@@ -221,6 +221,7 @@ void AttackState::OnUpdate(CCSBot *me)
 			// try to retreat
 			if (me->TryToRetreat())
 			{
+				me->LsWhy("retreat");
 				// if we are a sniper, equip our pistol so we can fire while retreating
 				if (me->IsUsingSniperRifle())
 				{
@@ -406,11 +407,13 @@ void AttackState::OnUpdate(CCSBot *me)
 				// decide whether we should hide and "ambush" our enemy
 				if (m_haveSeenEnemy && !m_didAmbushCheck)
 				{
-					const float hideChance = 33.3f;
+					// (Loner-Strike: in deathmatch people chase or move on, not sit and wait; a
+					// short wait now and then. Elsewhere a little less, and not as long)
+					const float hideChance = !LsFight() ? 33.3f : LsSolo() ? 8.0f : 22.0f;
 
 					if (RANDOM_FLOAT(0.0, 100.0f) < hideChance)
 					{
-						float ambushTime = RANDOM_FLOAT(3.0f, 15.0f);
+						float ambushTime = !LsFight() ? RANDOM_FLOAT(3.0f, 15.0f) : LsSolo() ? RANDOM_FLOAT(1.5f, 4.0f) : RANDOM_FLOAT(3.0f, 10.0f);
 
 						// hide in ambush nearby
 						// TODO: look towards where we know enemy is
@@ -421,6 +424,7 @@ void AttackState::OnUpdate(CCSBot *me)
 							me->Run();
 							me->StandUp();
 							me->Hide(spot, ambushTime, true);
+							me->LsWhy("ambush");
 							return;
 						}
 					}

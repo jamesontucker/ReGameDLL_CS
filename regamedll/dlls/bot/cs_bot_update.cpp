@@ -774,6 +774,7 @@ void CCSBot::Update()
 				{
 					SetDisposition(OPPORTUNITY_FIRE);
 					Hide(m_lastKnownArea, RANDOM_FLOAT(3.0f, 15.0f));
+					LsWhy("low-morale");
 					GetChatter()->Say("WaitingHere");
 				}
 			}
