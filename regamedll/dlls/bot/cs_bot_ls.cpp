@@ -711,7 +711,7 @@ float CCSBot::LsDodgeDuration(bool steady)
 // A stop between strafes: more for the ones who stop to shoot
 bool CCSBot::LsPickSteady()
 {
-	return RANDOM_FLOAT(0.0f, 1.0f) < 0.15f + 0.35f * LsTrait(13);
+	return RANDOM_FLOAT(0.0f, 1.0f) < 0.2f + 0.4f * LsTrait(13);
 }
 
 // Some bots back off when an enemy gets close; only with room behind (not into a wall or
@@ -798,7 +798,7 @@ void CCSBot::LsFightHabits(float range, bool crouchAndHold)
 	if (IsEnemyVisible())
 	{
 		// crouch while shooting: close and mid range, the bots with the habit
-		if (!crouchAndHold && range < 900.0f && LsTrait(17) > 0.5f && RANDOM_FLOAT(0.0f, 1.0f) < 0.35f && (pev->flags & FL_ONGROUND))
+		if (!crouchAndHold && range < 900.0f && LsTrait(17) > 0.35f && RANDOM_FLOAT(0.0f, 1.0f) < 0.45f && (pev->flags & FL_ONGROUND))
 		{
 			m_lsCrouchBurstUntil = now + RANDOM_FLOAT(0.4f, 1.2f);
 			Crouch();
@@ -807,7 +807,7 @@ void CCSBot::LsFightHabits(float range, bool crouchAndHold)
 	else if (GetTimeSinceLastSawEnemy() < 3.0f && !IsNotMoving() && (pev->flags & FL_ONGROUND))
 	{
 		// a jump to look round the corner they went behind
-		if (LsTrait(18) > 0.6f && RANDOM_FLOAT(0.0f, 1.0f) < 0.3f)
+		if (LsTrait(18) > 0.45f && RANDOM_FLOAT(0.0f, 1.0f) < 0.4f)
 			Jump(MUST_JUMP);
 	}
 }
@@ -822,4 +822,90 @@ bool CCSBot::LsShirksObjective()
 	if (cv_bot_ls_solo.value <= 0.0f || LsSolo())
 		return true;
 	return LsTrait(19) >= 0.7f;
+}
+
+// ---- moving like a player (bot_ls_fight) ------------------------------------------------
+
+// A corner coming up: look into the opening past it (head height), so the bot strafes round
+// it with its view on where someone would be, the way players peek with A and D. Newer
+// players walk straight in looking ahead; nearly everyone else peeks, a few only now and then
+bool CCSBot::LsCornerPeek()
+{
+	if (!LsFight() || IsSafe() || IsUsingLadder() || IsAttacking())
+		return false;
+
+	float skill = GetProfile()->GetSkill();
+	float chance = Q_min(0.95f, 0.25f + 0.7f * skill + 0.25f * (LsTrait(20) - 0.5f));
+	if (RANDOM_FLOAT(0.0f, 1.0f) > chance)
+		return false;
+
+	// the first path point well past the corner
+	const Vector *corner = &m_goalPosition;
+	for (int i = m_pathIndex + 1; i < m_pathLength; i++)
+	{
+		const Vector &p = m_path[i].pos;
+		if ((p - *corner).IsLengthGreaterThan(220.0f))
+		{
+			Vector at = p;
+			at.z += HalfHumanHeight + 24.0f;	// about where a head is
+			SetLookAt("Loner-Strike: peek", &at, PRIORITY_LOW, RANDOM_FLOAT(0.6f, 1.2f), true);
+			return true;
+		}
+	}
+	return false;
+}
+
+// Shift-walking where an enemy could hear it: the sneaky ones (lurkers, careful players)
+// when it's gone quiet and they're somewhere they've felt danger, or late in the round on
+// the way somewhere; back to running once seen, hurt, in a hurry or with the bomb down
+void CCSBot::LsSneak()
+{
+	if (!LsFight() || gpGlobals->time < m_lsNextSneakCheck)
+		return;
+	m_lsNextSneakCheck = gpGlobals->time + RANDOM_FLOAT(0.8f, 1.5f);
+
+	float sneaky = 0.6f * (1.0f - GetProfile()->GetAggression()) + 0.4f * LsTrait(21);
+	bool loud = IsHurrying() || GetTimeSinceAttacked() < 5.0f || GetTimeSinceLastSawEnemy() < 6.0f || IsSafe()
+		|| (TheCSBots() && TheCSBots()->IsBombPlanted()) || IsCarryingBomb() || GetHostageEscortCount() > 0;
+
+	bool want = false;
+	if (!loud && sneaky > 0.45f)
+	{
+		float danger = (LsOwnMemory() && GetLastKnownArea()) ? LsGetDanger(GetLastKnownArea()) : 0.0f;
+		bool lateRound = TheCSBots() && TheCSBots()->GetElapsedRoundTime() > 25.0f;
+		want = danger > 0.1f || (lateRound && RANDOM_FLOAT(0.0f, 1.0f) < sneaky) || IsNoiseHeard();
+	}
+
+	// (only its own walk is undone: a state may want walking for its own reasons)
+	if (want && IsRunning())
+	{
+		Walk();
+		m_lsSneaking = true;
+	}
+	else if (!want && m_lsSneaking)
+	{
+		if (!IsRunning())
+			Run();
+		m_lsSneaking = false;
+	}
+}
+
+// Stopping to shoot: a tap of the opposite key (70-120 ms) stops dead, as players do; the
+// careless just let go. A crouch tap on the stop for some (first-shot accuracy)
+bool CCSBot::LsCounterStrafe(int fromState)
+{
+	if (!LsFight())
+		return false;
+	float skill = GetProfile()->GetSkill();
+	if (RANDOM_FLOAT(0.0f, 1.0f) > 0.2f + 0.8f * skill)
+		return false;
+
+	m_lsCounterDir = (fromState == 1) ? -1 : 1;		// slid left: tap right
+	m_lsCounterUntil = gpGlobals->time + RANDOM_FLOAT(0.07f, 0.12f);
+	if (LsTrait(22) > 0.5f && m_lsCrouchBurstUntil <= gpGlobals->time && (pev->flags & FL_ONGROUND))
+	{
+		m_lsCrouchBurstUntil = gpGlobals->time + RANDOM_FLOAT(0.2f, 0.45f);
+		Crouch();
+	}
+	return true;
 }

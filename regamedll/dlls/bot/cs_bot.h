@@ -1049,6 +1049,9 @@ public:
 	float LsCrouchFactor();
 	float LsPinnedDownTime();
 	void LsFightHabits(float range, bool crouchAndHold);	// crouch bursts, jump peeks
+	bool LsCornerPeek();							// strafe round a corner looking into it
+	void LsSneak();									// shift-walk where enemies may be
+	bool LsCounterStrafe(int fromState);			// a tap the other way to stop dead
 	struct LsDanger { unsigned int id = 0; float amount = 0.0f; float time = 0.0f; };
 
 private:
@@ -1077,6 +1080,10 @@ private:
 	float m_lsNextSpreadCheck = 0.0f;
 	float m_lsCrouchBurstUntil = 0.0f;
 	float m_lsNextHabit = 0.0f;
+	float m_lsCounterUntil = 0.0f;
+	int m_lsCounterDir = 0;							// 1 left, -1 right
+	float m_lsNextSneakCheck = 0.0f;
+	bool m_lsSneaking = false;
 };
 
 // Loner-Strike (cs_bot_ls.cpp)

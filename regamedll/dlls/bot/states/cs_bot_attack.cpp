@@ -512,9 +512,10 @@ void AttackState::OnUpdate(CCSBot *me)
 		Vector toEnemy = pEnemy->pev->origin - me->pev->origin;
 		float range = toEnemy.Length2D();
 
-		// Loner-Strike: stopping to shoot ends the strafe now
+		// Loner-Strike: stopping to shoot ends the strafe now (with a counter-strafe)
 		if (lsHoldFire && m_dodgeState != STEADY_ON)
 		{
+			me->LsCounterStrafe(m_dodgeState == SLIDE_LEFT ? 1 : 2);
 			m_dodgeState = STEADY_ON;
 			m_nextDodgeStateTimestamp = gpGlobals->time + me->LsDodgeDuration(true);
 		}
@@ -557,8 +558,11 @@ void AttackState::OnUpdate(CCSBot *me)
 			while (!m_firstDodge && next == m_dodgeState);
 
 			// Loner-Strike: its own rhythm, and its own taste for stopping between strafes
+			// (a counter-strafe stops it dead)
 			if (LsFight() && next != JUMP && m_dodgeState != STEADY_ON && me->LsPickSteady())
 				next = STEADY_ON;
+			if (LsFight() && next == STEADY_ON && (m_dodgeState == SLIDE_LEFT || m_dodgeState == SLIDE_RIGHT))
+				me->LsCounterStrafe(m_dodgeState == SLIDE_LEFT ? 1 : 2);
 
 			m_dodgeState = (DodgeStateType)next;
 			m_nextDodgeStateTimestamp = gpGlobals->time + (LsFight() ? me->LsDodgeDuration(next == STEADY_ON) : RANDOM_FLOAT(0.3f, 1.0f));
@@ -569,6 +573,14 @@ void AttackState::OnUpdate(CCSBot *me)
 		{
 		case STEADY_ON:
 		{
+			// Loner-Strike: the counter-strafe tap
+			if (gpGlobals->time < me->m_lsCounterUntil)
+			{
+				if (me->m_lsCounterDir > 0)
+					me->StrafeLeft();
+				else
+					me->StrafeRight();
+			}
 			break;
 		}
 		case SLIDE_LEFT:

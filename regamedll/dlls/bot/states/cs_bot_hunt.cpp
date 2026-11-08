@@ -166,6 +166,9 @@ void HuntState::OnUpdate(CCSBot *me)
 	// look around
 	me->UpdateLookAround();
 
+	// Loner-Strike: shift-walk where it's worth being quiet (the sneaky ones)
+	me->LsSneak();
+
 	// if we have reached our destination area, pick a new one
 	// if our path fails, pick a new one
 	// (Loner-Strike: or, every bot for itself, it finds itself walking with a teammate)

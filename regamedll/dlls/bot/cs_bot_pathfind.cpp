@@ -1350,8 +1350,12 @@ CCSBot::PathResult CCSBot::UpdatePathMovement(bool allowSpeedChange)
 	const float nearCornerRange = 100.0f;
 	if (m_pathIndex < m_pathLength - 1 && (m_goalPosition - pev->origin).IsLengthLessThan(nearCornerRange))
 	{
-		ClearLookAt();
-		InhibitLookAround(0.5f);
+		// Loner-Strike: or strafe round it looking into the opening, as players peek
+		if (!LsCornerPeek())
+		{
+			ClearLookAt();
+			InhibitLookAround(0.5f);
+		}
 	}
 
 	// if we moved to a new node on the path, setup movement
