@@ -1054,6 +1054,13 @@ public:
 	bool LsCounterStrafe(int fromState);			// a tap the other way to stop dead
 	void LsStopDead();								// keys against its own velocity (counter-strafe)
 	float LsBuyPace() { return LsTrait(23); }		// 0 quick to buy, 1 slow
+	float LsReloadRatio();							// reloads below this much ammo (habit)
+	float LsReloadWait();							// after this long without seeing anyone
+	float LsAimDamping();							// 1 stock; lower overshoots like a flick
+	float LsLookHeight();							// how high it holds its crosshair
+	float LsSmoothYaw(float target);				// heading eases round instead of snapping
+	bool LsPushes(float range);						// runs at them pressing W (habit or weapon)
+	float LsChaseExtra();							// chases a lost enemy longer (eager ones)
 	struct LsDanger { unsigned int id = 0; float amount = 0.0f; float time = 0.0f; };
 
 private:
@@ -1084,6 +1091,9 @@ private:
 	float m_lsNextHabit = 0.0f;
 	float m_lsCounterUntil = 0.0f;
 	float m_lsHoldSince = 0.0f;						// stopping to shoot since (0: not)
+	float m_lsPushUntil = 0.0f;						// running at them until
+	float m_lsYaw = 0.0f;							// eased heading
+	float m_lsYawAt = 0.0f;							// when it was last eased
 	float m_lsPinnedExtended = 0.0f;				// how much a winning fight has been extended
 	float m_lsVetoNoiseAt = -1.0f;					// the noise the teammate veto was rolled for
 	bool m_lsVetoNoise = false;

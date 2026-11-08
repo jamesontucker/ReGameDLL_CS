@@ -438,7 +438,9 @@ const float minEquipInterval = 5.0f;
 void CCSBot::EquipBestWeapon(bool mustEquip)
 {
 	// throttle how often equipping is allowed
-	if (!mustEquip && m_equipTimer.GetElapsedTime() < minEquipInterval)
+	// (Loner-Strike: caught with a knife or grenade out near an enemy, the gun comes out fast)
+	float interval = (LsFight() && (IsUsingKnife() || IsUsingGrenade()) && GetTimeSinceLastSawEnemy() < 5.0f) ? 0.5f : minEquipInterval;
+	if (!mustEquip && m_equipTimer.GetElapsedTime() < interval)
 		return;
 
 	CBasePlayerWeapon *pPrimary = static_cast<CBasePlayerWeapon *>(m_rgpPlayerItems[PRIMARY_WEAPON_SLOT]);
@@ -688,8 +690,9 @@ bool CCSBot::FindGrenadeTossPathTarget(Vector *pos)
 // Reload our weapon if we must
 void CCSBot::ReloadCheck()
 {
-	const float safeReloadWaitTime = 3.0f;
-	const float reloadAmmoRatio = 0.6f;
+	// (Loner-Strike: the bot's own habit: sloppy ones reload after every kill)
+	const float safeReloadWaitTime = LsFight() ? LsReloadWait() : 3.0f;
+	const float reloadAmmoRatio = LsFight() ? LsReloadRatio() : 0.6f;
 
 	// don't bother to reload if there are no enemies left
 	if (GetEnemiesRemaining() == 0)

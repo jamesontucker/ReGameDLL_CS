@@ -117,6 +117,11 @@ void CCSBot::Upkeep()
 			Vector idealAngle = UTIL_VecToAngles(toEnemy);
 
 			idealAngle.x = 360.0 - idealAngle.x;
+
+			// Loner-Strike: pulling down against the recoil, as well as its skill allows
+			if (LsFight())
+				idealAngle.x -= (0.2f + 0.6f * GetProfile()->GetSkill()) * pev->punchangle.x;
+
 			SetLookAngles(idealAngle.y, idealAngle.x);
 		}
 	}
@@ -135,7 +140,8 @@ void CCSBot::Upkeep()
 		case NOT_LOOKING_AT_SPOT:
 		{
 			// look ahead
-			SetLookAngles(m_lookAheadAngle, 0);
+			// (Loner-Strike: eased round, and at its crosshair height)
+			SetLookAngles(LsFight() ? LsSmoothYaw(m_lookAheadAngle) : m_lookAheadAngle, 0);
 			break;
 		}
 		case LOOK_TOWARDS_SPOT:
@@ -170,8 +176,10 @@ void CCSBot::Upkeep()
 			driftAmplitude = 0.5f;
 		}
 
-		m_lookYaw += driftAmplitude * BotCOS(33.0f * gpGlobals->time);
-		m_lookPitch += driftAmplitude * BotSIN(13.0f * gpGlobals->time);
+		// (Loner-Strike: each bot's own phase, not everyone swaying together)
+		float phase = LsFight() ? float(LsSeed() % 360) : 0.0f;
+		m_lookYaw += driftAmplitude * BotCOS(33.0f * gpGlobals->time + phase);
+		m_lookPitch += driftAmplitude * BotSIN(13.0f * gpGlobals->time + phase);
 	}
 
 #ifdef REGAMEDLL_FIXES

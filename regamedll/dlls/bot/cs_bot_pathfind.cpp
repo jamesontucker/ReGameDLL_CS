@@ -1498,7 +1498,8 @@ CCSBot::PathResult CCSBot::UpdatePathMovement(bool allowSpeedChange)
 		{
 			m_isWaitingBehindFriend = true;
 
-			const float politeDuration = 5.0f - 3.0f * GetProfile()->GetAggression();
+			// (Loner-Strike: a moment, then round them: people don't queue for seconds)
+			const float politeDuration = LsFight() ? 0.5f + 1.0f * (1.0f - GetProfile()->GetAggression()) : 5.0f - 3.0f * GetProfile()->GetAggression();
 			m_politeTimer.Start(politeDuration);
 		}
 		else if (m_politeTimer.IsElapsed())

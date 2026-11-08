@@ -785,7 +785,8 @@ bool CCSBot::LsHoldFireToStop(float range)
 // How likely this bot crouches to hold in a fight (most never do, a few always try)
 float CCSBot::LsCrouchFactor()
 {
-	float t = LsTrait(15);
+	// (newer players crouch in every fight, better ones only now and then)
+	float t = LsTrait(15) + 0.4f * (0.5f - GetProfile()->GetSkill());
 	return t < 0.35f ? 0.3f : t < 0.85f ? 1.0f : 2.0f;
 }
 
@@ -969,4 +970,80 @@ void CCSBot::LsStopDead()
 		StrafeRight();
 	else if (side < -slow)
 		StrafeLeft();
+}
+
+// ---- habits by skill: careless ones for newer players, disciplined ones for better ------
+// (each still the bot's own: some newbies are tidy, some good players have a bad habit)
+
+// Sloppy: reloads after every kill, whatever's around; good players reload when it's low
+float CCSBot::LsReloadRatio()
+{
+	float skill = GetProfile()->GetSkill();
+	if (skill < 0.5f && LsTrait(24) < 0.65f && !LsMatch())
+		return 0.97f;
+	if (skill > 0.65f || LsMatch())
+		return 0.4f;
+	return 0.6f;
+}
+
+float CCSBot::LsReloadWait()
+{
+	float skill = GetProfile()->GetSkill();
+	return (skill < 0.5f && LsTrait(24) < 0.65f && !LsMatch()) ? 1.0f : 3.0f;
+}
+
+// Aim settles with a small overshoot like a flick; newer players are twitchier
+float CCSBot::LsAimDamping()
+{
+	float skill = GetProfile()->GetSkill();
+	return 0.6f + 0.25f * skill + 0.1f * (LsTrait(25) - 0.5f);
+}
+
+// Where the crosshair rests while moving: head height for good players, lower (chest,
+// the floor) for newer ones
+float CCSBot::LsLookHeight()
+{
+	float skill = GetProfile()->GetSkill();
+	return -14.0f + 42.0f * skill + 8.0f * (LsTrait(26) - 0.5f);
+}
+
+// The heading eases round to where it's going (people turn the mouse, they don't snap)
+float CCSBot::LsSmoothYaw(float target)
+{
+	// (picks up from where it's actually looking after looking at something else)
+	if (gpGlobals->time - m_lsYawAt > 0.2f)
+		m_lsYaw = pev->v_angle.y;
+	m_lsYawAt = gpGlobals->time;
+	float tau = 0.12f + 0.25f * LsTrait(27);
+	float dt = g_flBotCommandInterval;
+	float k = 1.0f - expf(-dt / tau);
+	m_lsYaw = NormalizeAngle(m_lsYaw + NormalizeAngle(target - m_lsYaw) * k);
+	return m_lsYaw;
+}
+
+// Running straight at them: SMGs and shotguns full send (the eager ones), and newer
+// players who just hold W
+bool CCSBot::LsPushes(float range)
+{
+	if (range < 250.0f || IsUsingSniperRifle())
+		return false;
+	float skill = GetProfile()->GetSkill();
+	float aggro = GetProfile()->GetAggression();
+	CBasePlayerWeapon *pWeapon = GetActiveWeapon();
+	bool closeGun = IsUsingShotgun() || (pWeapon && (pWeapon->m_iId == WEAPON_MAC10 || pWeapon->m_iId == WEAPON_TMP
+		|| pWeapon->m_iId == WEAPON_P90 || pWeapon->m_iId == WEAPON_UMP45 || pWeapon->m_iId == WEAPON_MP5N));
+	if (closeGun && aggro > 0.55f && range < 900.0f)
+		return RANDOM_FLOAT(0.0f, 1.0f) < 0.6f;
+	if (!LsMatch() && skill < 0.45f && LsTrait(28) < 0.6f)
+		return RANDOM_FLOAT(0.0f, 1.0f) < 0.4f;
+	return false;
+}
+
+// The eager ones chase a kill they lost sight of (the "chasing an eco" mistake)
+float CCSBot::LsChaseExtra()
+{
+	float aggro = GetProfile()->GetAggression();
+	if (LsMatch())
+		return 0.0f;
+	return (aggro > 0.65f && LsTrait(29) < 0.6f) ? RANDOM_FLOAT(2.0f, 5.0f) : 0.0f;
 }

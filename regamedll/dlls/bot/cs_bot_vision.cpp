@@ -71,7 +71,7 @@ void CCSBot::UpdateLookAngles()
 	if (IsAttacking())
 	{
 		stiffness = 300.0f;
-		damping = 30.0f;
+		damping = 30.0f * (LsFight() ? LsAimDamping() : 1.0f);
 		maxAccel = 3000.0f;
 	}
 	else
@@ -167,7 +167,8 @@ void CCSBot::UpdateLookAngles()
 
 	// if almost at target angle, snap to it
 	const float onTargetTolerance = 1.0f;
-	if (angleDiff < onTargetTolerance && angleDiff > -onTargetTolerance)
+	// (Loner-Strike: only on a ladder; elsewhere it settles like a hand on a mouse)
+	if (angleDiff < onTargetTolerance && angleDiff > -onTargetTolerance && (!LsFight() || IsUsingLadder() || fabs(m_lookYawVel) < 3.0f))
 	{
 		m_lookYawVel = 0.0f;
 		pev->v_angle.y = useYaw;
@@ -416,7 +417,7 @@ void CCSBot::UpdateLookAround(bool updateNow)
 		if (CanHearNearbyEnemyGunfire(noiseStartleRange))
 		{
 			Vector spot = m_noisePosition;
-			spot.z += HalfHumanHeight + (LsFight() ? 24.0f : 0.0f);	// (Loner-Strike: head height, not chest)
+			spot.z += HalfHumanHeight + (LsFight() ? LsLookHeight() : 0.0f);	// (Loner-Strike: head height for good players)
 
 			SetLookAt("Check dangerous noise", &spot, PRIORITY_HIGH, recentThreatTime);
 			InhibitLookAround(RANDOM_FLOAT(2.0f, 4.0f));
@@ -435,7 +436,7 @@ void CCSBot::UpdateLookAround(bool updateNow)
 		// find enemy position on the ground
 		if (GetSimpleGroundHeight(&m_lastEnemyPosition, &spot.z))
 		{
-			spot.z += HalfHumanHeight + (LsFight() ? 24.0f : 0.0f);	// (Loner-Strike: head height, not chest)
+			spot.z += HalfHumanHeight + (LsFight() ? LsLookHeight() : 0.0f);	// (Loner-Strike: head height for good players)
 			SetLookAt("Last Enemy Position", &spot, PRIORITY_MEDIUM, RANDOM_FLOAT(2.0f, 3.0f), true);
 			return;
 		}
@@ -490,7 +491,7 @@ void CCSBot::UpdateLookAround(bool updateNow)
 
 		// don't look at the floor, look roughly at chest level
 		// TODO: If this approach point is very near, this will cause us to aim up in the air if were crouching
-		spot.z += HalfHumanHeight + (LsFight() ? 24.0f : 0.0f);	// (Loner-Strike: head height, not chest)
+		spot.z += HalfHumanHeight + (LsFight() ? LsLookHeight() : 0.0f);	// (Loner-Strike: head height for good players)
 		SetLookAt("Approach Point (Hiding)", &spot, PRIORITY_LOW);
 		return;
 	}

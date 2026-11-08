@@ -452,6 +452,8 @@ void AttackState::OnUpdate(CCSBot *me)
 
 	// if we haven't seen our enemy for a long time, chase after them
 	float chaseTime = 2.0f + 2.0f * (1.0f - me->GetProfile()->GetAggression());
+	if (LsFight())
+		chaseTime += me->LsChaseExtra();
 
 	// if we are sniping, be very patient
 	if (me->IsUsingSniperRifle())
@@ -589,8 +591,15 @@ void AttackState::OnUpdate(CCSBot *me)
 
 			m_dodgeState = (DodgeStateType)next;
 			m_nextDodgeStateTimestamp = gpGlobals->time + (LsFight() ? me->LsDodgeDuration(next == STEADY_ON) : RANDOM_FLOAT(0.3f, 1.0f));
+
+			// Loner-Strike: or just run at them for a moment (close-range guns, W-key players)
+			if (LsFight() && !lsHoldFire && me->LsPushes(range))
+				me->m_lsPushUntil = gpGlobals->time + RANDOM_FLOAT(0.4f, 1.1f);
 			m_firstDodge = false;
 		}
+
+		if (LsFight() && gpGlobals->time < me->m_lsPushUntil && !lsHoldFire)
+			me->MoveForward();
 
 		switch (m_dodgeState)
 		{
