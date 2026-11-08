@@ -206,9 +206,13 @@ void AttackState::OnUpdate(CCSBot *me)
 
 		bool isPinnedDown = (gpGlobals->time > m_pinnedDownTimestamp);
 
-		if (isPinnedDown ||
+		// (Loner-Strike: in deathmatch everyone around is an enemy, so being outnumbered is
+		// normal: only pinned down and hurt makes someone fall back)
+		if (LsFight() && LsSolo()
+			? (isPinnedDown && me->pev->health < 50.0f)
+			: (isPinnedDown ||
 			(me->IsOutnumbered() && m_isCoward) ||
-			(me->OutnumberedCount() >= 2 && me->GetProfile()->GetAggression() < 1.0f))
+			(me->OutnumberedCount() >= 2 && me->GetProfile()->GetAggression() < 1.0f)))
 		{
 			// tell our teammates our plight
 			if (isPinnedDown)

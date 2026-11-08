@@ -181,7 +181,9 @@ void HuntState::OnUpdate(CCSBot *me)
 			if (m_huntArea)
 			{
 				me->LsWhy(me->LsShouldSpread() ? "hunt-spread" : "hunt");
-				me->ComputePath(m_huntArea, nullptr, SAFEST_ROUTE);
+				// (in deathmatch the quickest way there: the safest kept teammates on the
+				// same few routes, away from the enemy)
+				me->ComputePath(m_huntArea, nullptr, LsSolo() ? FASTEST_ROUTE : SAFEST_ROUTE);
 				return;
 			}
 		}
