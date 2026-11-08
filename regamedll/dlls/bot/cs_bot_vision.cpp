@@ -87,7 +87,9 @@ void CCSBot::UpdateLookAngles()
 
 	// Loner-Strike: walking about with nobody to fight, the view stays within a strafe of
 	// where it's going (people don't walk backwards looking at something behind them)
-	if (LsFight() && !IsAttacking() && !IsUsingLadder() && pev->velocity.Length2D() > 80.0f)
+	// (only while really on the move: at a walk or a stop the direction of travel jumps about
+	// and would drag the view with it)
+	if (LsFight() && !IsAttacking() && !IsUsingLadder() && pev->velocity.Length2D() > 150.0f)
 	{
 		float moveYaw = UTIL_VecToYaw(pev->velocity);
 		float off = NormalizeAngle(useYaw - moveYaw);
