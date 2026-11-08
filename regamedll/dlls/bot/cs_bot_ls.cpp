@@ -1123,6 +1123,10 @@ void CCSBot::LsShotAt(CBasePlayer *pShooter, const Vector &impact)
 	m_lsShotAtAt = gpGlobals->time;
 	m_lsShotFrom = pShooter->pev->origin;
 
+	// planting or defusing: whether to stop for it is weighed there (LsObjectiveThreat)
+	if (m_state == &m_plantBombState || m_state == &m_defuseBombState)
+		return;
+
 	if (IsVisible(pShooter, false))
 	{
 		Attack(pShooter);
