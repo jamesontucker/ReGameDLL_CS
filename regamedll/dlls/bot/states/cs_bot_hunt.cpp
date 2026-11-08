@@ -168,8 +168,20 @@ void HuntState::OnUpdate(CCSBot *me)
 
 	// if we have reached our destination area, pick a new one
 	// if our path fails, pick a new one
-	if (me->GetLastKnownArea() == m_huntArea || me->UpdatePathMovement() != CCSBot::PROGRESSING)
+	// (Loner-Strike: or, every bot for itself, it finds itself walking with a teammate)
+	if (me->GetLastKnownArea() == m_huntArea || me->UpdatePathMovement() != CCSBot::PROGRESSING || (LsSolo() && me->LsShouldSpread()))
 	{
+		// Loner-Strike: every bot for itself: somewhere its teammates aren't
+		if (LsSolo())
+		{
+			m_huntArea = me->LsPickHuntArea();
+			if (m_huntArea)
+			{
+				me->ComputePath(m_huntArea, nullptr, SAFEST_ROUTE);
+				return;
+			}
+		}
+
 		m_huntArea = nullptr;
 		float oldest = 0.0f;
 

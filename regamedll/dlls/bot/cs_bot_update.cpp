@@ -682,6 +682,7 @@ void CCSBot::Update()
 	if (TheCSBots()->GetElapsedRoundTime() > earliestAutoFollowTime
 		&& GetProfile()->GetTeamwork() > minAutoFollowTeamwork
 		&& CanAutoFollow()
+		&& !LsSolo()	// Loner-Strike: every bot for itself
 		&& !IsBusy()
 		&& !IsFollowing()
 		&& !GetGameState()->IsAtPlantedBombsite())

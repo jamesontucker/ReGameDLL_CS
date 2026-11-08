@@ -1036,6 +1036,9 @@ public:
 	void LsPuppetRelease();
 	bool LsPuppetActive() const;
 	bool LsBusy() const;							// doing something that mustn't be interrupted
+	CNavArea *LsPickHuntArea();					// every bot for itself: where to hunt
+	bool LsTeammateCloser(const Vector &pos);
+	bool LsShouldSpread();
 	struct LsDanger { unsigned int id = 0; float amount = 0.0f; float time = 0.0f; };
 
 private:
@@ -1061,6 +1064,7 @@ private:
 	unsigned int m_lsSeed = 0;
 	float m_lsPauseUntil = 0.0f;
 	float m_lsNextPauseCheck = 0.0f;
+	float m_lsNextSpreadCheck = 0.0f;
 };
 
 // Loner-Strike (cs_bot_ls.cpp)
@@ -1071,6 +1075,8 @@ extern cvar_t cv_bot_ls_own_memory;
 extern cvar_t cv_bot_ls_routes;
 extern cvar_t cv_bot_ls_lines;
 extern cvar_t cv_bot_ls_pauses;
+extern cvar_t cv_bot_ls_solo;
+bool LsSolo();
 bool LsOwnMemory();
 void Bot_LsRegisterCVars();
 void Bot_LsServerCommand();

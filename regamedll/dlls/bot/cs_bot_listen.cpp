@@ -88,6 +88,10 @@ bool CCSBot::ShouldInvestigateNoise(float *retNoiseDist)
 			chance -= friendFactor;
 		}
 
+		// Loner-Strike: every bot for itself: a teammate who's closer goes (mostly)
+		if (LsSolo() && LsTeammateCloser(m_noisePosition) && RANDOM_FLOAT(0.0f, 1.0f) < 0.85f)
+			return false;
+
 		if (RANDOM_FLOAT(0.0f, 1.0f) <= chance)
 		{
 			if (retNoiseDist)

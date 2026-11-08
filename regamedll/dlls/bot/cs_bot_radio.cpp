@@ -76,6 +76,13 @@ void CCSBot::RespondToRadioCommands()
 		}
 	}
 
+	// Loner-Strike: every bot for itself: no following (or backing up) anyone on the radio
+	if (LsSolo() && m_lastRadioCommand != EVENT_RADIO_REPORT_IN_TEAM)
+	{
+		m_lastRadioCommand = EVENT_INVALID;
+		return;
+	}
+
 	// wait for reaction time before responding
 	// delay needs to be long enough for the radio message we're responding to to finish
 	float respondTime = 1.0f + 2.0f * GetProfile()->GetReactionTime();

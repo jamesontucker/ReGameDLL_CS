@@ -12,6 +12,11 @@
 *                         the right, some the middle) instead of all on the same one
 *   bot_ls_pauses    1.0  now and then a bot stops for a moment while walking somewhere
 *                         quiet, like someone checking the map or the chat
+*   bot_ls_solo        1  in deathmatch-type modes (bot_deathmatch 1: deathmatch, gun game)
+*                         every bot plays for itself: it heads somewhere its teammates
+*                         aren't, leaves a fight a closer teammate is already going to,
+*                         breaks off when it finds itself walking with one, and doesn't
+*                         follow anyone on the radio. Objective maps keep their teamwork
 *
 *   All of them at 0 is the stock behaviour.
 *
@@ -23,6 +28,7 @@ cvar_t cv_bot_ls_own_memory = { "bot_ls_own_memory", "1", FCVAR_SERVER, 0.0f, nu
 cvar_t cv_bot_ls_routes     = { "bot_ls_routes", "1.0", FCVAR_SERVER, 0.0f, nullptr };
 cvar_t cv_bot_ls_lines      = { "bot_ls_lines", "1.0", FCVAR_SERVER, 0.0f, nullptr };
 cvar_t cv_bot_ls_pauses     = { "bot_ls_pauses", "1.0", FCVAR_SERVER, 0.0f, nullptr };
+cvar_t cv_bot_ls_solo       = { "bot_ls_solo", "1", FCVAR_SERVER, 0.0f, nullptr };
 
 void Bot_LsRegisterCVars()
 {
@@ -30,6 +36,13 @@ void Bot_LsRegisterCVars()
 	CVAR_REGISTER(&cv_bot_ls_routes);
 	CVAR_REGISTER(&cv_bot_ls_lines);
 	CVAR_REGISTER(&cv_bot_ls_pauses);
+	CVAR_REGISTER(&cv_bot_ls_solo);
+}
+
+// Every bot for itself (deathmatch-type modes, bot_ls_solo)
+bool LsSolo()
+{
+	return cv_bot_ls_solo.value > 0.0f && TheCSBots() && TheCSBots()->GetScenario() == CCSBotManager::SCENARIO_DEATHMATCH;
 }
 
 // ---- a bot's own numbers ----------------------------------------------------------------
@@ -534,4 +547,112 @@ void CCSBot::LsPuppetCommand(const char *what, float now)
 	}
 
 	p.any = true;
+}
+
+// ---- every bot for itself (deathmatch-type modes) -----------------------------------------
+
+// Living teammates, other than this bot
+template <typename F>
+static void LsForTeammates(CCSBot *me, F f)
+{
+	for (int i = 1; i <= gpGlobals->maxClients; i++)
+	{
+		CBasePlayer *pPlayer = UTIL_PlayerByIndex(i);
+		if (!pPlayer || pPlayer == me || !pPlayer->IsAlive() || pPlayer->m_iTeam != me->m_iTeam)
+			continue;
+		f(pPlayer);
+	}
+}
+
+// Where to hunt: of a handful of random parts of the map, the one furthest from where its
+// teammates are and where they're heading (with some chance in it, and not right here)
+CNavArea *CCSBot::LsPickHuntArea()
+{
+	int count = (int)TheNavAreaList.size();
+	if (count <= 0)
+		return nullptr;
+
+	// the places to keep away from: teammates, and the ends of the bots' paths
+	Vector avoid[64];
+	int n = 0;
+	LsForTeammates(this, [&](CBasePlayer *pPlayer) {
+		if (n < 64)
+			avoid[n++] = pPlayer->pev->origin;
+		if (n < 64 && pPlayer->IsBot())
+		{
+			CCSBot *pBot = static_cast<CCSBot *>(pPlayer);
+			if (pBot->HasPath())
+				avoid[n++] = pBot->GetPathEndpoint();
+		}
+	});
+
+	const int tries = 12;
+	int picks[tries];
+	for (int t = 0; t < tries; t++)
+		picks[t] = RANDOM_LONG(0, count - 1);
+
+	CNavArea *best = nullptr;
+	float bestScore = -1.0f;
+	int index = 0;
+	for (auto area : TheNavAreaList)
+	{
+		for (int t = 0; t < tries; t++)
+		{
+			if (picks[t] != index)
+				continue;
+
+			const Vector *c = area->GetCenter();
+			float score = RANDOM_FLOAT(0.0f, 500.0f);
+
+			// somewhere to go, not where it is
+			float fromMe = (*c - pev->origin).Length2D();
+			if (fromMe < 600.0f)
+				score -= 1500.0f;
+
+			float nearest = 3000.0f;
+			for (int k = 0; k < n; k++)
+				nearest = Q_min(nearest, (*c - avoid[k]).Length2D());
+			score += nearest;
+
+			if (score > bestScore)
+			{
+				bestScore = score;
+				best = area;
+			}
+		}
+		index++;
+	}
+	return best;
+}
+
+// A teammate closer to that spot than this bot (it'll be the one to look into it)
+bool CCSBot::LsTeammateCloser(const Vector &pos)
+{
+	float mine = (pos - pev->origin).Length();
+	bool closer = false;
+	LsForTeammates(this, [&](CBasePlayer *pPlayer) {
+		if ((pos - pPlayer->pev->origin).Length() < mine)
+			closer = true;
+	});
+	return closer;
+}
+
+// Time to go somewhere else: it's walking right next to a teammate (checked every couple of
+// seconds, and not again straight after breaking off)
+bool CCSBot::LsShouldSpread()
+{
+	if (gpGlobals->time < m_lsNextSpreadCheck)
+		return false;
+	m_lsNextSpreadCheck = gpGlobals->time + RANDOM_FLOAT(1.8f, 2.6f);
+
+	bool crowded = false;
+	LsForTeammates(this, [&](CBasePlayer *pPlayer) {
+		if ((pPlayer->pev->origin - pev->origin).IsLengthLessThan(320.0f))
+			crowded = true;
+	});
+	if (!crowded || RANDOM_FLOAT(0.0f, 1.0f) > 0.7f)
+		return false;
+
+	m_lsNextSpreadCheck = gpGlobals->time + RANDOM_FLOAT(5.0f, 8.0f);
+	return true;
 }
