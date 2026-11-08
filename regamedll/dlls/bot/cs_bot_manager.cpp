@@ -274,6 +274,7 @@ void CCSBotManager::AddServerCommands()
 	AddServerCommand("bot_add_ct");
 	AddServerCommand("bot_kill");
 	AddServerCommand("bot_kick");
+	AddServerCommand("ls_bot");	// Loner-Strike (cs_bot_ls.cpp)
 	AddServerCommand("bot_knives_only");
 	AddServerCommand("bot_pistols_only");
 	AddServerCommand("bot_snipers_only");
@@ -705,6 +706,10 @@ void CCSBotManager::ServerCommand(const char *pcmd)
 				}
 			}
 		}
+	}
+	else if (FStrEq(pcmd, "ls_bot"))
+	{
+		Bot_LsServerCommand();
 	}
 	else if (FStrEq(pcmd, "bot_memory_usage"))
 	{

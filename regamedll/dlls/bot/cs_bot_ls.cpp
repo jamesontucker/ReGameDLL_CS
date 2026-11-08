@@ -293,3 +293,193 @@ bool CCSBot::LsUpdatePause()
 	ResetStuckMonitor();
 	return true;
 }
+
+// ---- a plugin's short say over a bot ------------------------------------------------------
+//
+// ls_bot <player index> <what> [...], for plugins (gm_botfun) to have a bot do something
+// human for a moment. The bot's own brain keeps running underneath, and anything that
+// starts a fight (attacking, seeing an enemy) ends it straight away.
+//
+//   hold <secs>                      stand still
+//   crouch <secs> [every]            crouch; with every > 0, down and up again every that
+//                                    many seconds
+//   jump <count> [every]             jump that many times, every that many seconds
+//   look <x> <y> <z> <secs>          look at a point
+//   nod <x> <y> <z> <secs> [every]   look at a point, aiming above and below it in turn
+//   goto <x> <y> <z> [walk]          go somewhere (walk 1: walking, not running)
+//   follow <player index> <secs>     tag along with someone
+//   release                          stop all of it
+
+void CCSBot::LsPuppetRelease()
+{
+	if (m_lsPuppet.crouchUntil > 0.0f)
+		StandUp();
+	if (m_lsPuppet.followUntil > 0.0f && IsFollowing())
+		StopFollowing();
+	if (m_lsPuppet.lookUntil > 0.0f)
+		ClearLookAt();
+	m_lsPuppet = LsPuppet();
+}
+
+bool CCSBot::LsPuppetActive() const
+{
+	float now = gpGlobals->time;
+	const LsPuppet &p = m_lsPuppet;
+	return now < p.holdUntil || now < p.crouchUntil || now < p.lookUntil || p.jumpsLeft > 0 || now < p.walkUntil || now < p.followUntil;
+}
+
+// After the state machine each frame
+void CCSBot::LsPuppetUpdate()
+{
+	LsPuppet &p = m_lsPuppet;
+	if (!p.any)
+		return;
+
+	// a fight comes first
+	if (IsAttacking() || m_isEnemyVisible || !LsPuppetActive())
+	{
+		LsPuppetRelease();
+		return;
+	}
+
+	float now = gpGlobals->time;
+
+	if (now < p.holdUntil)
+	{
+		ClearMovement();
+		ResetStuckMonitor();
+	}
+
+	if (now < p.crouchUntil)
+	{
+		bool down = true;
+		if (p.crouchEvery > 0.0f)
+			down = (int((now - p.crouchStart) / p.crouchEvery) % 2) == 0;
+
+		if (down)
+			Crouch();
+		else
+			StandUp();
+	}
+	else if (p.crouchUntil > 0.0f)
+	{
+		StandUp();
+		p.crouchUntil = 0.0f;
+	}
+
+	if (now < p.lookUntil)
+	{
+		Vector at = p.lookAt;
+		if (p.nodEvery > 0.0f)
+		{
+			// about 25 degrees above and below it at the distance it is
+			float range = (at - GetEyePosition()).Length2D();
+			float rise = Q_max(12.0f, range * 0.45f);
+			at.z += ((int((now - p.lookStart) / p.nodEvery) % 2) == 0) ? rise : -rise;
+		}
+		SetLookAt("Loner-Strike", &at, PRIORITY_HIGH, 0.3f, false, 2.0f);
+	}
+
+	if (p.jumpsLeft > 0 && now >= p.nextJump)
+	{
+		if (Jump(MUST_JUMP))
+		{
+			p.jumpsLeft--;
+			p.nextJump = now + p.jumpEvery;
+		}
+	}
+
+	if (now < p.walkUntil)
+		Walk();
+}
+
+static CCSBot *LsBotByIndex(const char *arg)
+{
+	int index = Q_atoi(arg);
+	if (index < 1 || index > gpGlobals->maxClients)
+		return nullptr;
+
+	CBasePlayer *pPlayer = UTIL_PlayerByIndex(index);
+	if (!pPlayer || !pPlayer->IsBot() || !pPlayer->IsAlive())
+		return nullptr;
+
+	return static_cast<CCSBot *>(pPlayer);
+}
+
+static float LsArg(int i, float fallback = 0.0f)
+{
+	return (CMD_ARGC() > i) ? Q_atof(CMD_ARGV(i)) : fallback;
+}
+
+void Bot_LsServerCommand()
+{
+	CCSBot *me = LsBotByIndex(CMD_ARGV(1));
+	if (!me)
+		return;
+
+	const char *what = CMD_ARGV(2);
+	float now = gpGlobals->time;
+
+	// not while it's in a fight
+	if (!FStrEq(what, "release") && (me->IsAttacking() || me->IsEnemyVisible()))
+		return;
+
+	me->LsPuppetCommand(what, now);
+}
+
+void CCSBot::LsPuppetCommand(const char *what, float now)
+{
+	LsPuppet &p = m_lsPuppet;
+	const float most = 30.0f;
+
+	if (FStrEq(what, "release"))
+	{
+		LsPuppetRelease();
+		return;
+	}
+
+	if (FStrEq(what, "hold"))
+	{
+		p.holdUntil = now + Q_min(LsArg(3, 1.0f), most);
+	}
+	else if (FStrEq(what, "crouch"))
+	{
+		p.crouchStart = now;
+		p.crouchUntil = now + Q_min(LsArg(3, 1.0f), most);
+		p.crouchEvery = Q_max(0.0f, LsArg(4));
+	}
+	else if (FStrEq(what, "jump"))
+	{
+		p.jumpsLeft = (int)Q_min(LsArg(3, 1.0f), 20.0f);
+		p.jumpEvery = Q_max(0.1f, LsArg(4, 0.6f));
+		p.nextJump = now;
+	}
+	else if (FStrEq(what, "look") || FStrEq(what, "nod"))
+	{
+		p.lookAt = Vector(LsArg(3), LsArg(4), LsArg(5));
+		p.lookStart = now;
+		p.lookUntil = now + Q_min(LsArg(6, 1.0f), most);
+		p.nodEvery = FStrEq(what, "nod") ? Q_max(0.15f, LsArg(7, 0.35f)) : 0.0f;
+	}
+	else if (FStrEq(what, "goto"))
+	{
+		Vector to(LsArg(3), LsArg(4), LsArg(5));
+		MoveTo(&to, SAFEST_ROUTE);
+		if (LsArg(6) > 0.0f)
+			p.walkUntil = now + most;
+	}
+	else if (FStrEq(what, "follow"))
+	{
+		CBasePlayer *pLeader = UTIL_PlayerByIndex(Q_atoi(CMD_ARGV(3)));
+		if (!pLeader || !pLeader->IsAlive() || pLeader == this)
+			return;
+		Follow(pLeader);
+		p.followUntil = now + Q_min(LsArg(4, 20.0f), 60.0f);
+	}
+	else
+	{
+		return;
+	}
+
+	p.any = true;
+}

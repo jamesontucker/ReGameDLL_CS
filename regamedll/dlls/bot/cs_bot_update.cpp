@@ -779,6 +779,9 @@ void CCSBot::Update()
 		m_state->OnUpdate(this);
 	}
 
+	// Loner-Strike: whatever a plugin asked of it for a moment (ls_bot)
+	LsPuppetUpdate();
+
 	if (m_isWaitingToTossGrenade)
 	{
 		ResetStuckMonitor();

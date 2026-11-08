@@ -1031,8 +1031,25 @@ public:
 	float LsRouteFactor(const CNavArea *area, RouteType route);
 	void LsShiftPortalPoint(const CNavArea *from, const CNavArea *to, NavDirType dir, Vector *pos);
 	bool LsUpdatePause();
+	void LsPuppetCommand(const char *what, float now);	// ls_bot (a plugin's short say over this bot)
+	void LsPuppetUpdate();
+	void LsPuppetRelease();
+	bool LsPuppetActive() const;
 
 private:
+	struct LsPuppet
+	{
+		bool any = false;
+		float holdUntil = 0.0f;
+		float crouchStart = 0.0f, crouchUntil = 0.0f, crouchEvery = 0.0f;
+		Vector lookAt;
+		float lookStart = 0.0f, lookUntil = 0.0f, nodEvery = 0.0f;
+		int jumpsLeft = 0;
+		float nextJump = 0.0f, jumpEvery = 0.0f;
+		float walkUntil = 0.0f;
+		float followUntil = 0.0f;
+	};
+	LsPuppet m_lsPuppet;
 	struct LsDanger { float amount; float time; };
 	void LsCheckMap();
 	void LsAddDangerToArea(const CNavArea *area, float amount);
@@ -1051,6 +1068,7 @@ extern cvar_t cv_bot_ls_lines;
 extern cvar_t cv_bot_ls_pauses;
 bool LsOwnMemory();
 void Bot_LsRegisterCVars();
+void Bot_LsServerCommand();
 
 // Inlines
 inline float CCSBot::GetCombatRange() const
