@@ -99,6 +99,7 @@ void CCSBot::OnEvent(GameEventType event, CBaseEntity *pEntity, CBaseEntity *pOt
 						if (!IsHiding() || !IsUsingKnife() || RANDOM_FLOAT(0, 100) < knifeAmbushChance)
 						{
 							PrintIfWatched("Attacking our friend's killer!\n");
+							LsWhy("avenge");
 							Attack(pKiller);
 							return;
 						}

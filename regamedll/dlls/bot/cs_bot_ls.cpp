@@ -33,6 +33,9 @@
 *   The habits follow the game: deathmatch-type modes (bot_deathmatch 1) run and gun with
 *   no sneaking; a pub game has the full mix; a match is disciplined.
 *
+*   bot_ls_trace       0  testing only: twice a second, each bot's state, task, goal and
+*                         why it's going there, to lstrace.csv in the server's folder
+*
 *   All of them at 0 is the stock behaviour.
 *
 */
@@ -46,6 +49,7 @@ cvar_t cv_bot_ls_pauses     = { "bot_ls_pauses", "1.0", FCVAR_SERVER, 0.0f, null
 cvar_t cv_bot_ls_solo       = { "bot_ls_solo", "1", FCVAR_SERVER, 0.0f, nullptr };
 cvar_t cv_bot_ls_fight      = { "bot_ls_fight", "1", FCVAR_SERVER, 0.0f, nullptr };
 cvar_t cv_bot_ls_match      = { "bot_ls_match", "0", FCVAR_SERVER, 0.0f, nullptr };
+cvar_t cv_bot_ls_trace      = { "bot_ls_trace", "0", FCVAR_SERVER, 0.0f, nullptr };
 const char LS_PEEK[] = "Loner-Strike: peek";
 
 void Bot_LsRegisterCVars()
@@ -57,6 +61,7 @@ void Bot_LsRegisterCVars()
 	CVAR_REGISTER(&cv_bot_ls_solo);
 	CVAR_REGISTER(&cv_bot_ls_fight);
 	CVAR_REGISTER(&cv_bot_ls_match);
+	CVAR_REGISTER(&cv_bot_ls_trace);
 }
 
 // An organised match (bot_ls_match, set by match mode)
@@ -1047,4 +1052,32 @@ float CCSBot::LsChaseExtra()
 	if (LsMatch())
 		return 0.0f;
 	return (aggro > 0.65f && LsTrait(29) < 0.6f) ? RANDOM_FLOAT(2.0f, 5.0f) : 0.0f;
+}
+
+// Testing (bot_ls_trace): twice a second, what each bot is doing and why, so a recording
+// of where the bots went can be explained (time,id,team,state,task,enemy,leader,goal x,y,
+// noise x,y,why,seconds since why)
+void CCSBot::LsTrace()
+{
+	if (cv_bot_ls_trace.value <= 0.0f || !IsAlive() || gpGlobals->time < m_lsTraceAt)
+		return;
+	m_lsTraceAt = gpGlobals->time + 0.5f;
+
+	static FILE *s_file = nullptr;
+	if (!s_file)
+	{
+		s_file = fopen("lstrace.csv", "a");
+		if (!s_file)
+			return;
+	}
+	CBasePlayer *pEnemy = GetEnemy();
+	CBasePlayer *pLeader = IsFollowing() ? GetFollowLeader() : nullptr;
+	Vector goal = HasPath() ? GetPathEndpoint() : Vector(0, 0, 0);
+	const Vector *noise = IsNoiseHeard() ? &m_noisePosition : nullptr;
+	fprintf(s_file, "%.2f,%d,%d,%s,%d,%d,%d,%.0f,%.0f,%.0f,%.0f,%s,%.1f\n",
+		gpGlobals->time, entindex(), m_iTeam, m_state ? m_state->GetName() : "-", int(GetTask()),
+		pEnemy ? pEnemy->entindex() : 0, pLeader ? pLeader->entindex() : 0,
+		goal.x, goal.y, noise ? noise->x : 0.0f, noise ? noise->y : 0.0f,
+		m_lsWhy, m_lsWhy[0] ? gpGlobals->time - m_lsWhyAt : 0.0f);
+	fflush(s_file);
 }

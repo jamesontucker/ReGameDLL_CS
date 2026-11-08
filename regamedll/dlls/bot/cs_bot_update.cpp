@@ -209,6 +209,8 @@ void CCSBot::Update()
 	case PROCESS_SAVE:          UpdateSaveProcess();         return;
 	}
 
+	LsTrace();	// Loner-Strike (testing)
+
 	// update our radio chatter
 	// need to allow bots to finish their chatter even if they are dead
 	GetChatter()->Update();

@@ -180,11 +180,13 @@ void HuntState::OnUpdate(CCSBot *me)
 			m_huntArea = me->LsPickHuntArea();
 			if (m_huntArea)
 			{
+				me->LsWhy(me->LsShouldSpread() ? "hunt-spread" : "hunt");
 				me->ComputePath(m_huntArea, nullptr, SAFEST_ROUTE);
 				return;
 			}
 		}
 
+		me->LsWhy("hunt-stock");
 		m_huntArea = nullptr;
 		float oldest = 0.0f;
 

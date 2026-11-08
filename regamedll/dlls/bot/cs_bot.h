@@ -1037,6 +1037,8 @@ public:
 	bool LsPuppetActive() const;
 	bool LsBusy() const;							// doing something that mustn't be interrupted
 	bool LsLoner() const;
+	void LsWhy(const char *why) { m_lsWhy = why; m_lsWhyAt = gpGlobals->time; }
+	void LsTrace();										// bot_ls_trace: what it's doing, to lstrace.csv
 	bool LsShirksObjective();						// a rogue who leaves the objective to others							// goes its own way (see bot_ls_solo)
 	CNavArea *LsPickHuntArea();					// every bot for itself: where to hunt
 	bool LsTeammateCloser(const Vector &pos);
@@ -1100,6 +1102,9 @@ private:
 	int m_lsCounterDir = 0;							// 1 left, -1 right
 	float m_lsNextSneakCheck = 0.0f;
 	bool m_lsSneaking = false;
+	const char *m_lsWhy = "";						// why it's going where it's going (bot_ls_trace)
+	float m_lsWhyAt = 0.0f;
+	float m_lsTraceAt = 0.0f;
 };
 
 // Loner-Strike (cs_bot_ls.cpp)
@@ -1113,6 +1118,7 @@ extern cvar_t cv_bot_ls_pauses;
 extern cvar_t cv_bot_ls_solo;
 extern cvar_t cv_bot_ls_fight;
 extern cvar_t cv_bot_ls_match;
+extern cvar_t cv_bot_ls_trace;
 extern const char LS_PEEK[];					// the look-at of a corner peek
 bool LsFight();
 bool LsMatch();
