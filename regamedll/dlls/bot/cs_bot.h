@@ -1037,6 +1037,10 @@ public:
 	bool LsPuppetActive() const;
 	bool LsBusy() const;							// doing something that mustn't be interrupted
 	bool LsLoner() const;
+	bool LsWallbang(float notSeenEnemyTime);		// spraying a thin wall the enemy just went behind (true while it does)
+	bool LsRadioOk(GameEventType event);			// whether this radio message is sent (bot_ls_fight)
+	void LsShotAt(CBasePlayer *pShooter, const Vector &impact);	// enemy bullets landing or passing close
+	bool LsObjectiveThreat(bool defusing);			// planting/defusing: a threat around it (true: stop for now)
 	void LsWhy(const char *why) { m_lsWhy = why; m_lsWhyAt = gpGlobals->time; }
 	void LsTrace();										// bot_ls_trace: what it's doing, to lstrace.csv
 	bool LsShirksObjective();						// a rogue who leaves the objective to others							// goes its own way (see bot_ls_solo)
@@ -1102,6 +1106,14 @@ private:
 	int m_lsCounterDir = 0;							// 1 left, -1 right
 	float m_lsNextSneakCheck = 0.0f;
 	bool m_lsSneaking = false;
+	float m_lsBangUntil = 0.0f;						// spraying through a wall at where the enemy went until then
+	float m_lsBangRolledAt = -1.0f;					// the lost sight it decided about
+	Vector m_lsBangAt;
+	float m_lsShotAtAt = -1.0f;						// enemy bullets landed (or passed) close by then
+	Vector m_lsShotFrom;							// ...fired from here
+	float m_lsCheckUntil = 0.0f;					// planting or defusing on hold: checking a threat until then
+	float m_lsObjUseAt = 0.0f;						// ...started using again then
+	float m_lsObjRolledAt = -1.0f;					// the last threat it decided about
 	const char *m_lsWhy = "";						// why it's going where it's going (bot_ls_trace)
 	float m_lsWhyAt = 0.0f;
 	float m_lsTraceAt = 0.0f;

@@ -48,13 +48,18 @@ void DefuseBombState::OnUpdate(CCSBot *me)
 		return;
 	}
 
+	// (Loner-Strike: a threat around - shot, shot at, or someone close by heard: some stop
+	// to deal with it, some risk it)
+	if (me->LsObjectiveThreat(true))
+		return;
+
 	// look at the bomb
 	me->SetLookAt("Defuse bomb", bombPos, PRIORITY_HIGH);
 
 	// defuse...
 	me->UseEnvironment();
 
-	if (gpGlobals->time - me->GetStateTimestamp() > 1.0f)
+	if (gpGlobals->time - Q_max(me->GetStateTimestamp(), me->m_lsObjUseAt) > 1.0f)
 	{
 		// if we missed starting the defuse, give up
 		if (!TheCSBots()->GetBombDefuser())

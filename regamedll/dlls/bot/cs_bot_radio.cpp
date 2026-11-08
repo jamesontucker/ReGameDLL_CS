@@ -321,6 +321,10 @@ void CCSBot::SendRadioMessage(GameEventType event)
 		return;
 	}
 
+	// Loner-Strike: people on a pub use the radio now and then, not for everything they think
+	if (!LsRadioOk(event))
+		return;
+
 	PrintIfWatched("%3.1f: SendRadioMessage( %s )\n", gpGlobals->time, GameEventName[event]);
 
 	// note the time the message was sent

@@ -864,10 +864,11 @@ void IdleState::OnUpdate(CCSBot *me)
 	default:
 	{
 		// sniping check
-		if (me->GetFriendsRemaining() && me->IsSniper() && RANDOM_FLOAT(0, 100.0f) < offenseSniperCampChance)
+		// (Loner-Strike: in deathmatch a sniper holds a spot now and then, briefly)
+		if (me->GetFriendsRemaining() && me->IsSniper() && RANDOM_FLOAT(0, 100.0f) < (LsFight() && LsSolo() ? 0.3f * offenseSniperCampChance : offenseSniperCampChance))
 		{
 			me->SetTask(CCSBot::MOVE_TO_SNIPER_SPOT);
-			me->Hide(me->GetLastKnownArea(), RANDOM_FLOAT(10.0f, 30.0f), sniperHideRange);
+			me->Hide(me->GetLastKnownArea(), LsFight() && LsSolo() ? RANDOM_FLOAT(4.0f, 9.0f) : RANDOM_FLOAT(10.0f, 30.0f), sniperHideRange);
 			me->SetDisposition(CCSBot::OPPORTUNITY_FIRE);
 			me->PrintIfWatched("Sniping!\n");
 			return;

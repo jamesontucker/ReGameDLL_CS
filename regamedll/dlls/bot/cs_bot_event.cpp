@@ -68,6 +68,14 @@ void CCSBot::OnEvent(GameEventType event, CBaseEntity *pEntity, CBaseEntity *pOt
 
 	CBasePlayer *pPlayer = static_cast<CBasePlayer *>(pEntity);
 
+	// Loner-Strike: an enemy's bullets landing close (or passing close): being shot at
+	if (event == EVENT_BULLET_IMPACT)
+	{
+		if (LsFight() && pPlayer && pOther)
+			LsShotAt(pPlayer, *reinterpret_cast<Vector *>(pOther));
+		return;
+	}
+
 	// Loner-Strike: a teammate dying in sight is remembered as danger by this bot alone
 	if (event == EVENT_PLAYER_DIED && pPlayer && pPlayer != this && pPlayer->IsPlayer() && BotRelationship(pPlayer) == BOT_TEAMMATE)
 		LsSawTeammateDie(pPlayer);

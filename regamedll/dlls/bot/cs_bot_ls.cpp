@@ -639,6 +639,10 @@ CNavArea *CCSBot::LsPickHuntArea()
 		}
 	});
 
+	bool keepSites = LsFight() && !LsSolo() && m_iTeam == CT && TheCSBots()->GetScenario() == CCSBotManager::SCENARIO_DEFUSE_BOMB
+		&& !TheCSBots()->IsBombPlanted() && TheCSBots()->GetZoneCount() > 0
+		&& !(GetProfile()->GetAggression() > 0.8f && LsTrait(31) < 0.5f);
+
 	const int tries = 12;
 	int picks[tries];
 	for (int t = 0; t < tries; t++)
@@ -671,6 +675,15 @@ CNavArea *CCSBot::LsPickHuntArea()
 			for (int k = 0; k < n; k++)
 				nearest = Q_min(nearest, float((*c - avoid[k]).Length2D()));
 			score += nearest;
+
+			// CTs on a bomb map keep to the bomb sites until it's planted (a bold few push)
+			if (keepSites)
+			{
+				float site = 99999.0f;
+				for (int z = 0; z < TheCSBots()->GetZoneCount(); z++)
+					site = Q_min(site, float((*c - TheCSBots()->GetZone(z)->m_center).Length2D()));
+				score += site < 1400.0f ? 400.0f : -1500.0f;
+			}
 
 			if (score > bestScore)
 			{
@@ -1080,4 +1093,221 @@ void CCSBot::LsTrace()
 		goal.x, goal.y, noise ? noise->x : 0.0f, noise ? noise->y : 0.0f,
 		m_lsWhy, m_lsWhy[0] ? gpGlobals->time - m_lsWhyAt : 0.0f);
 	fflush(s_file);
+}
+
+// An enemy's bullet landed close by, or passed close by on its way to the wall behind
+// (EVENT_BULLET_IMPACT): people notice being shot at. One it can see is fought; otherwise
+// it turns towards where the shots came from and treats it as a loud noise there.
+void CCSBot::LsShotAt(CBasePlayer *pShooter, const Vector &impact)
+{
+	if (!IsAlive() || !pShooter->IsPlayer() || pShooter == this || !pShooter->IsAlive() || !IsEnemy(pShooter))
+		return;
+	if (IsAttacking() && IsEnemyVisible())
+		return;
+
+	Vector eye = pev->origin + pev->view_ofs;
+	Vector from = pShooter->pev->origin + pShooter->pev->view_ofs;
+	// how close the bullet's line came to its head
+	Vector line = impact - from;
+	float len = line.Length();
+	if (len < 1.0f)
+		return;
+	float t = Q_max(0.0f, Q_min(1.0f, DotProduct(eye - from, line) / (len * len)));
+	float miss = (from + line * t - eye).Length();
+	if (miss > 90.0f && (impact - eye).Length() > 110.0f)
+		return;
+
+	// once a moment, not every bullet
+	if (gpGlobals->time - m_lsShotAtAt < 0.8f)
+		return;
+	m_lsShotAtAt = gpGlobals->time;
+	m_lsShotFrom = pShooter->pev->origin;
+
+	if (IsVisible(pShooter, false))
+	{
+		Attack(pShooter);
+		return;
+	}
+	SetLookAt("Loner-Strike: shot at", &from, PRIORITY_HIGH, RANDOM_FLOAT(1.0f, 2.0f));
+	CNavArea *area = TheNavAreaGrid.GetNavArea(&pShooter->pev->origin);
+	if (!area)
+		area = TheNavAreaGrid.GetNearestNavArea(&pShooter->pev->origin);
+	if (area)
+	{
+		m_noisePosition = pShooter->pev->origin;
+		m_noiseArea = area;
+		m_noisePriority = PRIORITY_HIGH;
+		m_noiseTimestamp = gpGlobals->time;
+	}
+	// no sneaking while being shot at
+	if (!IsRunning())
+	{
+		Run();
+		m_lsSneaking = false;
+	}
+}
+
+// Planting or defusing with a threat around: hurt, shot at, an enemy in sight or heard close
+// by. Each threat is weighed once: whether to stop for it depends on how bad it is, the bot
+// (bold ones risk it more) and how far along it is (nearly done: it keeps going). Stopping:
+// an enemy it can see is fought; otherwise it lets go and looks that way for a moment, then
+// starts over (as a player who let go of the key would). True while it's stopped.
+bool CCSBot::LsObjectiveThreat(bool defusing)
+{
+	if (!LsFight())
+		return false;
+	if (gpGlobals->time < m_lsCheckUntil)
+		return true;
+
+	float now = gpGlobals->time;
+	float threat = 0.0f;
+	CBasePlayer *pEnemy = nullptr;
+	const Vector *where = nullptr;
+	if (GetTimeSinceAttacked() < 0.4f && GetAttacker() && GetAttacker()->IsAlive())
+	{
+		threat = 0.8f;
+		pEnemy = GetAttacker();
+		where = &pEnemy->pev->origin;
+	}
+	else if (now - m_lsShotAtAt < 0.4f)
+	{
+		threat = 0.6f;
+		where = &m_lsShotFrom;
+	}
+	else if (IsNoiseHeard() && GetNoisePriority() >= PRIORITY_MEDIUM && (m_noisePosition - pev->origin).IsLengthLessThan(700.0f))
+	{
+		threat = 0.35f;
+		where = &m_noisePosition;
+	}
+	if (threat <= 0.0f)
+		return false;
+	// a threat it already decided about
+	float stamp = Q_max(GetTimeSinceAttacked() < 0.4f ? now : -1.0f, Q_max(m_lsShotAtAt, m_noiseTimestamp));
+	if (stamp <= m_lsObjRolledAt + 0.5f)
+		return false;
+	m_lsObjRolledAt = stamp;
+
+	// how far along: planting takes 3 s, defusing 5 with a kit and 10 without
+	float takes = defusing ? (m_bHasDefuser ? 5.0f : 10.0f) : 3.0f;
+	float done = (now - Q_max(GetStateTimestamp(), m_lsObjUseAt)) / takes;
+	if (done > 0.75f)
+		return false;
+	// the bomb about to go: nothing else matters
+	if (defusing && TheCSBots()->GetBombTimeLeft() < takes + 1.0f)
+		return false;
+	float bold = 0.5f * GetProfile()->GetAggression() + 0.5f * LsTrait(30);
+	float stop = threat * (1.2f - 0.6f * bold) * (LsMatch() ? 1.1f : 1.0f);
+	if (RANDOM_FLOAT(0.0f, 1.0f) > stop)
+		return false;
+
+	if (pEnemy && IsVisible(pEnemy, false))
+	{
+		StandUp();
+		Attack(pEnemy);
+		return true;
+	}
+	StandUp();
+	Vector look = *where + Vector(0, 0, HalfHumanHeight);
+	float secs = RANDOM_FLOAT(1.0f, 2.5f);
+	SetLookAt("Loner-Strike: checking", &look, PRIORITY_HIGH, secs);
+	m_lsCheckUntil = now + secs;
+	m_lsObjUseAt = m_lsCheckUntil;
+	return true;
+}
+
+// Whether a radio message goes out (bot_ls_fight): CS 1.6 turns every bit of the bots' chatter
+// into a radio command, which is far more than people use. In deathmatch nobody radios; on a
+// pub a bot radios now and then (the useful calls more than "follow me" and "regroup"), and
+// not straight after its last one or a teammate's same call; a match is chattier
+bool CCSBot::LsRadioOk(GameEventType event)
+{
+	if (!LsFight())
+		return true;
+	if (LsSolo())
+		return false;
+	float now = gpGlobals->time;
+	if (now - m_lastRadioSentTimestamp < (LsMatch() ? 8.0f : 20.0f))
+		return false;
+	if (TheCSBots()->GetRadioMessageInterval(event, m_iTeam) < 15.0f)
+		return false;
+	float chance;
+	switch (event)
+	{
+	case EVENT_RADIO_ENEMY_SPOTTED:
+	case EVENT_RADIO_NEED_BACKUP:
+	case EVENT_RADIO_TAKING_FIRE:
+	case EVENT_RADIO_ENEMY_DOWN:
+		chance = LsMatch() ? 0.8f : 0.45f;
+		break;
+	default:
+		chance = LsMatch() ? 0.6f : 0.2f;
+		break;
+	}
+	return RANDOM_FLOAT(0.0f, 1.0f) < chance;
+}
+
+// The enemy just went behind a door, a box or a thin wall a bullet goes through: some players
+// spray it where they saw them go (rifles, machine guns, snipers and the Deagle). Each bot
+// either has the habit or not (more of the good ones); whether it does it this time is
+// rolled once for each time it loses sight of someone. True while it's spraying.
+bool CCSBot::LsWallbang(float notSeenEnemyTime)
+{
+	if (!LsFight())
+		return false;
+	float now = gpGlobals->time;
+	CBasePlayerWeapon *pWeapon = GetActiveWeapon();
+	if (now < m_lsBangUntil)
+	{
+		if (!pWeapon || IsActiveWeaponClipEmpty())
+		{
+			m_lsBangUntil = 0.0f;
+			return false;
+		}
+		SetLookAt("Loner-Strike: wallbang", &m_lsBangAt, PRIORITY_HIGH, 0.3f);
+		Vector dir = m_lsBangAt - (pev->origin + pev->view_ofs);
+		dir.NormalizeInPlace();
+		UTIL_MakeVectors(pev->v_angle + pev->punchangle);
+		// (a semi-automatic needs the trigger let go between shots)
+		bool semi = pWeapon->m_iId == WEAPON_DEAGLE || pWeapon->m_iId == WEAPON_AWP || pWeapon->m_iId == WEAPON_SCOUT;
+		if (DotProduct(gpGlobals->v_forward, dir) > 0.996f && (!semi || int(now * 8.0f) % 2 == 0))
+			PrimaryAttack();
+		return true;
+	}
+	if (notSeenEnemyTime > 1.2f || GetLastSawEnemyTimestamp() == m_lsBangRolledAt)
+		return false;
+	m_lsBangRolledAt = GetLastSawEnemyTimestamp();
+
+	if (!pWeapon)
+		return false;
+	switch (pWeapon->m_iId)
+	{
+	case WEAPON_AK47: case WEAPON_M4A1: case WEAPON_GALIL: case WEAPON_FAMAS: case WEAPON_SG552: case WEAPON_AUG:
+	case WEAPON_M249: case WEAPON_DEAGLE: case WEAPON_AWP: case WEAPON_SCOUT: case WEAPON_G3SG1: case WEAPON_SG550:
+		break;
+	default:
+		return false;
+	}
+	float skill = GetProfile()->GetSkill();
+	if (LsTrait(32) > 0.2f + 0.4f * skill || RANDOM_FLOAT(0.0f, 1.0f) > 0.6f)
+		return false;
+
+	Vector eye = pev->origin + pev->view_ofs;
+	Vector target = GetLastKnownEnemyPosition() + Vector(0, 0, 10.0f);
+	if ((target - eye).IsLengthGreaterThan(1500.0f))
+		return false;
+	// one thin thing in the way: where the bullet goes in and where it comes out are close
+	TraceResult in, out;
+	UTIL_TraceLine(eye, target, ignore_monsters, ENT(pev), &in);
+	if (in.flFraction >= 1.0f || in.fStartSolid)
+		return false;
+	UTIL_TraceLine(target, eye, ignore_monsters, ENT(pev), &out);
+	if (out.fStartSolid || out.flFraction >= 1.0f)
+		return false;
+	if ((in.vecEndPos - out.vecEndPos).IsLengthGreaterThan(pWeapon->m_iId == WEAPON_AWP ? 40.0f : 22.0f))
+		return false;
+
+	m_lsBangAt = target;
+	m_lsBangUntil = now + (pWeapon->m_iId == WEAPON_AWP || pWeapon->m_iId == WEAPON_SCOUT || pWeapon->m_iId == WEAPON_DEAGLE ? RANDOM_FLOAT(0.3f, 0.8f) : RANDOM_FLOAT(0.6f, 1.5f));
+	LsWhy("wallbang");
+	return true;
 }

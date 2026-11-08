@@ -209,7 +209,7 @@ void AttackState::OnUpdate(CCSBot *me)
 		// (Loner-Strike: in deathmatch everyone around is an enemy, so being outnumbered is
 		// normal: only pinned down and hurt makes someone fall back)
 		if (LsFight() && LsSolo()
-			? (isPinnedDown && me->pev->health < 50.0f)
+			? (isPinnedDown && me->pev->health < 35.0f)
 			: (isPinnedDown ||
 			(me->IsOutnumbered() && m_isCoward) ||
 			(me->OutnumberedCount() >= 2 && me->GetProfile()->GetAggression() < 1.0f)))
@@ -406,6 +406,10 @@ void AttackState::OnUpdate(CCSBot *me)
 
 		if (notSeenEnemyTime > 0.1f)
 		{
+			// (Loner-Strike: some spray the door or thin wall the enemy just went behind)
+			if (me->LsWallbang(notSeenEnemyTime))
+				return;
+
 			if (me->GetDisposition() == CCSBot::ENGAGE_AND_INVESTIGATE)
 			{
 				// decide whether we should hide and "ambush" our enemy
@@ -413,11 +417,11 @@ void AttackState::OnUpdate(CCSBot *me)
 				{
 					// (Loner-Strike: in deathmatch people chase or move on, not sit and wait; a
 					// short wait now and then. Elsewhere a little less, and not as long)
-					const float hideChance = !LsFight() ? 33.3f : LsSolo() ? 8.0f : 22.0f;
+					const float hideChance = !LsFight() ? 33.3f : LsSolo() ? 3.0f : 22.0f;
 
 					if (RANDOM_FLOAT(0.0, 100.0f) < hideChance)
 					{
-						float ambushTime = !LsFight() ? RANDOM_FLOAT(3.0f, 15.0f) : LsSolo() ? RANDOM_FLOAT(1.5f, 4.0f) : RANDOM_FLOAT(3.0f, 10.0f);
+						float ambushTime = !LsFight() ? RANDOM_FLOAT(3.0f, 15.0f) : LsSolo() ? RANDOM_FLOAT(1.0f, 2.5f) : RANDOM_FLOAT(3.0f, 10.0f);
 
 						// hide in ambush nearby
 						// TODO: look towards where we know enemy is
@@ -460,7 +464,11 @@ void AttackState::OnUpdate(CCSBot *me)
 
 	// if we haven't seen our enemy for a long time, chase after them
 	float chaseTime = 2.0f + 2.0f * (1.0f - me->GetProfile()->GetAggression());
-	if (LsFight())
+	// (Loner-Strike: in deathmatch people go after someone who ducked out of sight, the
+	// aggressive ones straight away)
+	if (LsFight() && LsSolo())
+		chaseTime = 0.3f + 1.7f * (1.0f - me->GetProfile()->GetAggression());
+	else if (LsFight())
 		chaseTime += me->LsChaseExtra();
 
 	// if we are sniping, be very patient

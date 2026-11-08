@@ -52,6 +52,11 @@ void PlantBombState::OnUpdate(CCSBot *me)
 			holdingC4 = true;
 	}
 
+	// (Loner-Strike: a threat around - shot, shot at, or someone close by heard: some stop
+	// to deal with it, some risk it)
+	if (me->LsObjectiveThreat(false))
+		return;
+
 	// if we aren't holding the C4, grab it, otherwise plant it
 	if (holdingC4)
 		me->PrimaryAttack();
@@ -68,7 +73,7 @@ void PlantBombState::OnUpdate(CCSBot *me)
 
 	// if we time out, it's because we slipped into a non-plantable area
 	const float timeout = 5.0f;
-	if (gpGlobals->time - me->GetStateTimestamp() > timeout)
+	if (gpGlobals->time - Q_max(me->GetStateTimestamp(), me->m_lsObjUseAt) > timeout)
 		me->Idle();
 }
 
