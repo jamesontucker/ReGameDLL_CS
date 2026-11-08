@@ -210,7 +210,7 @@ void AttackState::OnUpdate(CCSBot *me)
 		// normal: only pinned down and hurt makes someone fall back)
 		if (LsFight() && LsSolo()
 			? (isPinnedDown && me->pev->health < 35.0f)
-			: (isPinnedDown ||
+			: (isPinnedDown || me->LsPlayForTime() ||
 			(me->IsOutnumbered() && m_isCoward) ||
 			(me->OutnumberedCount() >= 2 && me->GetProfile()->GetAggression() < 1.0f)))
 		{
@@ -482,6 +482,13 @@ void AttackState::OnUpdate(CCSBot *me)
 	// or haven't yet seen him, chase after him (unless we are a sniper)
 	if (!me->IsEnemyVisible() && (notSeenEnemyTime > chaseTime || !m_haveSeenEnemy))
 	{
+		// (Loner-Strike: guarding the planted bomb, most hold rather than chase)
+		if (me->LsHoldsPlant())
+		{
+			StopAttacking(me);
+			return;
+		}
+
 		// snipers don't chase their prey - they wait for their prey to come to them
 		if (me->GetTask() == CCSBot::SNIPING)
 		{

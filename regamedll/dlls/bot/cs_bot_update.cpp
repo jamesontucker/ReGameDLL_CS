@@ -211,6 +211,8 @@ void CCSBot::Update()
 
 	LsTrace();	// Loner-Strike (testing)
 
+	LsTeamTick();	// Loner-Strike: team play
+
 	// Loner-Strike: spraying a wall at someone heard behind it (in a fight, the attack does it)
 	if (!IsAttacking())
 		LsBangTick();

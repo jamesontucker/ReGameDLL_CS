@@ -108,6 +108,13 @@ void CCSBot::RespondToRadioCommands()
 	if (!m_radioSubject)
 		return;
 
+	// Loner-Strike: answered like a person (not every bot's call followed, a look first)
+	if (LsRadioAnswer())
+	{
+		m_lastRadioCommand = EVENT_INVALID;
+		return;
+	}
+
 	// respond to command
 	bool canDo = false;
 	const float inhibitAutoFollowDuration = 60.0f;

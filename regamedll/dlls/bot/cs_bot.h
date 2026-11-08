@@ -1023,6 +1023,12 @@ private:
 
 public:
 	// Loner-Strike team (cs_bot_ls_team.cpp)
+	void LsTeamTick();								// team play each frame: retakes, rotations, pickups
+	bool LsRadioAnswer();							// a teammate's radio call, answered like a person (true: handled)
+	bool LsTeamHeard(GameEventType event, CBasePlayer *pPlayer);	// a teammate's gunfire close by: go and trade
+	bool LsPlayForTime();							// a CT alone against several before the plant: fall back
+	bool LsHoldsPlant();							// guarding the planted bomb: hold, don't chase
+	void LsEarlyPick(CBasePlayer *pVictim, CBasePlayer *pKiller);	// a T teammate got an early kill: push
 	// (end team)
 	// Loner-Strike nades (cs_bot_ls_nades.cpp)
 	// (end nades)
@@ -1119,6 +1125,11 @@ private:
 	float m_lsNextSneakCheck = 0.0f;
 	bool m_lsSneaking = false;
 	// Loner-Strike team (cs_bot_ls_team.cpp): members
+	float m_lsRotateAt = 0.0f;						// going to a teammate's call then (after a look)
+	Vector m_lsRotateTo;
+	float m_lsTradeAt = -10.0f;						// last went to trade a teammate
+	int m_lsRetakeRound = -1;						// the round it waited for teammates before a retake
+	int m_lsPickupRound = -1;						// the round it went for a dropped gun after
 	// (end team members)
 	// Loner-Strike nades (cs_bot_ls_nades.cpp): members
 	// (end nades members)

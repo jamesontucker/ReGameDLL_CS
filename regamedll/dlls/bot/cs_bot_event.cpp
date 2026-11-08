@@ -79,6 +79,9 @@ void CCSBot::OnEvent(GameEventType event, CBaseEntity *pEntity, CBaseEntity *pOt
 	// Loner-Strike: a teammate dying in sight is remembered as danger by this bot alone
 	if (event == EVENT_PLAYER_DIED && pPlayer && pPlayer != this && pPlayer->IsPlayer() && BotRelationship(pPlayer) == BOT_TEAMMATE)
 		LsSawTeammateDie(pPlayer);
+	// ...and an enemy dying early in the round to a teammate is a reason to push
+	if (event == EVENT_PLAYER_DIED && pPlayer && pPlayer->IsPlayer() && pOther && pOther->IsPlayer())
+		LsEarlyPick(pPlayer, static_cast<CBasePlayer *>(pOther));
 
 	// If we just saw a nearby friend die, and we haven't yet acquired an enemy
 	// automatically acquire our dead friend's killer
@@ -337,8 +340,12 @@ void CCSBot::OnEvent(GameEventType event, CBaseEntity *pEntity, CBaseEntity *pOt
 	}
 
 	// don't pay attention to noise that friends make
+	// (Loner-Strike: except a teammate's fight close by, to trade)
 	if (!IsEnemy(pPlayer))
+	{
+		LsTeamHeard(event, pPlayer);
 		return;
+	}
 
 	float range;
 	PriorityType priority;

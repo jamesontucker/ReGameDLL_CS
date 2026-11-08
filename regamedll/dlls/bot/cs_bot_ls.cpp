@@ -291,9 +291,10 @@ bool CCSBot::LsRouteTaste(RouteType route, LsRoute *out)
 	if (strength <= 0.0f)
 		return false;
 
-	// mostly its own lasting taste, with a part that changes every couple of minutes
+	// mostly its own lasting taste, with a part that changes each round (every couple of
+	// minutes where there are no rounds), so the plan isn't the same every round
 	const float drift = 120.0f;
-	unsigned int bucket = (unsigned int)(gpGlobals->time / drift);
+	unsigned int bucket = LsSolo() ? (unsigned int)(gpGlobals->time / drift) : (unsigned int)CSGameRules()->m_iTotalRoundsPlayed * 7919u + 13u;
 	out->seed = LsSeed();
 	out->driftSeed = LsHash(out->seed, bucket);
 
@@ -306,7 +307,7 @@ bool CCSBot::LsRouteTaste(RouteType route, LsRoute *out)
 float LsRouteFactor(const LsRoute &r, const CNavArea *area)
 {
 	const Vector *c = area->GetCenter();
-	float taste = 0.7f * LsNoise(r.seed, c->x, c->y, 700.0f) + 0.3f * LsNoise(r.driftSeed, c->x, c->y, 500.0f);
+	float taste = 0.6f * LsNoise(r.seed, c->x, c->y, 700.0f) + 0.4f * LsNoise(r.driftSeed, c->x, c->y, 500.0f);
 	return 1.0f + r.most * taste;
 }
 

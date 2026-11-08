@@ -1138,7 +1138,8 @@ bool CCSBot::IsFriendInTheWay(const Vector *goalPos) const
 		Vector toFriend = pPlayer->pev->origin - pev->origin;
 
 		// check if friend is in our "personal space"
-		const float personalSpace = 100.0f;
+		// (Loner-Strike: on a team map people keep a little more room, not single file nose to tail)
+		const float personalSpace = (LsFight() && !LsSolo()) ? 170.0f : 100.0f;
 		if (toFriend.IsLengthGreaterThan(personalSpace))
 			continue;
 
