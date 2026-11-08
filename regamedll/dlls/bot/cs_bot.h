@@ -28,7 +28,7 @@
 
 #pragma once
 
-#include <unordered_map>
+#include <map>
 
 #include "bot/cs_gamestate.h"
 #include "bot/cs_bot_manager.h"
@@ -1036,7 +1036,7 @@ private:
 	struct LsDanger { float amount; float time; };
 	void LsCheckMap();
 	void LsAddDangerToArea(const CNavArea *area, float amount);
-	std::unordered_map<unsigned int, LsDanger> m_lsDanger;	// this bot's own danger memory, by area id
+	std::map<unsigned int, LsDanger> m_lsDanger;		// this bot's own danger memory, by area id
 	char m_lsMap[32] = "";									// the map that memory is for
 	string_t m_lsSeedName = 0;								// the name LsSeed was worked out from
 	unsigned int m_lsSeed = 0;
