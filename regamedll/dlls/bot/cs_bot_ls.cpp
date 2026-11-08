@@ -639,9 +639,28 @@ CNavArea *CCSBot::LsPickHuntArea()
 		}
 	});
 
-	bool keepSites = LsFight() && !LsSolo() && m_iTeam == CT && TheCSBots()->GetScenario() == CCSBotManager::SCENARIO_DEFUSE_BOMB
-		&& !TheCSBots()->IsBombPlanted() && TheCSBots()->GetZoneCount() > 0
-		&& !(GetProfile()->GetAggression() > 0.8f && LsTrait(31) < 0.5f);
+	// the places this side looks after: CTs on a bomb map the bomb sites until it's planted,
+	// Ts on a hostage map the hostages (they hold the building, not rush the CT spawn); a
+	// bold few push anyway
+	Vector keep[16];
+	int kept = 0;
+	if (LsFight() && !LsSolo() && !(GetProfile()->GetAggression() > 0.8f && LsTrait(31) < 0.5f))
+	{
+		if (m_iTeam == CT && TheCSBots()->GetScenario() == CCSBotManager::SCENARIO_DEFUSE_BOMB && !TheCSBots()->IsBombPlanted())
+		{
+			for (int z = 0; z < TheCSBots()->GetZoneCount() && kept < 16; z++)
+				keep[kept++] = TheCSBots()->GetZone(z)->m_center;
+		}
+		else if (m_iTeam == TERRORIST && TheCSBots()->GetScenario() == CCSBotManager::SCENARIO_RESCUE_HOSTAGES)
+		{
+			CBaseEntity *pHostage = nullptr;
+			while (kept < 16 && (pHostage = UTIL_FindEntityByClassname(pHostage, "hostage_entity")))
+			{
+				if (pHostage->IsAlive() && !(pHostage->pev->effects & EF_NODRAW))
+					keep[kept++] = pHostage->pev->origin;
+			}
+		}
+	}
 
 	const int tries = 12;
 	int picks[tries];
@@ -676,12 +695,12 @@ CNavArea *CCSBot::LsPickHuntArea()
 				nearest = Q_min(nearest, float((*c - avoid[k]).Length2D()));
 			score += nearest;
 
-			// CTs on a bomb map keep to the bomb sites until it's planted (a bold few push)
-			if (keepSites)
+			// near what this side looks after
+			if (kept)
 			{
 				float site = 99999.0f;
-				for (int z = 0; z < TheCSBots()->GetZoneCount(); z++)
-					site = Q_min(site, float((*c - TheCSBots()->GetZone(z)->m_center).Length2D()));
+				for (int k = 0; k < kept; k++)
+					site = Q_min(site, float((*c - keep[k]).Length2D()));
 				score += site < 1400.0f ? 400.0f : -1500.0f;
 			}
 
