@@ -1109,10 +1109,10 @@ void CCSBot::LsShotAt(CBasePlayer *pShooter, const Vector &impact)
 	Vector from = pShooter->pev->origin + pShooter->pev->view_ofs;
 	// how close the bullet's line came to its head
 	Vector line = impact - from;
-	float len = line.Length();
+	float len = float(line.Length());
 	if (len < 1.0f)
 		return;
-	float t = Q_max(0.0f, Q_min(1.0f, DotProduct(eye - from, line) / (len * len)));
+	float t = Q_max(0.0f, Q_min(1.0f, float(DotProduct(eye - from, line)) / (len * len)));
 	float miss = (from + line * t - eye).Length();
 	if (miss > 90.0f && (impact - eye).Length() > 110.0f)
 		return;
