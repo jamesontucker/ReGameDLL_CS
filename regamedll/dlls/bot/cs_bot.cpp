@@ -191,6 +191,9 @@ void CCSBot::Killed(entvars_t *pevAttacker, int iGib)
 	// end voice feedback
 	EndVoiceFeedback();
 
+	// Loner-Strike: whatever a plugin had it doing ends here
+	LsPuppetRelease();
+
 	// extend
 	CBasePlayer::Killed(pevAttacker, iGib);
 }

@@ -44,6 +44,7 @@ enum
 };
 
 class CCSBot;
+struct LsRoute;
 class BotChatterInterface;
 
 class BotState
@@ -1027,7 +1028,7 @@ public:
 	float LsGetDanger(const CNavArea *area);
 	void LsAddDangerNearby(float amount, CNavArea *startArea, const Vector *pos, float maxRadius);
 	void LsSawTeammateDie(CBasePlayer *pVictim);
-	float LsRouteFactor(const CNavArea *area, RouteType route);
+	bool LsRouteTaste(RouteType route, struct LsRoute *out);	// false: no taste in routes now
 	void LsShiftPortalPoint(const CNavArea *from, const CNavArea *to, NavDirType dir, Vector *pos);
 	bool LsUpdatePause();
 	void LsPuppetCommand(const char *what, float now);	// ls_bot (a plugin's short say over this bot)
@@ -1055,7 +1056,7 @@ private:
 	void LsAddDangerToArea(const CNavArea *area, float amount);
 	LsDanger m_lsDanger[96];						// this bot's own danger memory, by area id (a fixed table:
 													// the game frees a bot without running its destructor)
-	char m_lsMap[32] = "";									// the map that memory is for
+	char m_lsMap[64] = "";									// the map that memory is for
 	string_t m_lsSeedName = 0;								// the name LsSeed was worked out from
 	unsigned int m_lsSeed = 0;
 	float m_lsPauseUntil = 0.0f;
@@ -1063,6 +1064,9 @@ private:
 };
 
 // Loner-Strike (cs_bot_ls.cpp)
+// A bot's taste in routes for one path search (worked out once, used for every area)
+struct LsRoute { unsigned int seed, driftSeed; float most; };
+float LsRouteFactor(const LsRoute &r, const CNavArea *area);
 extern cvar_t cv_bot_ls_own_memory;
 extern cvar_t cv_bot_ls_routes;
 extern cvar_t cv_bot_ls_lines;
@@ -1625,10 +1629,13 @@ public:
 class PathCost
 {
 public:
-	PathCost(CCSBot *pBot, RouteType route = SAFEST_ROUTE)
+	PathCost(CCSBot *pBot, RouteType route = SAFEST_ROUTE, bool lsTaste = false)
 	{
 		m_bot = pBot;
 		m_route = route;
+		// Loner-Strike: taste in routes only for the path the bot walks (not for "how far is
+		// it" checks, whose ranges were tuned for plain distances)
+		m_lsTaste = lsTaste && pBot->LsRouteTaste(route, &m_lsRoute);
 	}
 	float operator()(CNavArea *area, CNavArea *fromArea, const CNavLadder *ladder)
 	{
@@ -1670,7 +1677,8 @@ public:
 			}
 
 			// Loner-Strike: this bot's favourite (and not so favourite) parts of the map
-			dist *= m_bot->LsRouteFactor(area, m_route);
+			if (m_lsTaste)
+				dist *= LsRouteFactor(m_lsRoute, area);
 
 			// compute distance travelled along path so far
 			float cost = dist + fromArea->GetCostSoFar();
@@ -1765,6 +1773,8 @@ public:
 private:
 	CCSBot *m_bot;
 	RouteType m_route;
+	bool m_lsTaste;
+	LsRoute m_lsRoute;
 };
 
 class FollowTargetCollector

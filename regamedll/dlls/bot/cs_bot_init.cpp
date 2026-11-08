@@ -358,6 +358,9 @@ void CCSBot::RoundRespawn()
 	// do the normal player spawn process
 	CBasePlayer::RoundRespawn();
 	EndVoiceFeedback();
+
+	// Loner-Strike: a new round starts clean
+	LsPuppetRelease();
 }
 
 void CCSBot::Disconnect()

@@ -1653,7 +1653,7 @@ bool CCSBot::ComputePath(CNavArea *goalArea, const Vector *goal, RouteType route
 
 	// Compute shortest path to goal
 	CNavArea *closestArea = nullptr;
-	PathCost pathCost(this, route);
+	PathCost pathCost(this, route, true);
 	bool pathToGoalExists = NavAreaBuildPath(startArea, goalArea, goal, pathCost, &closestArea);
 
 	CNavArea *effectiveGoalArea = (pathToGoalExists) ? goalArea : closestArea;

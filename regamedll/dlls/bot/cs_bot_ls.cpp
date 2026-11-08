@@ -216,24 +216,30 @@ static float LsNoise(unsigned int seed, float x, float y, float cell)
 	return (a + (b - a) * tx) + ((c + (d - c) * tx) - (a + (b - a) * tx)) * ty;
 }
 
-// How much more this bot minds walking through an area (1 = not at all)
-float CCSBot::LsRouteFactor(const CNavArea *area, RouteType route)
+// This bot's taste for one path search
+bool CCSBot::LsRouteTaste(RouteType route, LsRoute *out)
 {
 	float strength = cv_bot_ls_routes.value;
 	if (strength <= 0.0f)
-		return 1.0f;
-
-	const Vector *c = area->GetCenter();
-	unsigned int seed = LsSeed();
+		return false;
 
 	// mostly its own lasting taste, with a part that changes every couple of minutes
 	const float drift = 120.0f;
 	unsigned int bucket = (unsigned int)(gpGlobals->time / drift);
-	float taste = 0.7f * LsNoise(seed, c->x, c->y, 700.0f) + 0.3f * LsNoise(LsHash(seed, bucket), c->x, c->y, 500.0f);
+	out->seed = LsSeed();
+	out->driftSeed = LsHash(out->seed, bucket);
 
 	// a hurry (the fastest route) leaves less room for taste
-	float most = (route == FASTEST_ROUTE) ? 0.25f : 0.6f;
-	return 1.0f + Q_min(strength, 3.0f) * most * taste;
+	out->most = Q_min(strength, 3.0f) * ((route == FASTEST_ROUTE) ? 0.25f : 0.6f);
+	return true;
+}
+
+// How much more this bot minds walking through an area (1 = not at all)
+float LsRouteFactor(const LsRoute &r, const CNavArea *area)
+{
+	const Vector *c = area->GetCenter();
+	float taste = 0.7f * LsNoise(r.seed, c->x, c->y, 700.0f) + 0.3f * LsNoise(r.driftSeed, c->x, c->y, 500.0f);
+	return 1.0f + r.most * taste;
 }
 
 // ---- own line around corners ------------------------------------------------------------
@@ -289,7 +295,8 @@ bool CCSBot::LsUpdatePause()
 	if (gpGlobals->time < m_lsPauseUntil)
 	{
 		// anything happening ends it
-		if (IsAttacking() || GetTimeSinceLastSawEnemy() < 3.0f || IsHurrying() || IsOnLadder() || GetTimeSinceAttacked() < 3.0f || IsSurprised())
+		if (IsAttacking() || GetTimeSinceLastSawEnemy() < 3.0f || IsHurrying() || IsOnLadder() || GetTimeSinceAttacked() < 3.0f || IsSurprised()
+			|| TheCSBots()->IsBombPlanted() || GetHostageEscortCount() > 0)
 		{
 			m_lsPauseUntil = 0.0f;
 			return false;
@@ -309,6 +316,10 @@ bool CCSBot::LsUpdatePause()
 
 	// the bomb is down: no time for that
 	if (TheCSBots()->IsBombPlanted())
+		return false;
+
+	// never in the air, or where it has to jump or crouch through (it would stop short)
+	if (!(pev->flags & FL_ONGROUND) || !m_lastKnownArea || (m_lastKnownArea->GetAttributes() & (NAV_JUMP | NAV_CROUCH)))
 		return false;
 
 	// some bots stop often, some almost never (from 1 in 200 to 1 in 25 a second)
@@ -355,6 +366,8 @@ void CCSBot::LsPuppetRelease()
 		StopFollowing();
 	if (m_lsPuppet.lookUntil > 0.0f)
 		ClearLookAt();
+	if (m_lsPuppet.walkUntil > 0.0f)
+		Run();
 	m_lsPuppet = LsPuppet();
 }
 
