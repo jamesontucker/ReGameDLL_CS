@@ -733,14 +733,17 @@ void CCSBot::ReloadCheck()
 	Reload();
 
 	// move to cover to reload if there are enemies nearby
-	if (GetNearbyEnemyCount())
+	// (Loner-Strike: in deathmatch people reload where they are, or on the move, and get on
+	// with it; elsewhere fewer run off to hide, only straight after a fight, and they don't
+	// sit there long after. Hiding at the same few safe spots kept teammates bunched up)
+	if (GetNearbyEnemyCount() && !(LsFight() && LsSolo()))
 	{
 		// avoid enemies while reloading (above 0.75 skill always hide to reload)
-		const float hideChance = 25.0f + 100.0f * GetProfile()->GetSkill();
+		const float hideChance = (25.0f + 100.0f * GetProfile()->GetSkill()) * (LsFight() ? 0.5f : 1.0f);
 
 		if (!IsHiding() && RANDOM_FLOAT(0.0f, 100.0f) < hideChance)
 		{
-			const float safeTime = 5.0f;
+			const float safeTime = LsFight() ? 2.0f : 5.0f;
 			if (GetTimeSinceLastSawEnemy() < safeTime)
 			{
 				PrintIfWatched("Retreating to a safe spot to reload!\n");
@@ -749,11 +752,12 @@ void CCSBot::ReloadCheck()
 				{
 					// ignore enemies for a second to give us time to hide
 					// reaching our hiding spot clears our disposition
-					IgnoreEnemies(10.0f);
+					IgnoreEnemies(LsFight() ? 2.5f : 10.0f);
 
 					Run();
 					StandUp();
 					Hide(spot, 0.0f);
+					LsWhy("reload-hide");
 				}
 			}
 		}
