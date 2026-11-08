@@ -497,6 +497,10 @@ void AttackState::OnUpdate(CCSBot *me)
 	if (gpGlobals->time > m_reacquireTimestamp && !lsHoldFire)
 		me->FireWeaponAtEnemy();
 
+	// Loner-Strike: a crouch while shooting, a jump to look round a corner (some bots)
+	if (LsFight())
+		me->LsFightHabits(lsRange, m_crouchAndHold);
+
 	// Loner-Strike: hit, it moves (whatever it decided when the fight began)
 	if (LsFight() && !m_dodge && !m_crouchAndHold && me->GetTimeSinceAttacked() < 1.0f)
 		m_dodge = true;

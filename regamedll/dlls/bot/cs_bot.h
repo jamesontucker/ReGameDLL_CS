@@ -1047,6 +1047,7 @@ public:
 	bool LsHoldFireToStop(float range);
 	float LsCrouchFactor();
 	float LsPinnedDownTime();
+	void LsFightHabits(float range, bool crouchAndHold);	// crouch bursts, jump peeks
 	struct LsDanger { unsigned int id = 0; float amount = 0.0f; float time = 0.0f; };
 
 private:
@@ -1073,6 +1074,8 @@ private:
 	float m_lsPauseUntil = 0.0f;
 	float m_lsNextPauseCheck = 0.0f;
 	float m_lsNextSpreadCheck = 0.0f;
+	float m_lsCrouchBurstUntil = 0.0f;
+	float m_lsNextHabit = 0.0f;
 };
 
 // Loner-Strike (cs_bot_ls.cpp)

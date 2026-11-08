@@ -771,3 +771,43 @@ float CCSBot::LsPinnedDownTime()
 {
 	return 5.0f + 9.0f * LsTrait(16);
 }
+
+// Two habits of real players in a fight, for the bots that have them:
+//  - a crouch for a moment while shooting, then up again (not a crouch for the whole fight)
+//  - a jump to look round a corner at an enemy it just lost sight of
+void CCSBot::LsFightHabits(float range, bool crouchAndHold)
+{
+	float now = gpGlobals->time;
+
+	if (m_lsCrouchBurstUntil > 0.0f && now >= m_lsCrouchBurstUntil)
+	{
+		m_lsCrouchBurstUntil = 0.0f;
+		if (!crouchAndHold)
+			StandUp();
+	}
+	else if (m_lsCrouchBurstUntil > 0.0f)
+	{
+		Crouch();
+		return;
+	}
+
+	if (now < m_lsNextHabit || IsUsingKnife() || IsUsingSniperRifle())
+		return;
+	m_lsNextHabit = now + RANDOM_FLOAT(0.8f, 1.6f);
+
+	if (IsEnemyVisible())
+	{
+		// crouch while shooting: close and mid range, the bots with the habit
+		if (!crouchAndHold && range < 900.0f && LsTrait(17) > 0.5f && RANDOM_FLOAT(0.0f, 1.0f) < 0.35f && (pev->flags & FL_ONGROUND))
+		{
+			m_lsCrouchBurstUntil = now + RANDOM_FLOAT(0.4f, 1.2f);
+			Crouch();
+		}
+	}
+	else if (GetTimeSinceLastSawEnemy() < 3.0f && !IsNotMoving() && (pev->flags & FL_ONGROUND))
+	{
+		// a jump to look round the corner they went behind
+		if (LsTrait(18) > 0.6f && RANDOM_FLOAT(0.0f, 1.0f) < 0.3f)
+			Jump(MUST_JUMP);
+	}
+}
