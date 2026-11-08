@@ -128,7 +128,8 @@ void CCSBot::FireWeaponAtEnemy()
 				if (IsUsingPistol())
 				{
 					// high-skill bots fire their pistols quickly at close range
-					const float closePistolRange = 999999.9f;
+					// (Loner-Strike: up close; further out they tap like players do)
+					const float closePistolRange = LsFight() ? 700.0f : 999999.9f;
 					if (GetProfile()->GetSkill() > 0.75f && rangeToEnemy < closePistolRange)
 					{
 						StartRapidFire();

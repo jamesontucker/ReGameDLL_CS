@@ -244,7 +244,8 @@ void BuyState::OnUpdate(CCSBot *me)
 	// apparently we cant buy things in the first few seconds, so wait a bit
 	if (m_isInitialDelay)
 	{
-		const float waitToBuyTime = 2.0f; // 0.25f;
+		// (Loner-Strike: everyone at their own pace, not all on the same tick)
+		const float waitToBuyTime = LsFight() ? 1.0f + 4.0f * me->LsBuyPace() : 2.0f; // 0.25f;
 		if (gpGlobals->time - me->GetStateTimestamp() < waitToBuyTime)
 			return;
 

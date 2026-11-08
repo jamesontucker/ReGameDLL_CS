@@ -1052,6 +1052,8 @@ public:
 	bool LsCornerPeek();							// strafe round a corner looking into it
 	void LsSneak();									// shift-walk where enemies may be
 	bool LsCounterStrafe(int fromState);			// a tap the other way to stop dead
+	void LsStopDead();								// keys against its own velocity (counter-strafe)
+	float LsBuyPace() { return LsTrait(23); }		// 0 quick to buy, 1 slow
 	struct LsDanger { unsigned int id = 0; float amount = 0.0f; float time = 0.0f; };
 
 private:
@@ -1081,6 +1083,10 @@ private:
 	float m_lsCrouchBurstUntil = 0.0f;
 	float m_lsNextHabit = 0.0f;
 	float m_lsCounterUntil = 0.0f;
+	float m_lsHoldSince = 0.0f;						// stopping to shoot since (0: not)
+	float m_lsPinnedExtended = 0.0f;				// how much a winning fight has been extended
+	float m_lsVetoNoiseAt = -1.0f;					// the noise the teammate veto was rolled for
+	bool m_lsVetoNoise = false;
 	int m_lsCounterDir = 0;							// 1 left, -1 right
 	float m_lsNextSneakCheck = 0.0f;
 	bool m_lsSneaking = false;
@@ -1096,7 +1102,9 @@ extern cvar_t cv_bot_ls_lines;
 extern cvar_t cv_bot_ls_pauses;
 extern cvar_t cv_bot_ls_solo;
 extern cvar_t cv_bot_ls_fight;
+extern cvar_t cv_bot_ls_match;
 bool LsFight();
+bool LsMatch();
 bool LsSolo();
 bool LsOwnMemory();
 void Bot_LsRegisterCVars();

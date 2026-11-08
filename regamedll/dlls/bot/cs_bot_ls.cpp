@@ -27,6 +27,12 @@
 *                         run and gun), crouching only for the bots that crouch, and
 *                         staying in a fight it's winning
 *
+*   bot_ls_match       0  an organised match is on (5v5 match mode sets it): disciplined
+*                         habits (sneaking, careful peeks) more, careless ones less
+*
+*   The habits follow the game: deathmatch-type modes (bot_deathmatch 1) run and gun with
+*   no sneaking; a pub game has the full mix; a match is disciplined.
+*
 *   All of them at 0 is the stock behaviour.
 *
 */
@@ -39,6 +45,7 @@ cvar_t cv_bot_ls_lines      = { "bot_ls_lines", "1.0", FCVAR_SERVER, 0.0f, nullp
 cvar_t cv_bot_ls_pauses     = { "bot_ls_pauses", "1.0", FCVAR_SERVER, 0.0f, nullptr };
 cvar_t cv_bot_ls_solo       = { "bot_ls_solo", "1", FCVAR_SERVER, 0.0f, nullptr };
 cvar_t cv_bot_ls_fight      = { "bot_ls_fight", "1", FCVAR_SERVER, 0.0f, nullptr };
+cvar_t cv_bot_ls_match      = { "bot_ls_match", "0", FCVAR_SERVER, 0.0f, nullptr };
 
 void Bot_LsRegisterCVars()
 {
@@ -48,6 +55,13 @@ void Bot_LsRegisterCVars()
 	CVAR_REGISTER(&cv_bot_ls_pauses);
 	CVAR_REGISTER(&cv_bot_ls_solo);
 	CVAR_REGISTER(&cv_bot_ls_fight);
+	CVAR_REGISTER(&cv_bot_ls_match);
+}
+
+// An organised match (bot_ls_match, set by match mode)
+bool LsMatch()
+{
+	return cv_bot_ls_match.value > 0.0f;
 }
 
 bool LsFight()
@@ -591,7 +605,7 @@ static void LsForTeammates(CCSBot *me, F f)
 	for (int i = 1; i <= gpGlobals->maxClients; i++)
 	{
 		CBasePlayer *pPlayer = UTIL_PlayerByIndex(i);
-		if (!pPlayer || pPlayer == me || !pPlayer->IsAlive() || pPlayer->m_iTeam != me->m_iTeam)
+		if (!pPlayer || pPlayer == me || !pPlayer->IsAlive() || me->BotRelationship(pPlayer) != CCSBot::BOT_TEAMMATE)
 			continue;
 		f(pPlayer);
 	}
@@ -632,6 +646,11 @@ CNavArea *CCSBot::LsPickHuntArea()
 		for (int t = 0; t < tries; t++)
 		{
 			if (picks[t] != index)
+				continue;
+
+			// (not the small ones: corners of rooms, vents, ledges)
+			const Extent *ext = area->GetExtent();
+			if (ext->hi.x - ext->lo.x < 100.0f || ext->hi.y - ext->lo.y < 100.0f)
 				continue;
 
 			const Vector *c = area->GetCenter();
@@ -723,12 +742,15 @@ bool CCSBot::LsMayBackOff(const Vector &toEnemy)
 
 	Vector back = -toEnemy;
 	back.z = 0.0f;
+	if (back.Length2D() < 1.0f)
+		return false;
 	back = back.Normalize();
 
+	// room for a body behind, not just a line
 	TraceResult tr;
 	Vector from = pev->origin;
-	UTIL_TraceLine(from, from + back * 96.0f, ignore_monsters, ENT(pev), &tr);
-	if (tr.flFraction < 1.0f)
+	UTIL_TraceHull(from, from + back * 96.0f, ignore_monsters, human_hull, ENT(pev), &tr);
+	if (tr.flFraction < 1.0f || tr.fStartSolid)
 		return false;
 
 	// ground behind (a drop would be a fall)
@@ -751,19 +773,20 @@ bool CCSBot::LsHoldFireToStop(float range)
 	switch (pWeapon->m_iId)
 	{
 	case WEAPON_AK47: case WEAPON_M4A1: case WEAPON_GALIL: case WEAPON_FAMAS:
-	case WEAPON_SG552: case WEAPON_AUG: case WEAPON_DEAGLE: case WEAPON_SCOUT:
+	case WEAPON_SG552: case WEAPON_AUG: case WEAPON_DEAGLE:
 		break;
 	default:
 		return false;
 	}
-	return pev->velocity.Length2D() > 110.0f;
+	// moving fast enough to spoil the shot (half its top speed: follows a mode's speeds)
+	return pev->velocity.Length2D() > 0.5f * pev->maxspeed;
 }
 
 // How likely this bot crouches to hold in a fight (most never do, a few always try)
 float CCSBot::LsCrouchFactor()
 {
 	float t = LsTrait(15);
-	return t < 0.6f ? 0.3f : t < 0.9f ? 1.0f : 2.0f;
+	return t < 0.35f ? 0.3f : t < 0.85f ? 1.0f : 2.0f;
 }
 
 // Patience before a fight counts as "pinned down": its own, and more while it's winning
@@ -798,7 +821,7 @@ void CCSBot::LsFightHabits(float range, bool crouchAndHold)
 	if (IsEnemyVisible())
 	{
 		// crouch while shooting: close and mid range, the bots with the habit
-		if (!crouchAndHold && range < 900.0f && LsTrait(17) > 0.35f && RANDOM_FLOAT(0.0f, 1.0f) < 0.45f && (pev->flags & FL_ONGROUND))
+		if (!crouchAndHold && range < 900.0f && LsCrouchFactor() >= 1.0f && RANDOM_FLOAT(0.0f, 1.0f) < 0.45f && (pev->flags & FL_ONGROUND))
 		{
 			m_lsCrouchBurstUntil = now + RANDOM_FLOAT(0.4f, 1.2f);
 			Crouch();
@@ -836,6 +859,11 @@ bool CCSBot::LsCornerPeek()
 
 	float skill = GetProfile()->GetSkill();
 	float chance = Q_min(0.95f, 0.25f + 0.7f * skill + 0.25f * (LsTrait(20) - 0.5f));
+	// deathmatch: mostly running round corners; a match: careful
+	if (LsSolo())
+		chance *= 0.45f;
+	else if (LsMatch())
+		chance = Q_min(0.98f, chance + 0.2f);
 	if (RANDOM_FLOAT(0.0f, 1.0f) > chance)
 		return false;
 
@@ -862,9 +890,20 @@ void CCSBot::LsSneak()
 {
 	if (!LsFight() || gpGlobals->time < m_lsNextSneakCheck)
 		return;
+
+	// deathmatch: nobody sneaks (it would only look odd), back to running
+	if (LsSolo())
+	{
+		if (m_lsSneaking && !IsRunning())
+			Run();
+		m_lsSneaking = false;
+		return;
+	}
 	m_lsNextSneakCheck = gpGlobals->time + RANDOM_FLOAT(0.8f, 1.5f);
 
 	float sneaky = 0.6f * (1.0f - GetProfile()->GetAggression()) + 0.4f * LsTrait(21);
+	if (LsMatch())
+		sneaky += 0.25f;
 	bool loud = IsHurrying() || GetTimeSinceAttacked() < 5.0f || GetTimeSinceLastSawEnemy() < 6.0f || IsSafe()
 		|| (TheCSBots() && TheCSBots()->IsBombPlanted()) || IsCarryingBomb() || GetHostageEscortCount() > 0;
 
@@ -908,4 +947,26 @@ bool CCSBot::LsCounterStrafe(int fromState)
 		Crouch();
 	}
 	return true;
+}
+
+// A counter-strafe: the keys against its own velocity (forward/back and sideways), so it
+// stops dead in about a tenth of a second instead of sliding for a third of one
+void CCSBot::LsStopDead()
+{
+	float yaw = pev->v_angle.y;
+	Vector2D dir(BotCOS(yaw), BotSIN(yaw));
+	Vector2D lat(-dir.y, dir.x);
+	float fwd = pev->velocity.x * dir.x + pev->velocity.y * dir.y;
+	float side = pev->velocity.x * lat.x + pev->velocity.y * lat.y;
+
+	const float slow = 40.0f;
+	if (fwd > slow)
+		MoveBackward();
+	else if (fwd < -slow)
+		MoveForward();
+
+	if (side > slow)
+		StrafeRight();
+	else if (side < -slow)
+		StrafeLeft();
 }

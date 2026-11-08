@@ -89,8 +89,17 @@ bool CCSBot::ShouldInvestigateNoise(float *retNoiseDist)
 		}
 
 		// Loner-Strike: every bot for itself: a teammate who's closer goes (mostly)
-		if (LsLoner() && LsTeammateCloser(m_noisePosition) && RANDOM_FLOAT(0.0f, 1.0f) < 0.85f)
-			return false;
+		if (LsLoner())
+		{
+			// (decided once per noise, not re-rolled on every check)
+			if (m_lsVetoNoiseAt != m_noiseTimestamp)
+			{
+				m_lsVetoNoiseAt = m_noiseTimestamp;
+				m_lsVetoNoise = LsTeammateCloser(m_noisePosition) && RANDOM_FLOAT(0.0f, 1.0f) < 0.85f;
+			}
+			if (m_lsVetoNoise)
+				return false;
+		}
 
 		if (RANDOM_FLOAT(0.0f, 1.0f) <= chance)
 		{

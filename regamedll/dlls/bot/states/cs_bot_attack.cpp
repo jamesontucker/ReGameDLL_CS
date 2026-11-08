@@ -54,6 +54,8 @@ void AttackState::OnEnter(CCSBot *me)
 	m_reacquireTimestamp = 0.0f;
 
 	m_pinnedDownTimestamp = gpGlobals->time + (LsFight() ? me->LsPinnedDownTime() : RANDOM_FLOAT(7.0f, 10.0f));
+	me->m_lsPinnedExtended = 0.0f;
+	me->m_lsHoldSince = 0.0f;
 	m_shieldToggleTimestamp = gpGlobals->time + RANDOM_FLOAT(2.0f, 10.0f);
 	m_shieldForceOpen = false;
 
@@ -194,9 +196,13 @@ void AttackState::OnUpdate(CCSBot *me)
 		// If we've been fighting this battle for awhile, we're "pinned down" and
 		// need to do something else.
 		// If we are outnumbered, retreat.
-		// (Loner-Strike: not while it's winning: the enemy is hurt worse than it is)
-		if (LsFight() && me->GetEnemy() && me->GetEnemy()->pev->health < me->pev->health && gpGlobals->time > m_pinnedDownTimestamp)
+		// (Loner-Strike: not while it's doing fine: healthy and not hit lately; for a while)
+		if (LsFight() && gpGlobals->time > m_pinnedDownTimestamp && me->pev->health > 60.0f && me->GetTimeSinceAttacked() > 2.0f
+			&& me->m_lsPinnedExtended < 2.0f * me->LsPinnedDownTime())
+		{
 			m_pinnedDownTimestamp = gpGlobals->time + 2.0f;
+			me->m_lsPinnedExtended += 2.0f;
+		}
 
 		bool isPinnedDown = (gpGlobals->time > m_pinnedDownTimestamp);
 
@@ -493,6 +499,16 @@ void AttackState::OnUpdate(CCSBot *me)
 	// Loner-Strike: stop, then shoot (a skilled bot with a rifle at range)
 	float lsRange = (pEnemy->pev->origin - me->pev->origin).Length2D();
 	bool lsHoldFire = LsFight() && me->LsHoldFireToStop(lsRange);
+	if (lsHoldFire)
+	{
+		if (me->m_lsHoldSince <= 0.0f)
+			me->m_lsHoldSince = gpGlobals->time;
+		// never stuck waiting to stop: it shoots anyway after a moment
+		else if (gpGlobals->time - me->m_lsHoldSince > 0.6f)
+			lsHoldFire = false;
+	}
+	else
+		me->m_lsHoldSince = 0.0f;
 
 	if (gpGlobals->time > m_reacquireTimestamp && !lsHoldFire)
 		me->FireWeaponAtEnemy();
@@ -526,7 +542,8 @@ void AttackState::OnUpdate(CCSBot *me)
 		float maxRange = me->GetCombatRange() + hysterisRange;
 
 		// move towards (or away from) enemy if we are using a knife, behind a corner, or we aren't very skilled
-		if (me->GetProfile()->GetSkill() < 0.66f || !me->IsEnemyVisible())
+		// (Loner-Strike: not while stopping to shoot)
+		if (!lsHoldFire && (me->GetProfile()->GetSkill() < 0.66f || !me->IsEnemyVisible()))
 		{
 			if (range > maxRange)
 				me->MoveForward();
@@ -540,6 +557,12 @@ void AttackState::OnUpdate(CCSBot *me)
 		{
 			m_dodgeState = STEADY_ON;
 			m_nextDodgeStateTimestamp = 0.0f;
+		}
+		else if (lsHoldFire)
+		{
+			// Loner-Strike: stopping dead to shoot: keys against its own slide
+			m_dodgeState = STEADY_ON;
+			me->LsStopDead();
 		}
 		else if (gpGlobals->time >= m_nextDodgeStateTimestamp)
 		{

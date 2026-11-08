@@ -416,7 +416,7 @@ void CCSBot::UpdateLookAround(bool updateNow)
 		if (CanHearNearbyEnemyGunfire(noiseStartleRange))
 		{
 			Vector spot = m_noisePosition;
-			spot.z += HalfHumanHeight;
+			spot.z += HalfHumanHeight + (LsFight() ? 24.0f : 0.0f);	// (Loner-Strike: head height, not chest)
 
 			SetLookAt("Check dangerous noise", &spot, PRIORITY_HIGH, recentThreatTime);
 			InhibitLookAround(RANDOM_FLOAT(2.0f, 4.0f));
@@ -435,7 +435,7 @@ void CCSBot::UpdateLookAround(bool updateNow)
 		// find enemy position on the ground
 		if (GetSimpleGroundHeight(&m_lastEnemyPosition, &spot.z))
 		{
-			spot.z += HalfHumanHeight;
+			spot.z += HalfHumanHeight + (LsFight() ? 24.0f : 0.0f);	// (Loner-Strike: head height, not chest)
 			SetLookAt("Last Enemy Position", &spot, PRIORITY_MEDIUM, RANDOM_FLOAT(2.0f, 3.0f), true);
 			return;
 		}
@@ -490,7 +490,7 @@ void CCSBot::UpdateLookAround(bool updateNow)
 
 		// don't look at the floor, look roughly at chest level
 		// TODO: If this approach point is very near, this will cause us to aim up in the air if were crouching
-		spot.z += HalfHumanHeight;
+		spot.z += HalfHumanHeight + (LsFight() ? 24.0f : 0.0f);	// (Loner-Strike: head height, not chest)
 		SetLookAt("Approach Point (Hiding)", &spot, PRIORITY_LOW);
 		return;
 	}
