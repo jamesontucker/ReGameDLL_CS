@@ -178,7 +178,11 @@ void CCSBot::Killed(entvars_t *pevAttacker, int iGib)
 	// increase the danger where we died
 	const float deathDanger = 1.0f;
 	const float deathDangerRadius = 500.0f;
-	IncreaseDangerNearby(m_iTeam - 1, deathDanger, m_lastKnownArea, &pev->origin, deathDangerRadius);
+	// (Loner-Strike: into this bot's own memory instead of the team's, with bot_ls_own_memory)
+	if (LsOwnMemory())
+		LsAddDangerNearby(deathDanger, m_lastKnownArea, &pev->origin, deathDangerRadius);
+	else
+		IncreaseDangerNearby(m_iTeam - 1, deathDanger, m_lastKnownArea, &pev->origin, deathDangerRadius);
 
 	// end voice feedback
 	EndVoiceFeedback();

@@ -97,6 +97,7 @@ void Bot_RegisterCVars()
 		return;
 
 	CVAR_REGISTER(&cv_bot_traceview);
+	Bot_LsRegisterCVars();
 	CVAR_REGISTER(&cv_bot_stop);
 	CVAR_REGISTER(&cv_bot_show_nav);
 	CVAR_REGISTER(&cv_bot_show_danger);

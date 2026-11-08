@@ -307,6 +307,7 @@ set(GAMEDLL_SRCS
 	"dlls/bot/cs_bot_nav.cpp"
 	"dlls/bot/cs_bot_pathfind.cpp"
 	"dlls/bot/cs_bot_radio.cpp"
+	"dlls/bot/cs_bot_ls.cpp"
 	"dlls/bot/cs_bot_statemachine.cpp"
 	"dlls/bot/cs_bot_update.cpp"
 	"dlls/bot/cs_bot_vision.cpp"

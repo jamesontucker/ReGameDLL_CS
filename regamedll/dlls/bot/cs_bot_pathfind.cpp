@@ -52,6 +52,9 @@ bool CCSBot::ComputePathPositions()
 			// compute next point, keeping path as straight as possible
 			from->area->ComputeClosestPointInPortal(to->area, (NavDirType)to->how, &from->pos, &to->pos);
 
+			// Loner-Strike: through the opening on this bot's own line
+			LsShiftPortalPoint(from->area, to->area, (NavDirType)to->how, &to->pos);
+
 			// move goal position into the goal area a bit
 			// how far to "step into" an area - must be less than min area size
 			const float stepInDist = 5.0f;
@@ -1290,6 +1293,10 @@ CCSBot::PathResult CCSBot::UpdatePathMovement(bool allowSpeedChange)
 	// we are not supposed to be on a ladder - if we are, jump off
 	if (IsOnLadder())
 		Jump(MUST_JUMP);
+
+	// Loner-Strike: standing still for a moment
+	if (LsUpdatePause())
+		return PROGRESSING;
 
 	Assert(m_pathIndex < m_pathLength);
 

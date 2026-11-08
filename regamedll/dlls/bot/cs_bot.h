@@ -28,6 +28,8 @@
 
 #pragma once
 
+#include <unordered_map>
+
 #include "bot/cs_gamestate.h"
 #include "bot/cs_bot_manager.h"
 #include "bot/cs_bot_chatter.h"
@@ -1018,7 +1020,37 @@ private:
 #ifdef REGAMEDLL_ADD
 	bool IsNoticable(const CBasePlayer *pPlayer, unsigned char visibleParts) const;	// return true if we "notice" given player
 #endif
+
+public:
+	// Loner-Strike (cs_bot_ls.cpp): each bot keeps to itself and moves like a person
+	unsigned int LsSeed();
+	float LsTrait(unsigned int which);
+	float LsGetDanger(const CNavArea *area);
+	void LsAddDangerNearby(float amount, CNavArea *startArea, const Vector *pos, float maxRadius);
+	void LsSawTeammateDie(CBasePlayer *pVictim);
+	float LsRouteFactor(const CNavArea *area, RouteType route);
+	void LsShiftPortalPoint(const CNavArea *from, const CNavArea *to, NavDirType dir, Vector *pos);
+	bool LsUpdatePause();
+
+private:
+	struct LsDanger { float amount; float time; };
+	void LsCheckMap();
+	void LsAddDangerToArea(const CNavArea *area, float amount);
+	std::unordered_map<unsigned int, LsDanger> m_lsDanger;	// this bot's own danger memory, by area id
+	char m_lsMap[32] = "";									// the map that memory is for
+	string_t m_lsSeedName = 0;								// the name LsSeed was worked out from
+	unsigned int m_lsSeed = 0;
+	float m_lsPauseUntil = 0.0f;
+	float m_lsNextPauseCheck = 0.0f;
 };
+
+// Loner-Strike (cs_bot_ls.cpp)
+extern cvar_t cv_bot_ls_own_memory;
+extern cvar_t cv_bot_ls_routes;
+extern cvar_t cv_bot_ls_lines;
+extern cvar_t cv_bot_ls_pauses;
+bool LsOwnMemory();
+void Bot_LsRegisterCVars();
 
 // Inlines
 inline float CCSBot::GetCombatRange() const
@@ -1591,8 +1623,8 @@ public:
 			if (m_route == FASTEST_ROUTE)
 				return 0.0f;
 
-			// first area in path, cost is just danger
-			return dangerFactor * area->GetDanger(m_bot->m_iTeam - 1);
+			// first area in path, cost is just danger (Loner-Strike: the bot's own, with bot_ls_own_memory)
+			return dangerFactor * (LsOwnMemory() ? m_bot->LsGetDanger(area) : area->GetDanger(m_bot->m_iTeam - 1));
 		}
 		else if ((fromArea->GetAttributes() & NAV_JUMP) && (area->GetAttributes() & NAV_JUMP))
 		{
@@ -1617,6 +1649,9 @@ public:
 			{
 				dist = (*area->GetCenter() - *fromArea->GetCenter()).Length();
 			}
+
+			// Loner-Strike: this bot's favourite (and not so favourite) parts of the map
+			dist *= m_bot->LsRouteFactor(area, m_route);
 
 			// compute distance travelled along path so far
 			float cost = dist + fromArea->GetCostSoFar();
@@ -1684,7 +1719,7 @@ public:
 			if (m_route == SAFEST_ROUTE)
 			{
 				// add in the danger of this path - danger is per unit length travelled
-				cost += dist * dangerFactor * area->GetDanger(m_bot->m_iTeam - 1);
+				cost += dist * dangerFactor * (LsOwnMemory() ? m_bot->LsGetDanger(area) : area->GetDanger(m_bot->m_iTeam - 1));
 			}
 
 			if (!m_bot->IsAttacking())

@@ -68,6 +68,10 @@ void CCSBot::OnEvent(GameEventType event, CBaseEntity *pEntity, CBaseEntity *pOt
 
 	CBasePlayer *pPlayer = static_cast<CBasePlayer *>(pEntity);
 
+	// Loner-Strike: a teammate dying in sight is remembered as danger by this bot alone
+	if (event == EVENT_PLAYER_DIED && pPlayer && pPlayer != this && pPlayer->IsPlayer() && BotRelationship(pPlayer) == BOT_TEAMMATE)
+		LsSawTeammateDie(pPlayer);
+
 	// If we just saw a nearby friend die, and we haven't yet acquired an enemy
 	// automatically acquire our dead friend's killer
 	if (!IsAttacking() && (GetDisposition() == ENGAGE_AND_INVESTIGATE || GetDisposition() == OPPORTUNITY_FIRE))
