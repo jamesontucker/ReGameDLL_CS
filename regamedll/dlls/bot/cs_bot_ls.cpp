@@ -87,6 +87,9 @@ bool CCSBot::LsLoner() const
 {
 	if (cv_bot_ls_solo.value <= 0.0f)
 		return false;
+	// (the bomb carrier plays the objective, whoever it is)
+	if (!LsSolo() && IsCarryingBomb())
+		return false;
 	return LsSolo() || (GetProfile() && GetProfile()->GetTeamwork() < 0.35f);
 }
 
@@ -879,7 +882,7 @@ void CCSBot::LsFightHabits(float range, bool crouchAndHold)
 // teammate defusing, hold the site they're at and answer a hostage; a few never do
 bool CCSBot::LsShirksObjective()
 {
-	if (!IsRogue())
+	if (IsCarryingBomb() || !IsRogue())
 		return false;
 	if (cv_bot_ls_solo.value <= 0.0f || LsSolo())
 		return true;
@@ -1269,57 +1272,54 @@ bool CCSBot::LsRadioOk(GameEventType event)
 	return RANDOM_FLOAT(0.0f, 1.0f) < chance;
 }
 
-// The enemy just went behind a door, a box or a thin wall a bullet goes through: some players
-// spray it where they saw them go (rifles, machine guns, snipers and the Deagle). Each bot
-// either has the habit or not (more of the good ones); whether it does it this time is
-// rolled once for each time it loses sight of someone. True while it's spraying.
-bool CCSBot::LsWallbang(float notSeenEnemyTime)
+// Spraying through a wall (bot_ls_fight): while it's on (m_lsBangUntil), the view goes to the
+// spot and the trigger is pulled once the gun points there. True while it's spraying.
+bool CCSBot::LsBangTick()
 {
-	if (!LsFight())
-		return false;
 	float now = gpGlobals->time;
+	if (now >= m_lsBangUntil)
+		return false;
 	CBasePlayerWeapon *pWeapon = GetActiveWeapon();
-	if (now < m_lsBangUntil)
+	if (!pWeapon || IsActiveWeaponClipEmpty() || !LsBangGun(pWeapon))
 	{
-		if (!pWeapon || IsActiveWeaponClipEmpty())
-		{
-			m_lsBangUntil = 0.0f;
-			return false;
-		}
-		SetLookAt("Loner-Strike: wallbang", &m_lsBangAt, PRIORITY_HIGH, 0.3f);
-		Vector dir = m_lsBangAt - (pev->origin + pev->view_ofs);
-		dir.NormalizeInPlace();
-		UTIL_MakeVectors(pev->v_angle + pev->punchangle);
-		// (a semi-automatic needs the trigger let go between shots)
-		bool semi = pWeapon->m_iId == WEAPON_DEAGLE || pWeapon->m_iId == WEAPON_AWP || pWeapon->m_iId == WEAPON_SCOUT;
-		if (DotProduct(gpGlobals->v_forward, dir) > 0.996f && (!semi || int(now * 8.0f) % 2 == 0))
-			PrimaryAttack();
-		return true;
+		m_lsBangUntil = 0.0f;
+		return false;
 	}
-	if (notSeenEnemyTime > 1.2f || GetLastSawEnemyTimestamp() == m_lsBangRolledAt)
-		return false;
-	m_lsBangRolledAt = GetLastSawEnemyTimestamp();
+	SetLookAt("Loner-Strike: wallbang", &m_lsBangAt, PRIORITY_HIGH, 0.3f);
+	Vector dir = m_lsBangAt - (pev->origin + pev->view_ofs);
+	dir.NormalizeInPlace();
+	UTIL_MakeVectors(pev->v_angle + pev->punchangle);
+	// (a semi-automatic needs the trigger let go between shots)
+	bool semi = pWeapon->m_iId == WEAPON_DEAGLE || pWeapon->m_iId == WEAPON_AWP || pWeapon->m_iId == WEAPON_SCOUT;
+	if (DotProduct(gpGlobals->v_forward, dir) > 0.996f && (!semi || int(now * 8.0f) % 2 == 0))
+		PrimaryAttack();
+	return true;
+}
 
-	if (!pWeapon)
-		return false;
-	switch (pWeapon->m_iId)
+// A gun that goes through doors and thin walls: rifles, machine guns, snipers and the Deagle
+bool CCSBot::LsBangGun(CBasePlayerWeapon *pWeapon) const
+{
+	switch (pWeapon ? pWeapon->m_iId : 0)
 	{
 	case WEAPON_AK47: case WEAPON_M4A1: case WEAPON_GALIL: case WEAPON_FAMAS: case WEAPON_SG552: case WEAPON_AUG:
 	case WEAPON_M249: case WEAPON_DEAGLE: case WEAPON_AWP: case WEAPON_SCOUT: case WEAPON_G3SG1: case WEAPON_SG550:
-		break;
-	default:
-		return false;
+		return true;
 	}
-	float skill = GetProfile()->GetSkill();
-	if (LsTrait(32) > 0.2f + 0.4f * skill || RANDOM_FLOAT(0.0f, 1.0f) > 0.6f)
-		return false;
+	return false;
+}
 
+// Starts spraying at a spot behind one thin thing (a door, a box, a thin wall: where the
+// bullet goes in and where it comes out are close) with no teammate in the way. False if
+// it can't be shot through from here.
+bool CCSBot::LsBangThrough(const Vector &target)
+{
+	CBasePlayerWeapon *pWeapon = GetActiveWeapon();
+	if (!LsBangGun(pWeapon))
+		return false;
 	Vector eye = pev->origin + pev->view_ofs;
-	Vector target = GetLastKnownEnemyPosition() + Vector(0, 0, 10.0f);
 	if ((target - eye).IsLengthGreaterThan(1500.0f))
 		return false;
-	// one thin thing in the way: where the bullet goes in and where it comes out are close
-	TraceResult in, out;
+	TraceResult in, out, mates;
 	UTIL_TraceLine(eye, target, ignore_monsters, ENT(pev), &in);
 	if (in.flFraction >= 1.0f || in.fStartSolid)
 		return false;
@@ -1328,9 +1328,135 @@ bool CCSBot::LsWallbang(float notSeenEnemyTime)
 		return false;
 	if ((in.vecEndPos - out.vecEndPos).IsLengthGreaterThan(pWeapon->m_iId == WEAPON_AWP ? 40.0f : 22.0f))
 		return false;
+	// nobody on this side of the wall in the way
+	UTIL_TraceLine(eye, in.vecEndPos, dont_ignore_monsters, ENT(pev), &mates);
+	if (mates.flFraction < 1.0f && mates.pHit && CBaseEntity::Instance(mates.pHit) && CBaseEntity::Instance(mates.pHit)->IsPlayer())
+		return false;
 
+	bool slow = pWeapon->m_iId == WEAPON_AWP || pWeapon->m_iId == WEAPON_SCOUT || pWeapon->m_iId == WEAPON_DEAGLE;
 	m_lsBangAt = target;
-	m_lsBangUntil = now + (pWeapon->m_iId == WEAPON_AWP || pWeapon->m_iId == WEAPON_SCOUT || pWeapon->m_iId == WEAPON_DEAGLE ? RANDOM_FLOAT(0.3f, 0.8f) : RANDOM_FLOAT(0.6f, 1.5f));
+	m_lsBangUntil = gpGlobals->time + (slow ? RANDOM_FLOAT(0.3f, 0.8f) : RANDOM_FLOAT(0.6f, 1.5f));
 	LsWhy("wallbang");
 	return true;
+}
+
+// The enemy just went behind a door, a box or a thin wall a bullet goes through: some players
+// spray it where they saw them go. Each bot either has the habit or not (more of the good
+// ones); whether it does it this time is rolled once each time it loses sight of someone.
+// True while it's spraying.
+bool CCSBot::LsWallbang(float notSeenEnemyTime)
+{
+	if (!LsFight())
+		return false;
+	if (LsBangTick())
+		return true;
+	if (notSeenEnemyTime > 1.2f || GetLastSawEnemyTimestamp() == m_lsBangRolledAt)
+		return false;
+	m_lsBangRolledAt = GetLastSawEnemyTimestamp();
+	float skill = GetProfile()->GetSkill();
+	if (LsTrait(32) > 0.2f + 0.4f * skill || RANDOM_FLOAT(0.0f, 1.0f) > 0.6f)
+		return false;
+	return LsBangThrough(GetLastKnownEnemyPosition() + Vector(0, 0, 10.0f));
+}
+
+// Something heard from an enemy it can't see (bot_ls_fight): footsteps, a reload, gunfire.
+// - a reload close by: the bold go for them while they're reloading, the rest get ready
+// - close footsteps: the view goes to where they'd come out (the first spot along the way
+//   from the sound that it can see), at head height, like a player pre-aiming a corner
+// - the good ones, knowing someone is right there behind a door or thin wall, now and then
+//   spray it (with a gun that goes through)
+void CCSBot::LsHeard(GameEventType event, CBasePlayer *pPlayer, float dist)
+{
+	if (!LsFight() || !pPlayer || !pPlayer->IsAlive() || !IsEnemy(pPlayer))
+		return;
+	float now = gpGlobals->time;
+	float aggro = GetProfile()->GetAggression();
+	float skill = GetProfile()->GetSkill();
+	bool busy = m_state == &m_plantBombState || m_state == &m_defuseBombState || IsUsingLadder();
+
+	// in a fight with them: their reload is the moment to push
+	if (IsAttacking())
+	{
+		if (event == EVENT_WEAPON_RELOADED && GetEnemy() == pPlayer && !LsMatch() && aggro > 0.5f && RANDOM_FLOAT(0.0f, 1.0f) < aggro)
+			m_lsPushUntil = now + RANDOM_FLOAT(1.0f, 2.0f);
+		return;
+	}
+	if (busy || IsVisible(pPlayer, false))
+		return;
+	if (event != EVENT_WEAPON_RELOADED && event != EVENT_PLAYER_FOOTSTEP && event != EVENT_WEAPON_FIRED)
+		return;
+	if (dist > 900.0f)
+		return;
+
+	// where they are, as heard (less exact further away)
+	float err = dist * 0.08f;
+	Vector heard = pPlayer->pev->origin + Vector(RANDOM_FLOAT(-err, err), RANDOM_FLOAT(-err, err), 0.0f);
+
+	if (event == EVENT_WEAPON_RELOADED && aggro > 0.6f && !IsCarryingBomb() && RANDOM_FLOAT(0.0f, 1.0f) < 0.5f + 0.4f * (aggro - 0.6f))
+	{
+		Run();
+		MoveTo(&heard, FASTEST_ROUTE);
+		LsWhy("reload-push");
+		return;
+	}
+
+	// the good ones spray a thin wall they know someone's behind
+	if (dist < 650.0f && skill > 0.55f && LsTrait(33) < skill - 0.3f && now - m_lsBangHeardAt > 6.0f && RANDOM_FLOAT(0.0f, 1.0f) < 0.35f)
+	{
+		m_lsBangHeardAt = now;
+		if (LsBangThrough(heard + Vector(0, 0, 10.0f)))
+			return;
+	}
+
+	// pre-aim where they'd come out
+	if (event == EVENT_PLAYER_FOOTSTEP && dist < 700.0f && now - m_lsPreAimAt > 1.5f && RANDOM_FLOAT(0.0f, 1.0f) < 0.4f + 0.5f * skill)
+	{
+		m_lsPreAimAt = now;
+		Vector eye = pev->origin + pev->view_ofs;
+		Vector from = heard + Vector(0, 0, HalfHumanHeight);
+		Vector step = eye - from;
+		float len = float(step.Length());
+		if (len < 1.0f)
+			return;
+		step = step * (48.0f / len);
+		Vector at = from;
+		for (int i = 0; i < 16 && (at - eye).IsLengthGreaterThan(64.0f); i++)
+		{
+			TraceResult tr;
+			UTIL_TraceLine(eye, at, ignore_monsters, ENT(pev), &tr);
+			if (tr.flFraction >= 1.0f)
+			{
+				SetLookAt("Loner-Strike: pre-aim", &at, PRIORITY_MEDIUM, RANDOM_FLOAT(1.5f, 3.0f));
+				return;
+			}
+			at = at + step;
+		}
+	}
+}
+
+// About to defuse: most people look round the site first (corners, the way the Ts would
+// come), less so with time running out or teammates around covering, and newer players
+// often not at all. The defuse starts once the look is done (LsObjectiveThreat holds it)
+void CCSBot::LsCheckBeforeDefuse()
+{
+	if (!LsFight() || !TheCSBots()->IsBombPlanted())
+		return;
+	float takes = m_bHasDefuser ? 5.0f : 10.0f;
+	if (TheCSBots()->GetBombTimeLeft() < takes + 6.0f)
+		return;
+	int cover = 0;
+	LsForTeammates(this, [&](CBasePlayer *pPlayer) {
+		if ((pPlayer->pev->origin - pev->origin).IsLengthLessThan(600.0f))
+			cover++;
+	});
+	float chance = (0.3f + 0.6f * GetProfile()->GetSkill()) * (cover ? 0.4f : 1.0f);
+	if (RANDOM_FLOAT(0.0f, 1.0f) > chance)
+		return;
+	float yaw = pev->v_angle.y + RANDOM_FLOAT(120.0f, 240.0f);
+	Vector look = pev->origin + Vector(BotCOS(yaw) * 400.0f, BotSIN(yaw) * 400.0f, HalfHumanHeight);
+	float secs = RANDOM_FLOAT(0.8f, 1.8f);
+	StandUp();
+	SetLookAt("Loner-Strike: checking", &look, PRIORITY_HIGH, secs);
+	m_lsCheckUntil = gpGlobals->time + secs;
+	m_lsObjUseAt = m_lsCheckUntil;
 }

@@ -1037,10 +1037,15 @@ public:
 	bool LsPuppetActive() const;
 	bool LsBusy() const;							// doing something that mustn't be interrupted
 	bool LsLoner() const;
+	bool LsBangTick();								// spraying through a wall, while it's on
+	bool LsBangGun(CBasePlayerWeapon *pWeapon) const;	// a gun that goes through doors and thin walls
+	bool LsBangThrough(const Vector &target);		// starts spraying a spot behind one thin thing
+	void LsHeard(GameEventType event, CBasePlayer *pPlayer, float dist);	// an enemy heard, not seen
 	bool LsWallbang(float notSeenEnemyTime);		// spraying a thin wall the enemy just went behind (true while it does)
 	bool LsRadioOk(GameEventType event);			// whether this radio message is sent (bot_ls_fight)
 	void LsShotAt(CBasePlayer *pShooter, const Vector &impact);	// enemy bullets landing or passing close
 	float LsObjUseAt() const { return m_lsObjUseAt; }	// planting/defusing started again then (after a threat)
+	void LsCheckBeforeDefuse();						// a look round the site before defusing
 	bool LsObjectiveThreat(bool defusing);			// planting/defusing: a threat around it (true: stop for now)
 	void LsWhy(const char *why) { m_lsWhy = why; m_lsWhyAt = gpGlobals->time; }
 	void LsTrace();										// bot_ls_trace: what it's doing, to lstrace.csv
@@ -1107,6 +1112,8 @@ private:
 	int m_lsCounterDir = 0;							// 1 left, -1 right
 	float m_lsNextSneakCheck = 0.0f;
 	bool m_lsSneaking = false;
+	float m_lsBangHeardAt = -10.0f;					// last sprayed a wall at someone heard behind it
+	float m_lsPreAimAt = -10.0f;					// last pre-aimed at footsteps
 	float m_lsBangUntil = 0.0f;						// spraying through a wall at where the enemy went until then
 	float m_lsBangRolledAt = -1.0f;					// the lost sight it decided about
 	Vector m_lsBangAt;

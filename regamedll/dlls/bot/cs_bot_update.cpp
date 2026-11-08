@@ -211,6 +211,10 @@ void CCSBot::Update()
 
 	LsTrace();	// Loner-Strike (testing)
 
+	// Loner-Strike: spraying a wall at someone heard behind it (in a fight, the attack does it)
+	if (!IsAttacking())
+		LsBangTick();
+
 	// update our radio chatter
 	// need to allow bots to finish their chatter even if they are dead
 	GetChatter()->Update();

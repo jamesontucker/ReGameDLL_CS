@@ -34,6 +34,8 @@ void DefuseBombState::OnEnter(CCSBot *me)
 	me->Crouch();
 	me->SetDisposition(CCSBot::SELF_DEFENSE);
 	me->GetChatter()->Say("DefusingBomb");
+	// (Loner-Strike: a quick look round the site first, as people check the corners)
+	me->LsCheckBeforeDefuse();
 }
 
 // Defuse the bomb

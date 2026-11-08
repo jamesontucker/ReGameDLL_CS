@@ -373,6 +373,7 @@ void CCSBot::OnEvent(GameEventType event, CBaseEntity *pEntity, CBaseEntity *pOt
 	if (newNoiseDist < range)
 	{
 		// we heard the sound
+		LsHeard(event, pPlayer, newNoiseDist);	// Loner-Strike
 		if ((IsLocalPlayerWatchingMe() && cv_bot_debug.value == 3.0f) || cv_bot_debug.value == 4.0f)
 		{
 			PrintIfWatched("Heard noise (%s from %s, pri %s, time %3.1f)\n",
