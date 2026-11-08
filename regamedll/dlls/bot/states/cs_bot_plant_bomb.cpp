@@ -73,7 +73,7 @@ void PlantBombState::OnUpdate(CCSBot *me)
 
 	// if we time out, it's because we slipped into a non-plantable area
 	const float timeout = 5.0f;
-	if (gpGlobals->time - Q_max(me->GetStateTimestamp(), me->m_lsObjUseAt) > timeout)
+	if (gpGlobals->time - Q_max(me->GetStateTimestamp(), me->LsObjUseAt()) > timeout)
 		me->Idle();
 }
 

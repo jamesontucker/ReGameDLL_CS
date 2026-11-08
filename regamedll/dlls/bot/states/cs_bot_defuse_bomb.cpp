@@ -59,7 +59,7 @@ void DefuseBombState::OnUpdate(CCSBot *me)
 	// defuse...
 	me->UseEnvironment();
 
-	if (gpGlobals->time - Q_max(me->GetStateTimestamp(), me->m_lsObjUseAt) > 1.0f)
+	if (gpGlobals->time - Q_max(me->GetStateTimestamp(), me->LsObjUseAt()) > 1.0f)
 	{
 		// if we missed starting the defuse, give up
 		if (!TheCSBots()->GetBombDefuser())

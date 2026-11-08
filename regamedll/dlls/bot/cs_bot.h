@@ -1040,6 +1040,7 @@ public:
 	bool LsWallbang(float notSeenEnemyTime);		// spraying a thin wall the enemy just went behind (true while it does)
 	bool LsRadioOk(GameEventType event);			// whether this radio message is sent (bot_ls_fight)
 	void LsShotAt(CBasePlayer *pShooter, const Vector &impact);	// enemy bullets landing or passing close
+	float LsObjUseAt() const { return m_lsObjUseAt; }	// planting/defusing started again then (after a threat)
 	bool LsObjectiveThreat(bool defusing);			// planting/defusing: a threat around it (true: stop for now)
 	void LsWhy(const char *why) { m_lsWhy = why; m_lsWhyAt = gpGlobals->time; }
 	void LsTrace();										// bot_ls_trace: what it's doing, to lstrace.csv
