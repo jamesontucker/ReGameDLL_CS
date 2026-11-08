@@ -83,7 +83,7 @@ void HuntState::OnUpdate(CCSBot *me)
 
 			// if bomb has been planted, and we hear it, move to a hiding spot near the bomb and watch it
 			const Vector *bombPos = me->GetGameState()->GetBombPosition();
-			if (!me->IsRogue() && me->GetGameState()->IsBombPlanted() && bombPos)
+			if (!me->LsShirksObjective() && me->GetGameState()->IsBombPlanted() && bombPos)
 			{
 				me->SetTask(CCSBot::GUARD_TICKING_BOMB);
 				me->Hide(TheNavAreaGrid.GetNavArea(bombPos));
@@ -93,7 +93,7 @@ void HuntState::OnUpdate(CCSBot *me)
 		// CT
 		else
 		{
-			if (!me->IsRogue() && me->CanSeeLooseBomb())
+			if (!me->LsShirksObjective() && me->CanSeeLooseBomb())
 			{
 				CNavArea *looseBombArea = TheCSBots()->GetLooseBombArea();
 
@@ -109,7 +109,7 @@ void HuntState::OnUpdate(CCSBot *me)
 			else if (TheCSBots()->IsBombPlanted())
 			{
 				// rogues will defuse a bomb, but not guard the defuser
-				if (!me->IsRogue() || !TheCSBots()->GetBombDefuser())
+				if (!me->LsShirksObjective() || !TheCSBots()->GetBombDefuser())
 				{
 					// search for the planted bomb to defuse
 					me->Idle();
@@ -136,7 +136,7 @@ void HuntState::OnUpdate(CCSBot *me)
 			}
 
 			// if safe time is up, and we stumble across a hostage, guard it
-			if (!me->IsRogue() && !me->IsSafe())
+			if (!me->LsShirksObjective() && !me->IsSafe())
 			{
 				CHostage *pHostage = me->GetGameState()->GetNearestVisibleFreeHostage();
 				if (pHostage)

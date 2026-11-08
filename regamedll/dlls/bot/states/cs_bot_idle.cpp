@@ -220,7 +220,7 @@ void IdleState::OnUpdate(CCSBot *me)
 				}
 
 				// if bomb has been planted, and we hear it, move to a hiding spot near the bomb and guard it
-				if (!me->IsRogue() && me->GetGameState()->IsBombPlanted() && me->GetGameState()->GetBombPosition())
+				if (!me->LsShirksObjective() && me->GetGameState()->IsBombPlanted() && me->GetGameState()->GetBombPosition())
 				{
 					const Vector *bombPos = me->GetGameState()->GetBombPosition();
 
@@ -245,7 +245,7 @@ void IdleState::OnUpdate(CCSBot *me)
 					// if someone is defusing the bomb, guard them
 					if (TheCSBots()->GetBombDefuser())
 					{
-						if (!me->IsRogue())
+						if (!me->LsShirksObjective())
 						{
 							me->SetTask(CCSBot::GUARD_BOMB_DEFUSER);
 							me->Hide(TheNavAreaGrid.GetNavArea(bombPos));
@@ -393,7 +393,7 @@ void IdleState::OnUpdate(CCSBot *me)
 			// rogues just hunt, unless they want to snipe
 			// if the whole team has decided to rush, hunt
 			// if we know the bomb is dropped, hunt for enemies and the loose bomb
-			if (me->IsRogue() || TheCSBots()->IsDefenseRushing() || me->GetGameState()->IsLooseBombLocationKnown())
+			if (me->LsShirksObjective() || TheCSBots()->IsDefenseRushing() || me->GetGameState()->IsLooseBombLocationKnown())
 			{
 				me->Hunt();
 				return;
@@ -457,7 +457,7 @@ void IdleState::OnUpdate(CCSBot *me)
 
 			// rogues just hunt, unless they want to snipe
 			// if the whole team has decided to rush, hunt
-			if (me->IsRogue() || TheCSBots()->IsDefenseRushing())
+			if (me->LsShirksObjective() || TheCSBots()->IsDefenseRushing())
 				break;
 
 			// the lower our morale gets, the more we want to camp the escape zone(s)
@@ -589,7 +589,7 @@ void IdleState::OnUpdate(CCSBot *me)
 			}
 
 			// if safe time is up, and we stumble across a hostage, guard it
-			if (!me->IsSafe() && !me->IsRogue())
+			if (!me->IsSafe() && !me->LsShirksObjective())
 			{
 				CBaseEntity *pHostage = me->GetGameState()->GetNearestVisibleFreeHostage();
 				if (pHostage)
@@ -614,7 +614,7 @@ void IdleState::OnUpdate(CCSBot *me)
 			// if the whole team has decided to rush, hunt
 			if (me->GetFriendsRemaining())
 			{
-				if (me->IsRogue() || TheCSBots()->IsDefenseRushing() || RANDOM_FLOAT(0, 100) < huntChance)
+				if (me->LsShirksObjective() || TheCSBots()->IsDefenseRushing() || RANDOM_FLOAT(0, 100) < huntChance)
 				{
 					me->Hunt();
 					return;
@@ -674,7 +674,7 @@ void IdleState::OnUpdate(CCSBot *me)
 					// rogues just hunt, unless all friends are dead
 					// if we have friends left, we might go hunting instead of hostage rescuing
 					const float huntChance = 33.3f;
-					if (me->IsRogue() || RANDOM_FLOAT(0.0f, 100.0f) < huntChance)
+					if (me->LsShirksObjective() || RANDOM_FLOAT(0.0f, 100.0f) < huntChance)
 					{
 						me->Hunt();
 						return;
@@ -832,7 +832,7 @@ void IdleState::OnUpdate(CCSBot *me)
 
 			// rogues just hunt, unless they want to snipe
 			// if the whole team has decided to rush, hunt
-			if (me->IsRogue() || TheCSBots()->IsDefenseRushing())
+			if (me->LsShirksObjective() || TheCSBots()->IsDefenseRushing())
 				break;
 
 			// the lower our morale gets, the more we want to camp the escape zone(s)

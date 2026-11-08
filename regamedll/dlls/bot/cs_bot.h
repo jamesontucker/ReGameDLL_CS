@@ -1036,7 +1036,8 @@ public:
 	void LsPuppetRelease();
 	bool LsPuppetActive() const;
 	bool LsBusy() const;							// doing something that mustn't be interrupted
-	bool LsLoner() const;							// goes its own way (see bot_ls_solo)
+	bool LsLoner() const;
+	bool LsShirksObjective();						// a rogue who leaves the objective to others							// goes its own way (see bot_ls_solo)
 	CNavArea *LsPickHuntArea();					// every bot for itself: where to hunt
 	bool LsTeammateCloser(const Vector &pos);
 	bool LsShouldSpread();

@@ -811,3 +811,15 @@ void CCSBot::LsFightHabits(float range, bool crouchAndHold)
 			Jump(MUST_JUMP);
 	}
 }
+
+// A rogue who leaves the objective to others. On objective maps, going your own way
+// (bot_ls_solo) doesn't mean ignoring the bomb: most still guard a planted bomb, cover a
+// teammate defusing, hold the site they're at and answer a hostage; a few never do
+bool CCSBot::LsShirksObjective()
+{
+	if (!IsRogue())
+		return false;
+	if (cv_bot_ls_solo.value <= 0.0f || LsSolo())
+		return true;
+	return LsTrait(19) >= 0.7f;
+}

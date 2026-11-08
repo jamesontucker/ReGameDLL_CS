@@ -306,7 +306,7 @@ void CCSBot::OnEvent(GameEventType event, CBaseEntity *pEntity, CBaseEntity *pOt
 	if (!pPlayer)
 		return;
 
-	if (!IsRogue() && event == EVENT_HOSTAGE_CALLED_FOR_HELP && m_iTeam == CT && IsHunting())
+	if (!LsShirksObjective() && event == EVENT_HOSTAGE_CALLED_FOR_HELP && m_iTeam == CT && IsHunting())
 	{
 		if ((pEntity->pev->origin - pev->origin).IsLengthGreaterThan(1000.0f))
 			return;
