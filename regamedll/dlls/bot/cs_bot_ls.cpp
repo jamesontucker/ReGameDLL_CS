@@ -59,7 +59,7 @@ static float LsUnit(unsigned int h)
 // habits; worked out again when the name changes
 unsigned int CCSBot::LsSeed()
 {
-	if (pev->netname != m_lsSeedName)
+	if (!(pev->netname == m_lsSeedName))
 	{
 		m_lsSeedName = pev->netname;
 		unsigned int h = 2166136261U;
