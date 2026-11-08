@@ -78,40 +78,65 @@ float CCSBot::LsTrait(unsigned int which)
 
 // ---- own memory of danger ---------------------------------------------------------------
 
-// Areas are kept by id, never by pointer, and forgotten on a new map
+// Areas are kept by id, never by pointer, and forgotten on a new map. A fixed table, not
+// a container: the game frees a bot without running its destructor
 void CCSBot::LsCheckMap()
 {
 	if (Q_strcmp(m_lsMap, STRING(gpGlobals->mapname)) != 0)
 	{
 		Q_strlcpy(m_lsMap, STRING(gpGlobals->mapname));
-		m_lsDanger.clear();
+		for (auto &d : m_lsDanger)
+			d.amount = 0.0f;
 	}
+}
+
+// What's left of a remembered danger now (forgotten in two minutes per kill, like the team's)
+static float LsDangerNow(const CCSBot::LsDanger &d)
+{
+	const float decayRate = 1.0f / 120.0f;
+	return (d.amount > 0.0f) ? Q_max(0.0f, d.amount - decayRate * (gpGlobals->time - d.time)) : 0.0f;
 }
 
 float CCSBot::LsGetDanger(const CNavArea *area)
 {
 	LsCheckMap();
-	auto it = m_lsDanger.find(area->GetID());
-	if (it == m_lsDanger.end())
-		return 0.0f;
-
-	// forgotten in two minutes per kill, like the team's
-	const float decayRate = 1.0f / 120.0f;
-	float danger = it->second.amount - decayRate * (gpGlobals->time - it->second.time);
-	if (danger <= 0.0f)
+	for (const auto &d : m_lsDanger)
 	{
-		m_lsDanger.erase(it);
-		return 0.0f;
+		if (d.amount > 0.0f && d.id == area->GetID())
+			return LsDangerNow(d);
 	}
-	return danger;
+	return 0.0f;
 }
 
 void CCSBot::LsAddDangerToArea(const CNavArea *area, float amount)
 {
-	float now = LsGetDanger(area);
-	LsDanger &d = m_lsDanger[area->GetID()];
-	d.amount = now + amount;
-	d.time = gpGlobals->time;
+	LsCheckMap();
+	// its slot, else a free (or forgotten) one, else the faintest memory
+	LsDanger *slot = nullptr, *faintest = nullptr;
+	float faint = 1e9f;
+	for (auto &d : m_lsDanger)
+	{
+		float now = LsDangerNow(d);
+		if (now > 0.0f && d.id == area->GetID())
+		{
+			slot = &d;
+			break;
+		}
+		if (now < faint)
+		{
+			faint = now;
+			faintest = &d;
+		}
+	}
+	if (!slot)
+	{
+		slot = faintest;
+		slot->id = area->GetID();
+		slot->amount = 0.0f;
+		slot->time = gpGlobals->time;
+	}
+	slot->amount = LsDangerNow(*slot) + amount;
+	slot->time = gpGlobals->time;
 }
 
 // As IncreaseDangerNearby, into this bot's own memory
@@ -226,21 +251,24 @@ void CCSBot::LsShiftPortalPoint(const CNavArea *from, const CNavArea *to, NavDir
 	float halfWidth;
 	from->ComputePortal(to, dir, &center, &halfWidth);
 
-	const float margin = 20.0f;
+	const float margin = 24.0f;
 	float room = halfWidth - margin;
 	if (room <= 4.0f)
 		return;
 
-	// -1 hugs one side, 1 the other; mostly the bot's own habit, a little different each path
+	// 1 keeps to its left, -1 to its right (of the way it's going); mostly the bot's own
+	// habit, a little different each path
 	float habit = 2.0f * LsTrait(1) - 1.0f;
 	float jitter = RANDOM_FLOAT(-0.35f, 0.35f);
 	float side = Q_max(-1.0f, Q_min(1.0f, habit + jitter));
 
+	// its left going north (-y) is +x, south -x, east +y, west -y
 	bool alongX = (dir == NORTH || dir == SOUTH);
-	float want = (alongX ? center.x : center.y) + side * room;
+	float leftward = (dir == NORTH || dir == EAST) ? 1.0f : -1.0f;
+	float want = (alongX ? center.x : center.y) + side * leftward * room;
 	float &at = alongX ? pos->x : pos->y;
 
-	float blend = Q_min(1.0f, 0.6f * strength);
+	float blend = Q_min(1.0f, 0.45f * strength);
 	float moved = at + (want - at) * blend;
 
 	// stay inside the opening
@@ -261,7 +289,7 @@ bool CCSBot::LsUpdatePause()
 	if (gpGlobals->time < m_lsPauseUntil)
 	{
 		// anything happening ends it
-		if (IsAttacking() || GetTimeSinceLastSawEnemy() < 3.0f || IsHurrying() || IsOnLadder())
+		if (IsAttacking() || GetTimeSinceLastSawEnemy() < 3.0f || IsHurrying() || IsOnLadder() || GetTimeSinceAttacked() < 3.0f || IsSurprised())
 		{
 			m_lsPauseUntil = 0.0f;
 			return false;
@@ -276,8 +304,7 @@ bool CCSBot::LsUpdatePause()
 	m_lsNextPauseCheck = gpGlobals->time + RANDOM_FLOAT(0.8f, 1.2f);
 
 	// only when nothing is going on
-	if (IsAttacking() || GetTimeSinceLastSawEnemy() < 8.0f || IsHurrying() || IsOnLadder()
-		|| IsCarryingBomb() || IsDefusingBomb() || IsEscapingFromBomb() || GetHostageEscortCount() > 0)
+	if (IsAttacking() || GetTimeSinceLastSawEnemy() < 8.0f || IsOnLadder() || IsCarryingBomb() || LsBusy())
 		return false;
 
 	// the bomb is down: no time for that
@@ -310,6 +337,16 @@ bool CCSBot::LsUpdatePause()
 //   follow <player index> <secs>     tag along with someone
 //   release                          stop all of it
 
+// Doing something that mustn't be interrupted: the bomb, a grenade being lined up, hostages,
+// a hurry, or just shot at or surprised. (Carrying the bomb only counts once the round is
+// on: a salute in freeze time is fine.)
+bool CCSBot::LsBusy() const
+{
+	return IsDefusingBomb() || IsEscapingFromBomb() || TheCSBots()->IsBombPlanted() || m_isWaitingToTossGrenade
+		|| GetHostageEscortCount() > 0 || IsHurrying() || GetTimeSinceAttacked() < 3.0f || IsSurprised()
+		|| (IsCarryingBomb() && !(CSGameRules() && CSGameRules()->IsFreezePeriod()));
+}
+
 void CCSBot::LsPuppetRelease()
 {
 	if (m_lsPuppet.crouchUntil > 0.0f)
@@ -325,7 +362,7 @@ bool CCSBot::LsPuppetActive() const
 {
 	float now = gpGlobals->time;
 	const LsPuppet &p = m_lsPuppet;
-	return now < p.holdUntil || now < p.crouchUntil || now < p.lookUntil || p.jumpsLeft > 0 || now < p.walkUntil || now < p.followUntil;
+	return now < p.holdUntil || now < p.crouchUntil || now < p.lookUntil || (p.jumpsLeft > 0 && now < p.jumpUntil) || now < p.walkUntil || now < p.followUntil;
 }
 
 // After the state machine each frame
@@ -335,8 +372,8 @@ void CCSBot::LsPuppetUpdate()
 	if (!p.any)
 		return;
 
-	// a fight comes first
-	if (IsAttacking() || m_isEnemyVisible || !LsPuppetActive())
+	// a fight, or anything that matters, comes first
+	if (IsAttacking() || m_isEnemyVisible || LsBusy() || !LsPuppetActive())
 	{
 		LsPuppetRelease();
 		return;
@@ -420,8 +457,8 @@ void Bot_LsServerCommand()
 	const char *what = CMD_ARGV(2);
 	float now = gpGlobals->time;
 
-	// not while it's in a fight
-	if (!FStrEq(what, "release") && (me->IsAttacking() || me->IsEnemyVisible()))
+	// not while it's in a fight or busy with something that matters
+	if (!FStrEq(what, "release") && (me->IsAttacking() || me->IsEnemyVisible() || me->LsBusy()))
 		return;
 
 	me->LsPuppetCommand(what, now);
@@ -453,6 +490,8 @@ void CCSBot::LsPuppetCommand(const char *what, float now)
 		p.jumpsLeft = (int)Q_min(LsArg(3, 1.0f), 20.0f);
 		p.jumpEvery = Q_max(0.1f, LsArg(4, 0.6f));
 		p.nextJump = now;
+		// jumps that can't happen (crouched, in a crawl space) are given up, not saved for later
+		p.jumpUntil = now + p.jumpsLeft * p.jumpEvery + 1.5f;
 	}
 	else if (FStrEq(what, "look") || FStrEq(what, "nod"))
 	{
@@ -471,7 +510,7 @@ void CCSBot::LsPuppetCommand(const char *what, float now)
 	else if (FStrEq(what, "follow"))
 	{
 		CBasePlayer *pLeader = UTIL_PlayerByIndex(Q_atoi(CMD_ARGV(3)));
-		if (!pLeader || !pLeader->IsAlive() || pLeader == this)
+		if (!pLeader || !pLeader->IsAlive() || pLeader == this || BotRelationship(pLeader) != BOT_TEAMMATE)
 			return;
 		Follow(pLeader);
 		p.followUntil = now + Q_min(LsArg(4, 20.0f), 60.0f);
