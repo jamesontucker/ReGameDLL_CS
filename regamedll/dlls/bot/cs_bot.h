@@ -1022,6 +1022,12 @@ private:
 #endif
 
 public:
+	// Loner-Strike team (cs_bot_ls_team.cpp)
+	// (end team)
+	// Loner-Strike nades (cs_bot_ls_nades.cpp)
+	// (end nades)
+	// Loner-Strike moves (cs_bot_ls_moves.cpp)
+	// (end moves)
 	// Loner-Strike (cs_bot_ls.cpp): each bot keeps to itself and moves like a person
 	unsigned int LsSeed();
 	float LsTrait(unsigned int which);
@@ -1112,6 +1118,12 @@ private:
 	int m_lsCounterDir = 0;							// 1 left, -1 right
 	float m_lsNextSneakCheck = 0.0f;
 	bool m_lsSneaking = false;
+	// Loner-Strike team (cs_bot_ls_team.cpp): members
+	// (end team members)
+	// Loner-Strike nades (cs_bot_ls_nades.cpp): members
+	// (end nades members)
+	// Loner-Strike moves (cs_bot_ls_moves.cpp): members
+	// (end moves members)
 	float m_lsBangHeardAt = -10.0f;					// last sprayed a wall at someone heard behind it
 	float m_lsPreAimAt = -10.0f;					// last pre-aimed at footsteps
 	float m_lsBangUntil = 0.0f;						// spraying through a wall at where the enemy went until then

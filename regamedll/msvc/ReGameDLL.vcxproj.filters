@@ -366,6 +366,15 @@
     <ClCompile Include="..\dlls\bot\cs_bot_ls.cpp">
       <Filter>dlls\bot</Filter>
     </ClCompile>
+    <ClCompile Include="..\dlls\bot\cs_bot_ls_team.cpp">
+      <Filter>dlls\bot</Filter>
+    </ClCompile>
+    <ClCompile Include="..\dlls\bot\cs_bot_ls_nades.cpp">
+      <Filter>dlls\bot</Filter>
+    </ClCompile>
+    <ClCompile Include="..\dlls\bot\cs_bot_ls_moves.cpp">
+      <Filter>dlls\bot</Filter>
+    </ClCompile>
     <ClCompile Include="..\dlls\bot\cs_bot_radio.cpp">
       <Filter>dlls\bot</Filter>
     </ClCompile>

@@ -2,7 +2,7 @@ name: C/C++ CI
 
 on:
   push:
-    branches: [master, loner-strike]
+    branches: [master, loner-strike, "ls-*"]
     paths-ignore:
       - '**.md'
       - '.github/**'
