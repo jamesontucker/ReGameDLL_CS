@@ -622,7 +622,7 @@ CNavArea *CCSBot::LsPickHuntArea()
 
 			float nearest = 3000.0f;
 			for (int k = 0; k < n; k++)
-				nearest = Q_min(nearest, (*c - avoid[k]).Length2D());
+				nearest = Q_min(nearest, float((*c - avoid[k]).Length2D()));
 			score += nearest;
 
 			if (score > bestScore)
