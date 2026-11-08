@@ -85,6 +85,19 @@ void CCSBot::UpdateLookAngles()
 	float useYaw = m_lookYaw;
 	float usePitch = m_lookPitch;
 
+	// Loner-Strike: walking about with nobody to fight, the view stays within a strafe of
+	// where it's going (people don't walk backwards looking at something behind them)
+	if (LsFight() && !IsAttacking() && !IsUsingLadder() && pev->velocity.Length2D() > 80.0f)
+	{
+		float moveYaw = UTIL_VecToYaw(pev->velocity);
+		float off = NormalizeAngle(useYaw - moveYaw);
+		const float most = 100.0f;
+		if (off > most)
+			useYaw = moveYaw + most;
+		else if (off < -most)
+			useYaw = moveYaw - most;
+	}
+
 	// Ladders require precise movement, therefore we need to look at the
 	// ladder as we approach and ascend/descend it.
 	// If we are on a ladder, we need to look up or down to traverse it - override pitch in this case.

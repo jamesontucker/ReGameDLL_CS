@@ -786,8 +786,8 @@ bool CCSBot::LsHoldFireToStop(float range)
 float CCSBot::LsCrouchFactor()
 {
 	// (newer players crouch in every fight, better ones only now and then)
-	float t = LsTrait(15) + 0.4f * (0.5f - GetProfile()->GetSkill());
-	return t < 0.35f ? 0.3f : t < 0.85f ? 1.0f : 2.0f;
+	float t = LsTrait(15) + 0.3f * (0.5f - GetProfile()->GetSkill());
+	return t < 0.5f ? 0.3f : t < 0.9f ? 1.0f : 2.0f;
 }
 
 // Patience before a fight counts as "pinned down": its own, and more while it's winning
@@ -822,7 +822,7 @@ void CCSBot::LsFightHabits(float range, bool crouchAndHold)
 	if (IsEnemyVisible())
 	{
 		// crouch while shooting: close and mid range, the bots with the habit
-		if (!crouchAndHold && range < 900.0f && LsCrouchFactor() >= 1.0f && RANDOM_FLOAT(0.0f, 1.0f) < 0.45f && (pev->flags & FL_ONGROUND))
+		if (!crouchAndHold && range < 900.0f && LsCrouchFactor() >= 1.0f && RANDOM_FLOAT(0.0f, 1.0f) < 0.3f && (pev->flags & FL_ONGROUND))
 		{
 			m_lsCrouchBurstUntil = now + RANDOM_FLOAT(0.4f, 1.2f);
 			Crouch();

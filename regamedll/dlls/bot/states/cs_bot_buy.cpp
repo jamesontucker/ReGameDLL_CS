@@ -245,7 +245,7 @@ void BuyState::OnUpdate(CCSBot *me)
 	if (m_isInitialDelay)
 	{
 		// (Loner-Strike: everyone at their own pace, not all on the same tick)
-		const float waitToBuyTime = LsFight() ? 1.0f + 4.0f * me->LsBuyPace() : 2.0f; // 0.25f;
+		const float waitToBuyTime = LsFight() ? 0.5f + 2.5f * me->LsBuyPace() : 2.0f; // 0.25f;
 		if (gpGlobals->time - me->GetStateTimestamp() < waitToBuyTime)
 			return;
 
