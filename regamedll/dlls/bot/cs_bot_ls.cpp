@@ -12,11 +12,13 @@
 *                         the right, some the middle) instead of all on the same one
 *   bot_ls_pauses    1.0  now and then a bot stops for a moment while walking somewhere
 *                         quiet, like someone checking the map or the chat
-*   bot_ls_solo        1  in deathmatch-type modes (bot_deathmatch 1: deathmatch, gun game)
-*                         every bot plays for itself: it heads somewhere its teammates
-*                         aren't, leaves a fight a closer teammate is already going to,
-*                         breaks off when it finds itself walking with one, and doesn't
-*                         follow anyone on the radio. Objective maps keep their teamwork
+*   bot_ls_solo        1  every bot for itself, like a real pub server: it heads somewhere
+*                         its teammates aren't, leaves a fight a closer teammate is
+*                         already going to, and breaks off when it finds itself walking
+*                         with one. In deathmatch-type modes (bot_deathmatch 1) that's
+*                         every bot, and nobody follows anyone on the radio; elsewhere
+*                         it's the bots with little teamwork in their profile (a team
+*                         style's bots, and the team-minded ones, still play together)
 *
 *   All of them at 0 is the stock behaviour.
 *
@@ -43,6 +45,15 @@ void Bot_LsRegisterCVars()
 bool LsSolo()
 {
 	return cv_bot_ls_solo.value > 0.0f && TheCSBots() && TheCSBots()->GetScenario() == CCSBotManager::SCENARIO_DEATHMATCH;
+}
+
+// This bot goes its own way: everyone in deathmatch, and on objective maps a bot with
+// little teamwork in its profile
+bool CCSBot::LsLoner() const
+{
+	if (cv_bot_ls_solo.value <= 0.0f)
+		return false;
+	return LsSolo() || (GetProfile() && GetProfile()->GetTeamwork() < 0.35f);
 }
 
 // ---- a bot's own numbers ----------------------------------------------------------------
