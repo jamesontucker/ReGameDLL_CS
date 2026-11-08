@@ -46,6 +46,7 @@ cvar_t cv_bot_ls_pauses     = { "bot_ls_pauses", "1.0", FCVAR_SERVER, 0.0f, null
 cvar_t cv_bot_ls_solo       = { "bot_ls_solo", "1", FCVAR_SERVER, 0.0f, nullptr };
 cvar_t cv_bot_ls_fight      = { "bot_ls_fight", "1", FCVAR_SERVER, 0.0f, nullptr };
 cvar_t cv_bot_ls_match      = { "bot_ls_match", "0", FCVAR_SERVER, 0.0f, nullptr };
+const char LS_PEEK[] = "Loner-Strike: peek";
 
 void Bot_LsRegisterCVars()
 {
@@ -877,7 +878,7 @@ bool CCSBot::LsCornerPeek()
 		{
 			Vector at = p;
 			at.z += HalfHumanHeight + 24.0f;	// about where a head is
-			SetLookAt("Loner-Strike: peek", &at, PRIORITY_LOW, RANDOM_FLOAT(0.6f, 1.2f), true);
+			SetLookAt(LS_PEEK, &at, PRIORITY_LOW, RANDOM_FLOAT(0.6f, 1.2f), true);
 			return true;
 		}
 	}

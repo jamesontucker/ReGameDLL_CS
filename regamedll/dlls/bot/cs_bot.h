@@ -1113,6 +1113,7 @@ extern cvar_t cv_bot_ls_pauses;
 extern cvar_t cv_bot_ls_solo;
 extern cvar_t cv_bot_ls_fight;
 extern cvar_t cv_bot_ls_match;
+extern const char LS_PEEK[];					// the look-at of a corner peek
 bool LsFight();
 bool LsMatch();
 bool LsSolo();

@@ -91,7 +91,8 @@ void CCSBot::UpdateLookAngles()
 	{
 		float moveYaw = UTIL_VecToYaw(pev->velocity);
 		float off = NormalizeAngle(useYaw - moveYaw);
-		const float most = 100.0f;
+		// (a corner peek strafes, so it may turn further; looking about while walking doesn't)
+		const float most = (m_lookAtDesc == LS_PEEK) ? 100.0f : 70.0f;
 		if (off > most)
 			useYaw = moveYaw + most;
 		else if (off < -most)
