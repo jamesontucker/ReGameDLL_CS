@@ -313,7 +313,9 @@ inline float CBot::GetMoveSpeed()
 	if (m_isRunning || m_isCrouching)
 		return pev->maxspeed;
 
-	return 0.4f * pev->maxspeed;
+	// Loner-Strike: a player walking (holding shift) moves at cl_movespeedkey 0.52 of their
+	// speed, still silent; the stock 0.4 made walking bots look slow
+	return 0.52f * pev->maxspeed;
 }
 
 inline void CBot::Run()

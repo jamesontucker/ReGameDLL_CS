@@ -53,7 +53,7 @@ void AttackState::OnEnter(CCSBot *me)
 	m_isEnemyHidden = false;
 	m_reacquireTimestamp = 0.0f;
 
-	m_pinnedDownTimestamp = gpGlobals->time + RANDOM_FLOAT(7.0f, 10.0f);
+	m_pinnedDownTimestamp = gpGlobals->time + (LsFight() ? me->LsPinnedDownTime() : RANDOM_FLOAT(7.0f, 10.0f));
 	m_shieldToggleTimestamp = gpGlobals->time + RANDOM_FLOAT(2.0f, 10.0f);
 	m_shieldForceOpen = false;
 
@@ -84,6 +84,10 @@ void AttackState::OnEnter(CCSBot *me)
 					crouchChance = 50.0f;
 				else
 					crouchChance = 20.0f * (1.0f - me->GetProfile()->GetAggression());
+
+				// Loner-Strike: crouching is a habit some have, not a coin flip for everyone
+				if (LsFight())
+					crouchChance *= me->LsCrouchFactor();
 
 				if (RANDOM_FLOAT(0.0f, 100.0f) < crouchChance)
 				{
@@ -120,7 +124,8 @@ void AttackState::OnEnter(CCSBot *me)
 	float skill = me->GetProfile()->GetSkill();
 
 	// tendency to dodge is proportional to skill
-	float dodgeChance = 80.0f * skill;
+	// (Loner-Strike: mostly; nobody stands like a post)
+	float dodgeChance = LsFight() ? me->LsDodgeChance() : 80.0f * skill;
 
 	if (me->IsUsingKnife())
 	{
@@ -189,6 +194,10 @@ void AttackState::OnUpdate(CCSBot *me)
 		// If we've been fighting this battle for awhile, we're "pinned down" and
 		// need to do something else.
 		// If we are outnumbered, retreat.
+		// (Loner-Strike: not while it's winning: the enemy is hurt worse than it is)
+		if (LsFight() && me->GetEnemy() && me->GetEnemy()->pev->health < me->pev->health && gpGlobals->time > m_pinnedDownTimestamp)
+			m_pinnedDownTimestamp = gpGlobals->time + 2.0f;
+
 		bool isPinnedDown = (gpGlobals->time > m_pinnedDownTimestamp);
 
 		if (isPinnedDown ||
@@ -481,8 +490,16 @@ void AttackState::OnUpdate(CCSBot *me)
 		return;
 	}
 
-	if (gpGlobals->time > m_reacquireTimestamp)
+	// Loner-Strike: stop, then shoot (a skilled bot with a rifle at range)
+	float lsRange = (pEnemy->pev->origin - me->pev->origin).Length2D();
+	bool lsHoldFire = LsFight() && me->LsHoldFireToStop(lsRange);
+
+	if (gpGlobals->time > m_reacquireTimestamp && !lsHoldFire)
 		me->FireWeaponAtEnemy();
+
+	// Loner-Strike: hit, it moves (whatever it decided when the fight began)
+	if (LsFight() && !m_dodge && !m_crouchAndHold && me->GetTimeSinceAttacked() < 1.0f)
+		m_dodge = true;
 
 	// do dodge behavior
 	// If sniping or crouching, stand still.
@@ -490,6 +507,13 @@ void AttackState::OnUpdate(CCSBot *me)
 	{
 		Vector toEnemy = pEnemy->pev->origin - me->pev->origin;
 		float range = toEnemy.Length2D();
+
+		// Loner-Strike: stopping to shoot ends the strafe now
+		if (lsHoldFire && m_dodgeState != STEADY_ON)
+		{
+			m_dodgeState = STEADY_ON;
+			m_nextDodgeStateTimestamp = gpGlobals->time + me->LsDodgeDuration(true);
+		}
 
 		const float hysterisRange = 125.0f;		// (+/-) m_combatRange
 
@@ -501,7 +525,7 @@ void AttackState::OnUpdate(CCSBot *me)
 		{
 			if (range > maxRange)
 				me->MoveForward();
-			else if (range < minRange)
+			else if (range < minRange && (!LsFight() || me->LsMayBackOff(toEnemy)))
 				me->MoveBackward();
 		}
 
@@ -528,8 +552,12 @@ void AttackState::OnUpdate(CCSBot *me)
 			}
 			while (!m_firstDodge && next == m_dodgeState);
 
+			// Loner-Strike: its own rhythm, and its own taste for stopping between strafes
+			if (LsFight() && next != JUMP && m_dodgeState != STEADY_ON && me->LsPickSteady())
+				next = STEADY_ON;
+
 			m_dodgeState = (DodgeStateType)next;
-			m_nextDodgeStateTimestamp = gpGlobals->time + RANDOM_FLOAT(0.3f, 1.0f);
+			m_nextDodgeStateTimestamp = gpGlobals->time + (LsFight() ? me->LsDodgeDuration(next == STEADY_ON) : RANDOM_FLOAT(0.3f, 1.0f));
 			m_firstDodge = false;
 		}
 

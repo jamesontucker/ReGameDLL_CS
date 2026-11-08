@@ -20,6 +20,13 @@
 *                         it's the bots with little teamwork in their profile (a team
 *                         style's bots, and the team-minded ones, still play together)
 *
+*   bot_ls_fight       1  fights like people: never frozen while reloading in sight of an
+*                         enemy, always moving when hit, backing off only with room
+*                         behind and only some bots, each with its own strafe rhythm, a
+*                         stop before a long-range shot with a rifle (newer players still
+*                         run and gun), crouching only for the bots that crouch, and
+*                         staying in a fight it's winning
+*
 *   All of them at 0 is the stock behaviour.
 *
 */
@@ -31,6 +38,7 @@ cvar_t cv_bot_ls_routes     = { "bot_ls_routes", "1.0", FCVAR_SERVER, 0.0f, null
 cvar_t cv_bot_ls_lines      = { "bot_ls_lines", "1.0", FCVAR_SERVER, 0.0f, nullptr };
 cvar_t cv_bot_ls_pauses     = { "bot_ls_pauses", "1.0", FCVAR_SERVER, 0.0f, nullptr };
 cvar_t cv_bot_ls_solo       = { "bot_ls_solo", "1", FCVAR_SERVER, 0.0f, nullptr };
+cvar_t cv_bot_ls_fight      = { "bot_ls_fight", "1", FCVAR_SERVER, 0.0f, nullptr };
 
 void Bot_LsRegisterCVars()
 {
@@ -39,6 +47,12 @@ void Bot_LsRegisterCVars()
 	CVAR_REGISTER(&cv_bot_ls_lines);
 	CVAR_REGISTER(&cv_bot_ls_pauses);
 	CVAR_REGISTER(&cv_bot_ls_solo);
+	CVAR_REGISTER(&cv_bot_ls_fight);
+}
+
+bool LsFight()
+{
+	return cv_bot_ls_fight.value > 0.0f;
 }
 
 // Every bot for itself (deathmatch-type modes, bot_ls_solo)
@@ -210,11 +224,18 @@ bool LsOwnMemory()
 // A teammate died where this bot could see it
 void CCSBot::LsSawTeammateDie(CBasePlayer *pVictim)
 {
-	if (!LsOwnMemory() || !pVictim)
+	if (!pVictim)
 		return;
 
 	// see it happen, not only hear about it (a little less than dying there yourself)
 	if (!IsVisible(&pVictim->pev->origin, CHECK_FOV))
+		return;
+
+	// whatever a plugin had it doing (a look, a nod, standing still) ends
+	if (m_lsPuppet.any)
+		LsPuppetRelease();
+
+	if (!LsOwnMemory())
 		return;
 
 	CNavArea *area = TheNavAreaGrid.GetNearestNavArea(&pVictim->pev->origin);
@@ -410,7 +431,8 @@ void CCSBot::LsPuppetUpdate()
 		return;
 
 	// a fight, or anything that matters, comes first
-	if (IsAttacking() || m_isEnemyVisible || LsBusy() || !LsPuppetActive())
+	// (and nothing holds it on a ladder, in the air, or blinded)
+	if (IsAttacking() || m_isEnemyVisible || LsBusy() || !LsPuppetActive() || IsOnLadder() || !(pev->flags & FL_ONGROUND) || IsBlind())
 	{
 		LsPuppetRelease();
 		return;
@@ -666,4 +688,86 @@ bool CCSBot::LsShouldSpread()
 
 	m_lsNextSpreadCheck = gpGlobals->time + RANDOM_FLOAT(5.0f, 8.0f);
 	return true;
+}
+
+// ---- fights (bot_ls_fight) ----------------------------------------------------------------
+// Per-bot habits come from LsTrait (its name), so a bot fights the same way every time.
+
+// Chance (0-100) this bot keeps moving in a fight: skill helps, but nobody stands like a post
+float CCSBot::LsDodgeChance()
+{
+	return 35.0f + 45.0f * GetProfile()->GetSkill() + 20.0f * LsTrait(10);
+}
+
+// How long it keeps one strafe or stop: some tap, some hold a direction
+float CCSBot::LsDodgeDuration(bool steady)
+{
+	float lo = 0.15f + 0.35f * LsTrait(11);
+	float hi = lo + 0.25f + 0.75f * LsTrait(12);
+	float d = RANDOM_FLOAT(lo, hi);
+	return steady ? d * 0.6f : d;
+}
+
+// A stop between strafes: more for the ones who stop to shoot
+bool CCSBot::LsPickSteady()
+{
+	return RANDOM_FLOAT(0.0f, 1.0f) < 0.15f + 0.35f * LsTrait(13);
+}
+
+// Some bots back off when an enemy gets close; only with room behind (not into a wall or
+// off a ledge they can't see)
+bool CCSBot::LsMayBackOff(const Vector &toEnemy)
+{
+	if (LsTrait(14) > 0.35f)
+		return false;
+
+	Vector back = -toEnemy;
+	back.z = 0.0f;
+	back = back.Normalize();
+
+	TraceResult tr;
+	Vector from = pev->origin;
+	UTIL_TraceLine(from, from + back * 96.0f, ignore_monsters, ENT(pev), &tr);
+	if (tr.flFraction < 1.0f)
+		return false;
+
+	// ground behind (a drop would be a fall)
+	Vector behind = from + back * 96.0f;
+	UTIL_TraceLine(behind, behind - Vector(0, 0, 80.0f), ignore_monsters, ENT(pev), &tr);
+	return tr.flFraction < 1.0f;
+}
+
+// Holds fire while moving fast with a rifle at range, to stop and then shoot: what good
+// players do. Newer ones (skill under a half) run and gun like pub players did
+bool CCSBot::LsHoldFireToStop(float range)
+{
+	if (GetProfile()->GetSkill() < 0.5f || range < 500.0f)
+		return false;
+
+	CBasePlayerWeapon *pWeapon = GetActiveWeapon();
+	if (!pWeapon)
+		return false;
+
+	switch (pWeapon->m_iId)
+	{
+	case WEAPON_AK47: case WEAPON_M4A1: case WEAPON_GALIL: case WEAPON_FAMAS:
+	case WEAPON_SG552: case WEAPON_AUG: case WEAPON_DEAGLE: case WEAPON_SCOUT:
+		break;
+	default:
+		return false;
+	}
+	return pev->velocity.Length2D() > 110.0f;
+}
+
+// How likely this bot crouches to hold in a fight (most never do, a few always try)
+float CCSBot::LsCrouchFactor()
+{
+	float t = LsTrait(15);
+	return t < 0.6f ? 0.3f : t < 0.9f ? 1.0f : 2.0f;
+}
+
+// Patience before a fight counts as "pinned down": its own, and more while it's winning
+float CCSBot::LsPinnedDownTime()
+{
+	return 5.0f + 9.0f * LsTrait(16);
 }

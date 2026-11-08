@@ -790,7 +790,8 @@ void CCSBot::Update()
 	}
 
 	// don't move while reloading unless we see an enemy
-	if (IsReloading() && !m_isEnemyVisible)
+	// (Loner-Strike: or someone's shooting at it)
+	if (IsReloading() && !m_isEnemyVisible && !(LsFight() && GetTimeSinceAttacked() < 3.0f))
 	{
 		ResetStuckMonitor();
 		ClearMovement();

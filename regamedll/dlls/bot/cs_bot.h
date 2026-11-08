@@ -1040,6 +1040,13 @@ public:
 	CNavArea *LsPickHuntArea();					// every bot for itself: where to hunt
 	bool LsTeammateCloser(const Vector &pos);
 	bool LsShouldSpread();
+	float LsDodgeChance();							// fights like people (bot_ls_fight)
+	float LsDodgeDuration(bool steady);
+	bool LsPickSteady();
+	bool LsMayBackOff(const Vector &toEnemy);
+	bool LsHoldFireToStop(float range);
+	float LsCrouchFactor();
+	float LsPinnedDownTime();
 	struct LsDanger { unsigned int id = 0; float amount = 0.0f; float time = 0.0f; };
 
 private:
@@ -1077,6 +1084,8 @@ extern cvar_t cv_bot_ls_routes;
 extern cvar_t cv_bot_ls_lines;
 extern cvar_t cv_bot_ls_pauses;
 extern cvar_t cv_bot_ls_solo;
+extern cvar_t cv_bot_ls_fight;
+bool LsFight();
 bool LsSolo();
 bool LsOwnMemory();
 void Bot_LsRegisterCVars();

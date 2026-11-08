@@ -306,7 +306,9 @@ void CCSBot::Attack(CBasePlayer *victim)
 #endif
 
 	// cannot attack if we are reloading
-	if (IsActiveWeaponReloading())
+	// (Loner-Strike: it can: it keeps aiming and moving, and fires once the reload is done;
+	// otherwise it stood frozen, not even aiming, while being shot)
+	if (IsActiveWeaponReloading() && !LsFight())
 		return;
 
 	// change enemy
