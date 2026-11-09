@@ -1188,8 +1188,13 @@ void CCSBot::LsHandUpdate(float goalYaw, float goalPitch, float dt)
 		if (start)
 		{
 			// how long (Fitts): a + b log2(1 + D/W), quicker for the skilled and in a fight
+			// (the flick only has to get near: the correction does the precise part, so it's timed
+			// against a looser target than the one aimed at: about 10 degrees calm, three times the
+			// enemy's size in a fight. Measured against a person: about 45 deg per 0.1 s at the peak
+			// of a big turn, about 5 on a small adjustment)
 			float b = (0.08f + 0.07f * (1.0f - skill)) * (fight ? 0.9f : calm ? 1.05f : 0.95f);
-			float dur = 0.05f + b * log2f(1.0f + off / width);
+			float flickWidth = h.corrections > 0 ? width : fight ? Q_max(6.0f, 3.0f * width) : 10.0f;
+			float dur = 0.1f + b * log2f(1.0f + off / flickWidth);
 			if (m_lsPuppet.fast && now < m_lsPuppet.lookUntil)
 				dur *= 0.6f;
 			if (h.corrections > 0)
