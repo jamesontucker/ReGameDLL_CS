@@ -164,7 +164,7 @@ bool CCSBot::LsRadioAnswer()
 			return true;
 		// (a match's anchor holds its own site: a call from the other one is someone else's)
 		if (LsMatch() && GetTask() == GUARD_BOMB_ZONE && (LsStyle() == LS_STYLE_CAMPER || LsStyle() == LS_STYLE_CAREFUL)
-			&& TheCSBots()->GetZone(&pev->origin) != TheCSBots()->GetClosestZone(&m_radioSubject->pev->origin))
+			&& TheCSBots()->GetClosestZone(&pev->origin) != TheCSBots()->GetClosestZone(&m_radioSubject->pev->origin))
 			return true;
 		float skill = LsSkill();
 		if ((m_radioPosition - pev->origin).IsLengthGreaterThan(2500.0f))
@@ -596,6 +596,9 @@ bool CCSBot::LsPlantHere()
 	m_lsPlantRound = round;
 	const CCSBotManager::Zone *zone = TheCSBots()->GetZone(&pev->origin);
 	if (!zone)
+		return true;
+	// (already in the middle of it, or right by cover: here's fine)
+	if ((pev->origin - zone->m_center).Make2D().IsLengthLessThan(200.0f))
 		return true;
 	// (a few spots in the site: further in from where it came in, and near a hiding spot)
 	CNavArea *best = nullptr;

@@ -902,6 +902,9 @@ bool CCSBot::LsBlindTick()
 	bool onBomb = m_state == &m_plantBombState || m_state == &m_defuseBombState;
 	if (onBomb && m_lsBlindWay != 3)
 		m_lsBlindWay = 4;
+	// (and keeps its finger on it: a flash doesn't undo the plant or defuse)
+	if (onBomb)
+		UseEnvironment();
 	if (!IsAtHidingSpot() && !IsOnLadder())
 	{
 		switch (m_lsBlindWay)

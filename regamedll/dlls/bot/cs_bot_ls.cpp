@@ -481,7 +481,7 @@ bool CCSBot::LsRouteTaste(RouteType route, LsRoute *out)
 	// mostly its own lasting taste, with a part that changes each round (every couple of
 	// minutes where there are no rounds), so the plan isn't the same every round
 	const float drift = 120.0f;
-	unsigned int bucket = LsSolo() ? (unsigned int)(gpGlobals->time / drift) : (unsigned int)CSGameRules()->m_iTotalRoundsPlayed * 7919u + 13u;
+	unsigned int bucket = LsSolo() ? (unsigned int)(gpGlobals->time / drift) : (unsigned int)LsRoundSerial() * 7919u + 13u;
 	out->seed = LsSeed();
 	out->driftSeed = LsHash(out->seed, bucket);
 
@@ -1159,8 +1159,14 @@ CNavArea *CCSBot::LsPickHuntArea()
 
 			// somewhere to go, not where it is
 			float fromMe = (*c - pev->origin).Length2D();
+			// (somewhere to go: on a small map nothing at all beats pacing on the spot; but Ts
+			// keeping to the hostages may settle near where they are)
 			if (fromMe < 600.0f)
-				continue;	// (somewhere to go: on a small map nothing at all beats pacing on the spot)
+			{
+				if (!kept)
+					continue;
+				score -= 1500.0f;
+			}
 
 			float nearest = 3000.0f;
 			for (int k = 0; k < n; k++)

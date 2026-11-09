@@ -1063,7 +1063,7 @@ public:
 	void LsNadeStop();
 	void LsStartOver();							// respawned or teleported: what it was in the middle of ends
 	bool LsBlindTick();
-	void LsSeedAs(const char *name) { if (!FStrEq(name, m_lsSeedAs)) { Q_strlcpy(m_lsSeedAs, name); m_lsSeedName = 0; } }
+	void LsSeedAs(const char *name) { if (!FStrEq(name, m_lsSeedAs)) { Q_strlcpy(m_lsSeedAs, name); m_lsSeedName = 0; } }	// (gm_people's persona comes as the bot joins, before its habits are used)
 	void LsSniperStep();							// after a sniper shot: a step aside while the zoom comes back							// flashed: its own way of coping (true: dealt with this frame)
 	bool LsKnifeOnly() const { return !m_rgpPlayerItems[PRIMARY_WEAPON_SLOT] && !m_rgpPlayerItems[PISTOL_SLOT]; }	// a knife and nothing else to shoot with
 	bool LsTossing() const { return m_isWaitingToTossGrenade; }
@@ -1394,8 +1394,8 @@ bool LsMatch();
 bool LsSolo();
 bool LsOwnMemory();
 bool LsHeSafe(CCSBot *me, const Vector &burst);
-float LsTimeLeft();
-int LsRoundSerial();	// a count of rounds that only goes up (a restart sets the game's own back to 0)	// the round's time left (a lot, when the round never runs out)
+float LsTimeLeft();	// the round's time left (a lot, when the round never runs out)
+int LsRoundSerial();	// a count of rounds that only goes up (a restart sets the game's own back to 0)
 void Bot_LsRegisterCVars();
 void Bot_LsServerCommand();
 

@@ -272,7 +272,8 @@ void MoveToState::OnUpdate(CCSBot *me)
 			// (Loner-Strike: not on the first step in: LsPlantHere)
 			if (me->IsAtBombsite() && me->IsCarryingBomb())
 			{
-				if (me->LsPlantHere())
+				// (or its walk in has nowhere left to go: here, then)
+				if (me->LsPlantHere() || !me->HasPath())
 					me->PlantBomb();
 				// (else it's on its way to a better spot: a new MoveTo has started)
 				else if (LsFight())
