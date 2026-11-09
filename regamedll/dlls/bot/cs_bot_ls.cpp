@@ -1251,8 +1251,8 @@ void CCSBot::LsShotAt(CBasePlayer *pShooter, const Vector &impact)
 	m_lsShotAtAt = gpGlobals->time;
 	m_lsShotBy = pShooter;
 	{
-		float far = float((pShooter->pev->origin - pev->origin).Length());
-		float err = far * (0.12f - 0.08f * LsSkill());
+		float away = float((pShooter->pev->origin - pev->origin).Length());
+		float err = away * (0.12f - 0.08f * LsSkill());
 		m_lsShotFrom = pShooter->pev->origin + Vector(RANDOM_FLOAT(-err, err), RANDOM_FLOAT(-err, err), 0.0f);
 	}
 

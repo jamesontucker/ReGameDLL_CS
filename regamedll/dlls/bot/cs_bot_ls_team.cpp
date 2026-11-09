@@ -226,8 +226,8 @@ void CCSBot::LsEarlyPick(CBasePlayer *pVictim, CBasePlayer *pKiller)
 // fell rather than straight at the killer (which would look like it sees through walls)
 void CCSBot::LsAvenge(CBasePlayer *pVictim, CBasePlayer *pKiller)
 {
-	float far = float((pKiller->pev->origin - pev->origin).Length());
-	float err = far * (0.15f - 0.08f * LsSkill());
+	float away = float((pKiller->pev->origin - pev->origin).Length());
+	float err = away * (0.15f - 0.08f * LsSkill());
 	Vector heard = pKiller->pev->origin + Vector(RANDOM_FLOAT(-err, err), RANDOM_FLOAT(-err, err), HalfHumanHeight);
 	SetLookAt("Loner-Strike: where the shots came from", &heard, PRIORITY_HIGH, RANDOM_FLOAT(1.0f, 2.0f));
 	Hurry(RANDOM_FLOAT(4.0f, 7.0f));
