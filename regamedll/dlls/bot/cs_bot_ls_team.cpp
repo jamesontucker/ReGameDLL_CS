@@ -14,7 +14,7 @@ void CCSBot::LsTeamTick()
 	if (!LsFight() || !LsTeamGame() || !IsAlive())
 		return;
 	float now = gpGlobals->time;
-	int round = CSGameRules()->m_iTotalRoundsPlayed;
+	int round = LsRoundSerial();
 	// (a call from last round is no reason to go anywhere now)
 	if (m_lsTeamRound != round)
 	{
@@ -55,8 +55,9 @@ void CCSBot::LsTeamTick()
 	// a CT with the clock on its side (no plant, little time left): holds where it is, as people
 	// do, rather than hunting into the Ts; the bold few keep pushing. A plant still calls it off
 	if (m_iTeam == CT && m_lsClockRound != round && TheCSBots()->GetScenario() == CCSBotManager::SCENARIO_DEFUSE_BOMB
-		&& !TheCSBots()->IsBombPlanted() && !CSGameRules()->IsFreezePeriod() && LsTimeLeft() < 22.0f && !IsAttacking()
-		&& !LsOrderActive() && (IsHunting() || (IsMovingTo() && GetTask() != DEFUSE_BOMB)))
+		&& !TheCSBots()->IsBombPlanted() && !CSGameRules()->IsFreezePeriod() && LsTimeLeft() < 14.0f + 16.0f * LsTrait(88) && !IsAttacking()
+		&& !LsOrderActive() && GetTask() != GUARD_LOOSE_BOMB && GetTask() != GUARD_BOMB_ZONE && !GetGameState()->IsLooseBombLocationKnown()
+		&& (IsHunting() || (IsMovingTo() && GetTask() != DEFUSE_BOMB)))
 	{
 		m_lsClockRound = round;
 		if (RANDOM_FLOAT(0.0f, 1.0f) > 0.15f + 0.4f * LsAggro() - (LsMatch() ? 0.2f : 0.0f))
@@ -158,6 +159,10 @@ bool CCSBot::LsRadioAnswer()
 		if (!LsFree())
 			return true;
 		if (LsLoner() && RANDOM_FLOAT(0.0f, 1.0f) < 0.6f)
+			return true;
+		// (a match's anchor holds its own site: a call from the other one is someone else's)
+		if (LsMatch() && GetTask() == GUARD_BOMB_ZONE && (LsStyle() == LS_STYLE_CAMPER || LsStyle() == LS_STYLE_CAREFUL)
+			&& TheCSBots()->GetZone(&pev->origin) != TheCSBots()->GetClosestZone(&m_radioSubject->pev->origin))
 			return true;
 		float skill = LsSkill();
 		if ((m_radioPosition - pev->origin).IsLengthGreaterThan(2500.0f))
@@ -350,7 +355,7 @@ bool CCSBot::LsYieldsDefuse()
 	if (m_bHasDefuser || (TheCSBots()->GetBombDefuser() && TheCSBots()->GetBombDefuser() != this))
 		return false;
 	// (twice a round at most: after that it does it itself)
-	int round = CSGameRules()->m_iTotalRoundsPlayed;
+	int round = LsRoundSerial();
 	if (m_lsYieldRound != round)
 	{
 		m_lsYieldRound = round;
@@ -436,7 +441,7 @@ void CCSBot::LsFloorGunTick()
 {
 	if (!LsFight() || LsSolo() || !IsAlive() || !CSGameRules() || CSGameRules()->IsFreezePeriod() || LsWeaponModeOn())
 		return;
-	int round = CSGameRules()->m_iTotalRoundsPlayed;
+	int round = LsRoundSerial();
 	if (m_lsFloorRound == round)
 	{
 		// (got one, or someone else did: a claim only lasts while it's still going for it)
@@ -514,7 +519,7 @@ void CCSBot::LsStalemateTick()
 		return;
 	// (only a bot standing about or holding a spot: not one following someone, on its way
 	// somewhere or looking into a noise; and once a round)
-	int round = CSGameRules()->m_iTotalRoundsPlayed;
+	int round = LsRoundSerial();
 	int mates = 0;
 	LsForTeammates(this, [&](CBasePlayer *) { mates++; });
 	// (once a round, or once more as the last one alive; never over a person's order)
@@ -578,8 +583,8 @@ bool CCSBot::LsPlantHere()
 	if (!LsFight())
 		return true;
 	float now = gpGlobals->time;
-	int round = CSGameRules()->m_iTotalRoundsPlayed;
-	if (GetTimeSinceAttacked() < 3.0f || now - m_lsShotAtAt < 3.0f || IsEnemyVisible() || LsTimeLeft() < 12.0f || LsSkill() < 0.25f)
+	int round = LsRoundSerial();
+	if (GetTimeSinceAttacked() < 3.0f || now - m_lsShotAtAt < 3.0f || IsEnemyVisible() || LsTimeLeft() < 18.0f || LsSkill() < 0.25f)
 		return true;
 	if (m_lsPlantRound == round)
 		return (m_lsPlantSpot - pev->origin).Make2D().IsLengthLessThan(70.0f) || now > m_lsPlantBy || !IsMovingTo();
@@ -595,10 +600,12 @@ bool CCSBot::LsPlantHere()
 		CNavArea *pArea = TheCSBots()->GetRandomAreaInZone(zone);
 		if (!pArea)
 			continue;
+		// (in toward the middle of the site, near cover; not across it to the far entrance)
 		float d = float((*pArea->GetCenter() - pev->origin).Length2D());
-		if (d < 160.0f || d > 900.0f)
+		if (d < 140.0f || d > 500.0f)
 			continue;
-		float score = d + RANDOM_FLOAT(0.0f, 250.0f) + (pArea->GetHidingSpotList()->size() ? 300.0f : 0.0f);
+		float mid = float((*pArea->GetCenter() - zone->m_center).Length2D());
+		float score = -mid + RANDOM_FLOAT(0.0f, 200.0f) + (pArea->GetHidingSpotList()->empty() ? 0.0f : 300.0f);
 		if (score > bestScore)
 		{
 			bestScore = score;

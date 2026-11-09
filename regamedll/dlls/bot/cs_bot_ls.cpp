@@ -250,14 +250,13 @@ unsigned int CCSBot::LsSeed()
 		char bare[64];
 		const char *name = STRING(pev->netname);
 		LsBareName(name, bare, sizeof(bare));
-		// (a regular whose name came out a little different this time, "Dave_" or "dave"
-		// (gm_pubserver's tweak_name): the same person: case aside, one such end off)
-		size_t len = Q_strlen(bare);
-		if (len > 3 && Q_strchr("^_.x2!~-", bare[len - 1]))
-			bare[len - 1] = '\0';
+		// (a regular whose name came out a little different this time, "Dave_" or "dave": gm_people
+		// sends the name it really is with the persona, and that's what it's seeded from)
+		if (m_lsSeedAs[0])
+			LsBareName(m_lsSeedAs, bare, sizeof(bare));
 		unsigned int h = 2166136261U;
 		for (const char *c = bare; *c; c++)
-			h = (h ^ (unsigned char)tolower((unsigned char)*c)) * 16777619U;
+			h = (h ^ (unsigned char)*c) * 16777619U;
 		// (a second bot with the same name, "(1)Dave": a person of its own, not Dave's twin)
 		if (name[0] == '(' && isdigit((unsigned char)name[1]))
 		{
@@ -385,6 +384,21 @@ void CCSBot::LsAddDangerNearby(float amount, CNavArea *startArea, const Vector *
 			}
 		}
 	}
+}
+
+// Rounds so far, counting on through restarts (sv_restart at a scrim's halves, Game
+// Commencing): the game's own count goes back to 0, and every once-a-round marker keyed to it
+// would think round 0 after a restart was already done
+int LsRoundSerial()
+{
+	static int s_serial = 0;
+	static float s_start = -1.0f;
+	if (TheCSBots() && TheCSBots()->GetRoundStartTime() != s_start)
+	{
+		s_start = TheCSBots()->GetRoundStartTime();
+		s_serial++;
+	}
+	return s_serial;
 }
 
 // The round's time left; with rounds that never run out, plenty (rather than below zero,
@@ -815,8 +829,11 @@ void Bot_LsServerCommand()
 		{
 			// (a missing value stays "not told": -1, so the profile's is used)
 			float aggro = LsArg(3, -1.0f), team = LsArg(4, -1.0f);
-			static_cast<CCSBot *>(pPlayer)->LsSetPersona(aggro < 0.0f ? -1.0f : Q_min(1.0f, aggro), team < 0.0f ? -1.0f : Q_min(1.0f, team),
+			CCSBot *pBot = static_cast<CCSBot *>(pPlayer);
+			pBot->LsSetPersona(aggro < 0.0f ? -1.0f : Q_min(1.0f, aggro), team < 0.0f ? -1.0f : Q_min(1.0f, team),
 				int(LsArg(5, -1.0f)), int(LsArg(6, 1.0f)), int(LsArg(7, 1.0f)), int(LsArg(8, -1.0f)));
+			// (persona ... <name>: the name it really is, when the shown one is a variant)
+			pBot->LsSeedAs(CMD_ARGC() > 9 ? CMD_ARGV(9) : "");
 		}
 		return;
 	}
@@ -943,9 +960,21 @@ void CCSBot::LsPuppetCommand(const char *what, float now)
 		if (!chat && ordered)
 			return;
 		Vector to(LsArg(3), LsArg(4), LsArg(5));
+		// (a spot on floor the nav doesn't cover: the nearest that it does)
+		if (!TheNavAreaGrid.GetNavArea(&to))
+		{
+			CNavArea *pNear = TheNavAreaGrid.GetNearestNavArea(&to);
+			if (pNear)
+			{
+				Vector snapped;
+				pNear->GetClosestPointOnArea(&to, &snapped);
+				to = snapped;
+			}
+		}
 		if (chat)
 		{
-			p.holdUntil = p.crouchUntil = 0.0f;
+			// (and a look a plugin had it holding goes: it looks where it's going)
+			p.holdUntil = p.crouchUntil = p.lookUntil = 0.0f;
 			p.holdTag[0] = '\0';
 		}
 		MoveTo(&to, SAFEST_ROUTE);
@@ -972,7 +1001,7 @@ void CCSBot::LsPuppetCommand(const char *what, float now)
 		CBasePlayer *pLeader = (index >= 1 && index <= gpGlobals->maxClients) ? UTIL_PlayerByIndex(index) : nullptr;
 		if (!pLeader || !pLeader->IsAlive() || pLeader == this || BotRelationship(pLeader) != BOT_TEAMMATE)
 			return;
-		p.holdUntil = p.crouchUntil = 0.0f;
+		p.holdUntil = p.crouchUntil = p.lookUntil = 0.0f;
 		p.holdTag[0] = '\0';
 		Follow(pLeader);
 		p.followUntil = now + Q_min(LsArg(4, 20.0f), 60.0f);
@@ -1130,7 +1159,7 @@ CNavArea *CCSBot::LsPickHuntArea()
 			// somewhere to go, not where it is
 			float fromMe = (*c - pev->origin).Length2D();
 			if (fromMe < 600.0f)
-				score -= 1500.0f;
+				continue;	// (somewhere to go: on a small map nothing at all beats pacing on the spot)
 
 			float nearest = 3000.0f;
 			for (int k = 0; k < n; k++)
@@ -1431,7 +1460,7 @@ void CCSBot::LsSneak()
 		float danger = (LsOwnMemory() && GetLastKnownArea()) ? LsGetDanger(GetLastKnownArea()) : 0.0f;
 		// (one stretch of it, 20 s to a minute: in a long round it doesn't creep for minutes)
 		float elapsed = TheCSBots() ? TheCSBots()->GetElapsedRoundTime() : 0.0f;
-		int round = CSGameRules() ? CSGameRules()->m_iTotalRoundsPlayed : 0;
+		int round = LsRoundSerial();
 		if (m_lsSneakRound != round)
 		{
 			m_lsSneakRound = round;

@@ -781,6 +781,7 @@ void CCSBot::LsStartOver()
 	m_lsBackUntil = 0.0f;
 	m_lsFloorGun = nullptr;
 	m_lsHeBlockedSince = -1.0f;
+	m_lsWasBlind = m_lsBlindSpray = false;
 	m_lsLastPos = pev->origin;
 	m_lsLastPosAt = gpGlobals->time;
 }
@@ -867,6 +868,8 @@ bool CCSBot::LsBlindTick()
 		if (m_lsWasBlind)
 		{
 			m_lsWasBlind = false;
+			if (m_lsBlindWay == 3)
+				StandUp();
 			if (GetTimeSinceLastSawEnemy() < 8.0f)
 			{
 				Vector look = GetLastKnownEnemyPosition() + Vector(0, 0, HalfHumanHeight);
@@ -881,7 +884,7 @@ bool CCSBot::LsBlindTick()
 		m_lsWasBlind = true;
 		m_lsBlindTurnAt = 0.0f;
 		// (a spray where they were: the aggressive, and only with someone seen just now)
-		m_lsBlindSpray = GetTimeSinceLastSawEnemy() < 4.0f && RANDOM_FLOAT(0.0f, 1.0f) < 0.08f + 0.4f * aggro;
+		m_lsBlindSpray = GetTimeSinceLastSawEnemy() < 4.0f && !IsUsingKnife() && !IsUsingGrenade() && RANDOM_FLOAT(0.0f, 1.0f) < 0.08f + 0.4f * aggro;
 	}
 	if (now >= m_lsBlindTurnAt)
 	{
@@ -895,7 +898,11 @@ bool CCSBot::LsBlindTick()
 		else
 			m_lsBlindWay = RANDOM_LONG(0, 4);
 	}
-	if (!IsAtHidingSpot())
+	// (planting or defusing: it stays on it; crouching at most)
+	bool onBomb = m_state == &m_plantBombState || m_state == &m_defuseBombState;
+	if (onBomb && m_lsBlindWay != 3)
+		m_lsBlindWay = 4;
+	if (!IsAtHidingSpot() && !IsOnLadder())
 	{
 		switch (m_lsBlindWay)
 		{
@@ -906,7 +913,8 @@ bool CCSBot::LsBlindTick()
 		default: break;
 		}
 	}
-	if (m_lsBlindSpray)
+	// (never a grenade's pin pulled blind, nor through a teammate)
+	if (m_lsBlindSpray && !IsUsingGrenade() && !m_isWaitingToTossGrenade && !IsFriendInLineOfFire())
 	{
 		Vector at = GetLastKnownEnemyPosition() + Vector(0, 0, HalfHumanHeight);
 		SetLookAt("Loner-Strike: spraying blind", &at, PRIORITY_HIGH, 0.3f);
@@ -927,6 +935,22 @@ void CCSBot::LsSniperStep()
 	if (now - m_lsSnipeStepAt > 1.2f)
 		m_lsSnipeStepDir = RANDOM_FLOAT(0.0f, 1.0f) < 0.15f + 0.65f * LsSkill() ? RANDOM_LONG(1, 2) : 0;
 	m_lsSnipeStepAt = now;
+	// (not off a ledge or into a wall: floor and room that way, else the other way, else not at all)
+	if (m_lsSnipeStepDir)
+	{
+		auto clear = [&](int dir) {
+			Vector right(BotCOS(pev->v_angle.y - 90.0f), BotSIN(pev->v_angle.y - 90.0f), 0.0f);
+			Vector side = pev->origin + right * (dir == 2 ? 40.0f : -40.0f);
+			TraceResult tr;
+			UTIL_TraceHull(pev->origin, side, ignore_monsters, head_hull, ENT(pev), &tr);
+			if (tr.flFraction < 1.0f)
+				return false;
+			UTIL_TraceLine(side, side - Vector(0, 0, 64.0f + HalfHumanHeight), ignore_monsters, ENT(pev), &tr);
+			return tr.flFraction < 1.0f;
+		};
+		if (!clear(m_lsSnipeStepDir))
+			m_lsSnipeStepDir = clear(3 - m_lsSnipeStepDir) ? 3 - m_lsSnipeStepDir : 0;
+	}
 	if (m_lsSnipeStepDir == 1)
 		StrafeLeft();
 	else if (m_lsSnipeStepDir == 2)

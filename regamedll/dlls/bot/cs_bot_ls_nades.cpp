@@ -800,7 +800,7 @@ static int LsTeamPlan(int team)
 	static int s_plan[2] = { LS_BUY, LS_BUY };
 
 	int slot = LsTeamSlot(team);
-	int round = CSGameRules()->m_iTotalRoundsPlayed;
+	int round = LsRoundSerial();
 	if (s_round[slot] == round && LsWithin(s_at[slot], 20.0f))
 		return s_plan[slot];
 
@@ -821,7 +821,7 @@ static int LsTeamPlan(int team)
 	// (a half's first round with more than pistol-round money: everyone buys what they can,
 	// never a team save on the first round)
 	// (a new map: last map's pistol round is no guide)
-	if (round == 0 && !LsPistolRound())
+	if (CSGameRules()->m_iTotalRoundsPlayed == 0 && !LsPistolRound())
 		s_lastPistol = -100;
 	bool freshHalf = n > 0 && LsAllNearStart(team);
 
@@ -890,7 +890,7 @@ static bool LsPistolRound()
 			return false;
 	}
 	if (CSGameRules())
-		s_lastPistol = CSGameRules()->m_iTotalRoundsPlayed;
+		s_lastPistol = LsRoundSerial();
 	return true;
 }
 

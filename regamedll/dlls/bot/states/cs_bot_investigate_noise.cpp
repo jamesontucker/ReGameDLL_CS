@@ -122,7 +122,7 @@ void InvestigateNoiseState::OnUpdate(CCSBot *me)
 			//me->ForgetNoise();
 			// (Loner-Strike: a moment there, listening, eyes on where it came from; the
 			// careful longer)
-			if (LsFight() && !me->IsHurrying())
+			if (LsFight() && !LsSolo() && !me->IsHurrying())
 			{
 				float secs = RANDOM_FLOAT(0.8f, 1.5f) + 2.0f * (1.0f - me->LsAggro());
 				Vector look = m_checkNoisePosition + Vector(0, 0, HalfHumanHeight);
