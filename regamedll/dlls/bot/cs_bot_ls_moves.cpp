@@ -1121,9 +1121,7 @@ void CCSBot::LsHandUpdate(float goalYaw, float goalPitch, float dt)
 	LsHand &h = m_lsHandM;
 	float now = gpGlobals->time;
 	float skill = LsSkill();
-	// (an enemy in view counts as a fight for the hand, shooting yet or not: people turn to a
-	// threat as fast as they can, not at looking-around speed)
-	bool fight = IsAttacking() || IsEnemyVisible();
+	bool fight = IsAttacking();
 	bool calm = !fight && LsCalm();
 	float oldY = pev->v_angle.y, oldP = pev->v_angle.x;
 
@@ -1151,7 +1149,16 @@ void CCSBot::LsHandUpdate(float goalYaw, float goalPitch, float dt)
 		pev->v_angle.x = h.p0 + (h.p1 - h.p0) * k;
 		// (and shot just now with the goal swung well away: a jolt, the stroke dropped at once)
 		bool jolt = GetTimeSinceAttacked() < 0.15f && sqrtf(driftY * driftY + driftP * driftP) > 20.0f;
-		if (jolt || (s >= 0.6f && s < 1.0f && sqrtf(driftY * driftY + driftP * driftP) > Q_max(2.0f, 0.5f * width)))
+		if (jolt)
+		{
+			h.moving = false;
+			h.corrections = 0;
+			h.restUntil = now;
+		}
+		// (past the committed part, only a goal that jumped (another target) drops the stroke;
+		// smaller drift is left to the correction after it lands. A dropped stroke restarts from
+		// a standstill, which held fight flicks well under a person's speed)
+		else if (s >= 0.6f && s < 1.0f && sqrtf(driftY * driftY + driftP * driftP) > Q_max(15.0f, 3.0f * width))
 		{
 			h.moving = false;
 			h.corrections = 0;
@@ -1175,7 +1182,7 @@ void CCSBot::LsHandUpdate(float goalYaw, float goalPitch, float dt)
 				h.corrections = 0;
 				// (alert but not fighting, which a deathmatch mostly is: a look is held a moment too,
 				// though shorter than a calm one)
-				h.restUntil = calm ? now + RANDOM_FLOAT(0.12f, 0.45f) + 0.5f * LsTrait(90) : fight ? now + RANDOM_FLOAT(0.02f, 0.08f) : now + RANDOM_FLOAT(0.2f, 0.55f) + 0.3f * LsTrait(90);
+				h.restUntil = calm ? now + RANDOM_FLOAT(0.25f, 0.8f) + 0.6f * LsTrait(90) : fight ? now + RANDOM_FLOAT(0.02f, 0.08f) : now + RANDOM_FLOAT(0.2f, 0.55f) + 0.3f * LsTrait(90);
 			}
 		}
 	}
@@ -1183,7 +1190,7 @@ void CCSBot::LsHandUpdate(float goalYaw, float goalPitch, float dt)
 	if (!h.moving)
 	{
 		// when to move: a big change at once; a small one only past the dead zone, after a rest
-		float deadZone = fight ? Q_max(0.2f, 0.5f * width) * (1.6f - 0.8f * skill) : calm ? 3.0f + 3.5f * LsTrait(91) : 3.5f + 2.0f * LsTrait(91);
+		float deadZone = fight ? Q_max(0.2f, 0.5f * width) * (1.6f - 0.8f * skill) : calm ? 4.0f + 4.0f * LsTrait(91) : 3.5f + 2.0f * LsTrait(91);
 		// (a new thing to look at, calmly: a reaction first, mostly quick, now and then slow: a
 		// log-normal delay, shorter for the skilled. In a fight the stock reaction already applies)
 		float jump = sqrtf(NormalizeAngle(goalYaw - h.lastY) * NormalizeAngle(goalYaw - h.lastY) + NormalizeAngle(goalPitch - h.lastP) * NormalizeAngle(goalPitch - h.lastP));
