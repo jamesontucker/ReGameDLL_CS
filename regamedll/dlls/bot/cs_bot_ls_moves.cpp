@@ -779,6 +779,7 @@ void CCSBot::LsStartOver()
 	m_lsBangUntil = 0.0f;
 	m_lsPrefireUntil = 0.0f;
 	m_lsBackUntil = 0.0f;
+	m_lsFloorGun = nullptr;
 	m_lsLastPos = pev->origin;
 	m_lsLastPosAt = gpGlobals->time;
 }
@@ -826,6 +827,12 @@ void CCSBot::LsAreaStuck(const CNavArea *area)
 	if (!LsFight() || !area || IsAttacking())
 		return;
 	float now = gpGlobals->time;
+	// (walking, sneaking or held by a plugin it's only slow, not stuck; nor is a big area,
+	// which takes a walker more than the give-up time to cross)
+	const Extent *ext = area->GetExtent();
+	if (!IsRunning() || m_lsSneaking || now < m_lsPuppet.walkUntil || now < m_lsPuppet.holdUntil
+		|| ext->hi.x - ext->lo.x > 450.0f || ext->hi.y - ext->lo.y > 450.0f)
+		return;
 	if (area != m_lsFailArea || now - m_lsFailAt > 30.0f)
 	{
 		m_lsFailArea = area;

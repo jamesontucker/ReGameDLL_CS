@@ -187,7 +187,7 @@ void HuntState::OnUpdate(CCSBot *me)
 				// (in deathmatch the quickest way there: the safest kept teammates on the
 				// same few routes, away from the enemy; a few who've been killed lately
 				// take the long way round, a flank)
-				bool flank = LsSolo() && LsOwnMemory() && me->LsRemembersDanger() && me->LsTrait(84) < 0.4f;
+				bool flank = LsSolo() && LsOwnMemory() && me->LsSinceDied() < 30.0f && RANDOM_FLOAT(0.0f, 1.0f) < 0.15f + 0.15f * me->LsTrait(84);
 				// (no way there: the stock pick below, not another random one next frame)
 				if (me->ComputePath(m_huntArea, nullptr, (LsSolo() && !flank) ? FASTEST_ROUTE : SAFEST_ROUTE))
 					return;

@@ -364,6 +364,11 @@ void CCSBot::Update()
 		// adjust our personal "safe" time
 		AdjustSafeTime();
 
+		// (Loner-Strike: Gun Game's grenade level with them back at range: the grenade out again)
+		if (LsFight() && LsNadeOnly() && !IsUsingGrenade() && gpGlobals->time >= m_lsHeBackAt
+			&& (threat->pev->origin - pev->origin).IsLengthGreaterThan(300.0f))
+			EquipGrenade();
+
 		// (Loner-Strike: not a flash or smoke it was getting out for something else: the gun)
 		if (IsUsingGrenade() && !LsNadeGunUp())
 		{
@@ -375,7 +380,22 @@ void CCSBot::Update()
 			if (LsFight() && LsNadeOnly() && range > 250.0f && range < 1100.0f && LsPlanThrow(WEAPON_HEGRENADE, threat->pev->origin, 220.0f, &aim, &burst))
 			{
 				if (LsHeSafe(this, burst))
+				{
+					m_lsHeBlockedSince = -1.0f;
 					ThrowGrenade(&aim);
+				}
+				// (a teammate where it would land for a while: the Glock or the knife instead)
+				else if (m_lsHeBlockedSince < 0.0f)
+					m_lsHeBlockedSince = gpGlobals->time;
+				else if (gpGlobals->time - m_lsHeBlockedSince > 1.5f)
+				{
+					m_lsHeBlockedSince = -1.0f;
+					m_lsHeBackAt = gpGlobals->time + 3.0f;
+					if (m_rgpPlayerItems[PISTOL_SLOT])
+						EquipPistol();
+					else
+						EquipKnife();
+				}
 			}
 			else if (!(LsFight() && LsNadeOnly() && range <= 250.0f))
 			{

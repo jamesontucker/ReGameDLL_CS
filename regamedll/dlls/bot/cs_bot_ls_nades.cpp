@@ -275,6 +275,9 @@ bool CCSBot::LsFlashSafe(const Vector &burst, bool careless)
 // No teammate where the HE goes off
 bool LsHeSafe(CCSBot *me, const Vector &burst)
 {
+	// (friendly fire off: a teammate there takes nothing)
+	if (friendlyfire.value <= 0.0f)
+		return true;
 	for (int i = 1; i <= gpGlobals->maxClients; i++)
 	{
 		CBasePlayer *pPlayer = UTIL_PlayerByIndex(i);
@@ -849,10 +852,14 @@ static bool LsScrimEconomy()
 // The pistol round (the first, or after a reset or a half: everyone on next to nothing)
 static bool LsPistolRound()
 {
+	// (nobody with much more than the server's start money: $800 as standard, up to $1600 or so)
+	float most = Q_max(1000.0f, startmoney.value + 200.0f);
+	if (most > 3000.0f)
+		return false;
 	for (int i = 1; i <= gpGlobals->maxClients; i++)
 	{
 		CBasePlayer *pPlayer = UTIL_PlayerByIndex(i);
-		if (pPlayer && (pPlayer->m_iTeam == CT || pPlayer->m_iTeam == TERRORIST) && pPlayer->m_iAccount > 1000)
+		if (pPlayer && (pPlayer->m_iTeam == CT || pPlayer->m_iTeam == TERRORIST) && float(pPlayer->m_iAccount) > most)
 			return false;
 	}
 	return true;
@@ -1086,7 +1093,7 @@ void CCSBot::LsSaveCheck()
 				EscapeFromBomb();
 		}
 		else if (!IsHiding())
-			Hide(nullptr, CSGameRules()->GetRoundRemainingTime() + 30.0f, 1500.0f, true);
+			Hide(nullptr, LsTimeLeft() + 30.0f, 1500.0f, true);
 		SetDisposition(SELF_DEFENSE);
 		return;
 	}
@@ -1112,7 +1119,7 @@ void CCSBot::LsSaveCheck()
 		return;
 
 	// and late
-	if (!planted && CSGameRules()->GetRoundRemainingTime() > 60.0f)
+	if (!planted && LsTimeLeft() > 60.0f)
 		return;
 
 	m_lsSaveDecided = true;

@@ -49,7 +49,7 @@ void CCSBot::FireWeaponAtEnemy()
 
 	// Loner-Strike: a grenade kept out in a fight (Gun Game's grenade level) is thrown by the
 	// update's arc, not fired at them flat
-	if (IsUsingGrenade())
+	if (LsFight() && IsUsingGrenade())
 		return;
 
 	if (IsUsingSniperRifle())

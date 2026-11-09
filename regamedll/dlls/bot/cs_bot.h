@@ -1041,7 +1041,8 @@ public:
 	bool LsPlayForTime();							// a CT alone against several before the plant: fall back
 	bool LsHoldsPlant();							// guarding the planted bomb: hold, don't chase
 	void LsEarlyPick(CBasePlayer *pVictim, CBasePlayer *pKiller);	// a T teammate got an early kill: push
-	bool LsDefuseHeard(CBasePlayer *pDefuser);		// a T guarding hears the defuse: handled the human way (true)
+	int LsDefuseHeard(CBasePlayer *pDefuser);		// a T guarding hears the defuse: 0 the stock way, 1 dealt with, 2 not yet (carry on hiding)
+	bool LsOrderBusy() const;						// too busy for a person's order (a fight aside): the bomb, a hostage, a throw
 	bool LsYieldsDefuse();							// at the bomb but leaves it: a kit CT is right there, or it can't finish
 	float LsHealth() const { return 100.0f * float(pev->health) / Q_max(100.0f, float(pev->max_health)); }	// health out of 100, whatever its max (War3, SuperHero; a mod that raises health without the max counts as healthier)
 	void LsFloorGunTick();
@@ -1114,6 +1115,7 @@ public:
 	float LsTrait(unsigned int which);
 	float LsGetDanger(const CNavArea *area);
 	bool LsRemembersDanger() const { return gpGlobals->time < m_lsDangerUntil; }	// any of its own danger memory not yet faded
+	float LsSinceDied() const { return gpGlobals->time - m_lsDiedAt; }
 	void LsAddDangerNearby(float amount, CNavArea *startArea, const Vector *pos, float maxRadius);
 	void LsSawTeammateDie(CBasePlayer *pVictim);
 	bool LsRouteTaste(RouteType route, struct LsRoute *out);	// false: no taste in routes now
@@ -1181,6 +1183,7 @@ private:
 		float followUntil = 0.0f;
 		char holdTag[8] = "";					// who asked for the hold (gm_botfun bf, gm_humanbots hb, gm_botchat bc)
 		bool fast = false;							// a quick look (a flick, a spin): not the calm turn
+		bool urgent = false;						// an urgent turn (look ... 2): goes on through a fight, till an enemy is in sight
 	};
 	LsPuppet m_lsPuppet;
 	void LsCheckMap();
@@ -1189,6 +1192,9 @@ private:
 													// the game frees a bot without running its destructor)
 	char m_lsMap[64] = "";									// the map that memory is for
 	float m_lsMapCheckedAt = -1.0f;						// the frame the map was last checked (once a frame is enough)
+	float m_lsDiedAt = -100.0f;
+	float m_lsHeBlockedSince = -1.0f;
+	float m_lsHeBackAt = 0.0f;						// ...and not back out before then				// Gun Game's grenade level: no safe throw since then						// when it was last killed
 	float m_lsDangerUntil = -1.0f;						// when all of that memory will have faded (nothing to look up after)
 	string_t m_lsSeedName = 0;								// the name LsSeed was worked out from
 	unsigned int m_lsSeed = 0;
@@ -1224,9 +1230,12 @@ private:
 	float m_lsDefuseNoticeAt = -1.0f;				// when it takes in the defuse it hears
 	float m_lsDefuseHeardLast = -10.0f;			// last time it was told of a defuse going on
 	int m_lsForTimeRoll = -1;
-	int m_lsLateBombRound = -1;
+	float m_lsLateBombAt = 0.0f;					// a late carrier: next look at whether it's off to a site
 	int m_lsFloorRound = -1;
-	float m_lsStaleCheckAt = 0.0f;						// the round it went for a floor gun
+	int m_lsYieldRound = -1;						// the round its kit yields were counted for
+	int m_lsYields = 0;							// times it left the bomb to a kit this round (twice at most)
+	float m_lsStaleCheckAt = 0.0f;
+	int m_lsStaleRound = -1;						// the round it went looking to end a stalemate						// the round it went for a floor gun
 	CBaseEntity *m_lsFloorGun = nullptr;			// the one it's going for (others leave it to it)					// the round its carrier hurried to a site for the clock						// this fight: does it play for time (-1 not rolled)
 	// (end team members)
 	// Loner-Strike nades (cs_bot_ls_nades.cpp): members
@@ -1293,6 +1302,7 @@ private:
 	bool m_lsPeekThis = false;
 	int m_lsSneakRound = -1;						// the round the late-round sneak was rolled for
 	bool m_lsSneakLate = false;
+	float m_lsSneakLateEnd = 0.0f;					// ...until this far into the round
 	Vector m_lsLastPos;							// where it was last frame (teleports)
 	float m_lsLastPosAt = -1.0f;
 	float m_lsBangUntil = 0.0f;						// spraying through a wall at where the enemy went until then
@@ -1344,6 +1354,7 @@ bool LsMatch();
 bool LsSolo();
 bool LsOwnMemory();
 bool LsHeSafe(CCSBot *me, const Vector &burst);
+float LsTimeLeft();	// the round's time left (a lot, when the round never runs out)
 void Bot_LsRegisterCVars();
 void Bot_LsServerCommand();
 
@@ -2030,7 +2041,7 @@ public:
 			{
 				// (Loner-Strike: deathmatch takes the quick way, but not back down the lane it
 				// keeps dying in)
-				cost += dist * dangerFactor * 0.3f * m_bot->LsGetDanger(area);
+				cost += dist * dangerFactor * 0.03f * m_bot->LsGetDanger(area);
 			}
 
 			if (!m_bot->IsAttacking())

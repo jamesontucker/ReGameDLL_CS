@@ -185,6 +185,7 @@ void CCSBot::Killed(entvars_t *pevAttacker, int iGib)
 	// (Loner-Strike: into this bot's own memory instead of the team's, with bot_ls_own_memory)
 	if (LsOwnMemory())
 		LsAddDangerNearby(deathDanger, m_lastKnownArea, &pev->origin, deathDangerRadius);
+		m_lsDiedAt = gpGlobals->time;	// (deathmatch: a flank, now and then, shortly after)
 	else
 		IncreaseDangerNearby(m_iTeam - 1, deathDanger, m_lastKnownArea, &pev->origin, deathDangerRadius);
 

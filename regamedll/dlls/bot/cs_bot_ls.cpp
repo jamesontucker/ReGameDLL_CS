@@ -375,6 +375,17 @@ void CCSBot::LsAddDangerNearby(float amount, CNavArea *startArea, const Vector *
 	}
 }
 
+// The round's time left; with rounds that never run out, plenty (rather than below zero,
+// which would read as the clock nearly gone)
+float LsTimeLeft()
+{
+	if (!CSGameRules())
+		return 999.0f;
+	if (HasRoundInfinite(SCENARIO_BLOCK_TIME_EXPRIRED))
+		return 999.0f;
+	return CSGameRules()->GetRoundRemainingTime();
+}
+
 bool LsOwnMemory()
 {
 	return cv_bot_ls_own_memory.value > 0.0f;
@@ -532,7 +543,7 @@ bool CCSBot::LsUpdatePause()
 		return false;
 
 	// the bomb is down, or the clock nearly out: no time for that
-	if (TheCSBots()->IsBombPlanted() || (!LsSolo() && CSGameRules() && CSGameRules()->GetRoundRemainingTime() < 30.0f))
+	if (TheCSBots()->IsBombPlanted() || (!LsSolo() && CSGameRules() && LsTimeLeft() < 30.0f))
 		return false;
 
 	// never in the air, or where it has to jump or crouch through (it would stop short)
@@ -575,6 +586,14 @@ bool CCSBot::LsBusy() const
 		|| (IsCarryingBomb() && !(CSGameRules() && CSGameRules()->IsFreezePeriod()));
 }
 
+// Too busy for a person's order (follow me, go b, wait): the bomb, a hostage, a grenade
+// on its way. Being in a hurry, or a noise a moment ago, doesn't stop it doing as asked
+bool CCSBot::LsOrderBusy() const
+{
+	return IsDefusingBomb() || IsEscapingFromBomb() || TheCSBots()->IsBombPlanted() || m_isWaitingToTossGrenade
+		|| GetHostageEscortCount() > 0 || (IsCarryingBomb() && !(CSGameRules() && CSGameRules()->IsFreezePeriod()));
+}
+
 void CCSBot::LsPuppetRelease()
 {
 	if (m_lsPuppet.crouchUntil > 0.0f)
@@ -604,7 +623,10 @@ void CCSBot::LsPuppetUpdate()
 
 	// a fight, or anything that matters, comes first
 	// (and nothing holds it on a ladder or blinded)
-	if (IsAttacking() || m_isEnemyVisible || LsBusy() || !LsPuppetActive() || IsOnLadder() || IsBlind())
+	// (a person's order: following them, or a chat hold, only gives way to what an order does)
+	bool order = gpGlobals->time < p.followUntil || FStrEq(p.holdTag, "bc");
+	bool urgent = p.urgent && gpGlobals->time < p.lookUntil;
+	if (m_isEnemyVisible || IsOnLadder() || !LsPuppetActive() || (!urgent && (IsAttacking() || (order ? LsOrderBusy() : LsBusy()) || IsBlind())))
 	{
 		LsPuppetRelease();
 		return;
@@ -647,7 +669,7 @@ void CCSBot::LsPuppetUpdate()
 			float rise = Q_max(12.0f, range * 0.45f);
 			at.z += ((int((now - p.lookStart) / p.nodEvery) % 2) == 0) ? rise : -rise;
 		}
-		SetLookAt("Loner-Strike", &at, PRIORITY_HIGH, 0.3f, false, 2.0f);
+		SetLookAt("Loner-Strike", &at, p.urgent ? PRIORITY_UNINTERRUPTABLE : PRIORITY_HIGH, 0.3f, false, 2.0f);
 	}
 
 	if (p.jumpsLeft > 0 && now >= p.nextJump)
@@ -706,8 +728,23 @@ void Bot_LsServerCommand()
 	float now = gpGlobals->time;
 
 	// not while it's in a fight or busy with something that matters, nor while something
-	// has startled it
-	if (!FStrEq(what, "release") && (me->IsAttacking() || me->IsEnemyVisible() || me->LsBusy() || (LsFight() && !me->LsCalm(false))))
+	// has startled it; a person's order (goto, follow, a chat hold) only gives way to a fight,
+	// the bomb or a ladder
+	bool order = FStrEq(what, "goto") || FStrEq(what, "follow") || (FStrEq(what, "hold") && CMD_ARGC() > 4 && FStrEq(CMD_ARGV(4), "bc"));
+	// (look ... 2: an urgent turn, toward someone it senses behind it mid-fight: only an
+	// enemy already in sight or a ladder stops it)
+	bool urgent = FStrEq(what, "look") && LsArg(7) >= 2.0f;
+	if (urgent)
+	{
+		if (me->IsEnemyVisible() || me->IsOnLadder())
+			return;
+	}
+	else if (order)
+	{
+		if (me->IsAttacking() || me->IsEnemyVisible() || me->LsOrderBusy() || me->IsOnLadder())
+			return;
+	}
+	else if (!FStrEq(what, "release") && (me->IsAttacking() || me->IsEnemyVisible() || me->LsBusy() || (LsFight() && !me->LsCalm(false))))
 		return;
 
 	me->LsPuppetCommand(what, now);
@@ -759,11 +796,15 @@ void CCSBot::LsPuppetCommand(const char *what, float now)
 		p.lookStart = now;
 		p.lookUntil = now + Q_min(LsArg(6, 1.0f), most);
 		p.nodEvery = FStrEq(what, "nod") ? Q_max(0.08f, LsArg(7, 0.35f)) : 0.0f;
-		// (look ... 1: a quick look, a flick or a spin; a nod is always quick)
+		// (look ... 1: a quick look, a flick or a spin; a nod is always quick; 2: urgent)
 		p.fast = FStrEq(what, "nod") || LsArg(7) > 0.0f;
+		p.urgent = FStrEq(what, "look") && LsArg(7) >= 2.0f;
 	}
 	else if (FStrEq(what, "goto"))
 	{
+		// (the latest order wins: a hold or crouch from before ends)
+		p.holdUntil = p.crouchUntil = 0.0f;
+		p.holdTag[0] = '\0';
 		Vector to(LsArg(3), LsArg(4), LsArg(5));
 		MoveTo(&to, SAFEST_ROUTE);
 		if (LsArg(6) > 0.0f)
@@ -774,6 +815,8 @@ void CCSBot::LsPuppetCommand(const char *what, float now)
 		CBasePlayer *pLeader = UTIL_PlayerByIndex(Q_atoi(CMD_ARGV(3)));
 		if (!pLeader || !pLeader->IsAlive() || pLeader == this || BotRelationship(pLeader) != BOT_TEAMMATE)
 			return;
+		p.holdUntil = p.crouchUntil = 0.0f;
+		p.holdTag[0] = '\0';
 		Follow(pLeader);
 		p.followUntil = now + Q_min(LsArg(4, 20.0f), 60.0f);
 	}
@@ -805,15 +848,24 @@ bool LsClanMates(CBasePlayer *a, CBasePlayer *b)
 	};
 	tagOf(na, bareA, tagA, sizeof(tagA));
 	tagOf(nb, bareB, tagB, sizeof(tagB));
-	// (a tag needs a letter or digit in it: "(1)" from a duplicate name isn't a clan)
-	bool real = false;
-	for (const char *c = tagA; *c; c++)
-	{
-		if (isalnum((unsigned char)*c))
-			real = true;
-	}
-	if (tagA[0] == '(' && Q_strlen(tagA) <= 4)
-		real = false;
+	// (compared by its letters and digits, case aside, as the chat plugin does: "[CoC] " and
+	// "-=[CoC]=- " are one clan; it needs a letter, so "(1)" from a duplicate name isn't one)
+	auto squash = [](char *tag) {
+		char *out = tag;
+		bool letter = false;
+		for (const char *c = tag; *c; c++)
+		{
+			if (isalnum((unsigned char)*c))
+			{
+				*out++ = (char)tolower((unsigned char)*c);
+				letter = letter || isalpha((unsigned char)*c);
+			}
+		}
+		*out = '\0';
+		return letter;
+	};
+	bool real = squash(tagA);
+	squash(tagB);
 	return real && FStrEq(tagA, tagB);
 }
 
@@ -832,7 +884,8 @@ CNavArea *CCSBot::LsPickHuntArea()
 	Vector avoid[64];
 	int n = 0;
 	LsForTeammates(this, [&](CBasePlayer *pPlayer) {
-		if (LsClanMates(this, pPlayer))
+		// (clan mates stick together; not in deathmatch, where a pack of them is a blob)
+		if (!LsSolo() && LsClanMates(this, pPlayer))
 			return;
 		if (n < 64)
 			avoid[n++] = pPlayer->pev->origin;
@@ -917,9 +970,13 @@ CNavArea *CCSBot::LsPickHuntArea()
 				nearest = Q_min(nearest, float((*c - avoid[k]).Length2D()));
 			score += nearest;
 
-			// a deathmatch: toward where an enemy was last seen, more so the fewer are left
-			// (with a crowd there's someone everywhere)
-			if (LsSolo() && GetTimeSinceLastSawEnemy() < 30.0f)
+			// a deathmatch: toward fighting it heard lately (that's where people are)
+			if (LsSolo() && m_noiseTimestamp > 0.0f && gpGlobals->time - m_noiseTimestamp < 10.0f)
+				score -= 0.4f * float((*c - m_noisePosition).Length2D());
+
+			// and toward where an enemy was last seen, more so the fewer are left (with a crowd
+			// there's someone everywhere; and not one who's since died)
+			if (LsSolo() && GetTimeSinceLastSawEnemy() < 30.0f && m_enemy.IsValid() && m_enemy->IsAlive())
 			{
 				int left = GetEnemiesRemaining();
 				if (left <= 6)
@@ -928,7 +985,7 @@ CNavArea *CCSBot::LsPickHuntArea()
 
 			// and in deathmatch: not where it keeps getting killed
 			if (LsSolo() && LsOwnMemory())
-				score -= 2500.0f * Q_min(1.0f, LsGetDanger(area));
+				score -= 800.0f * Q_min(1.0f, LsGetDanger(area));
 
 			// near what this side looks after
 			if (kept)
@@ -980,7 +1037,7 @@ bool CCSBot::LsShouldSpread()
 
 	bool crowded = false;
 	LsForTeammates(this, [&](CBasePlayer *pPlayer) {
-		if ((pPlayer->pev->origin - pev->origin).IsLengthLessThan(320.0f) && !LsClanMates(this, pPlayer))
+		if ((pPlayer->pev->origin - pev->origin).IsLengthLessThan(320.0f) && (LsSolo() || !LsClanMates(this, pPlayer)))
 			crowded = true;
 	});
 	if (!crowded || RANDOM_FLOAT(0.0f, 1.0f) > 0.7f)
@@ -1193,7 +1250,7 @@ void CCSBot::LsSneak()
 	if (LsMatch())
 		sneaky += 0.25f;
 	bool sneakyCarrier = IsCarryingBomb() && (LsStyle() == LS_STYLE_LURKER || LsStyle() == LS_STYLE_NINJA || LsStyle() == LS_STYLE_CAREFUL)
-		&& CSGameRules() && CSGameRules()->GetRoundRemainingTime() > 40.0f;
+		&& CSGameRules() && LsTimeLeft() > 40.0f;
 	// (a ninja or lurker CT walks in to a planted bomb while there's time for it)
 	bool quietRetake = m_iTeam == CT && TheCSBots() && TheCSBots()->IsBombPlanted() && (LsStyle() == LS_STYLE_NINJA || LsStyle() == LS_STYLE_LURKER)
 		&& TheCSBots()->GetBombTimeLeft() > 15.0f + (m_bHasDefuser ? 5.0f : 10.0f);
@@ -1204,13 +1261,16 @@ void CCSBot::LsSneak()
 	if (!loud && sneaky > 0.45f)
 	{
 		float danger = (LsOwnMemory() && GetLastKnownArea()) ? LsGetDanger(GetLastKnownArea()) : 0.0f;
-		bool lateRound = TheCSBots() && TheCSBots()->GetElapsedRoundTime() > 25.0f;
+		// (one stretch of it, 20 s to a minute: in a long round it doesn't creep for minutes)
+		float elapsed = TheCSBots() ? TheCSBots()->GetElapsedRoundTime() : 0.0f;
 		int round = CSGameRules() ? CSGameRules()->m_iTotalRoundsPlayed : 0;
 		if (m_lsSneakRound != round)
 		{
 			m_lsSneakRound = round;
 			m_lsSneakLate = RANDOM_FLOAT(0.0f, 1.0f) < sneaky;
+			m_lsSneakLateEnd = 25.0f + RANDOM_FLOAT(20.0f, 60.0f);
 		}
+		bool lateRound = elapsed > 25.0f && elapsed < m_lsSneakLateEnd;
 		want = danger > 0.1f || (lateRound && m_lsSneakLate) || IsNoiseHeard();
 	}
 
@@ -1411,6 +1471,8 @@ void CCSBot::LsShotAt(CBasePlayer *pShooter, const Vector &impact)
 	if (busy)
 	{
 		m_lsShotAtAt = gpGlobals->time;
+		m_lsShotBy = pShooter;
+		m_lsShotFrom = pShooter->pev->origin;
 		if (miss < 30.0f && IsVisible(pShooter, false) && RANDOM_FLOAT(0.0f, 1.0f) < 0.25f + 0.4f * LsSkill())
 		{
 			Attack(pShooter);
@@ -1528,7 +1590,7 @@ bool CCSBot::LsObjectiveThreat(bool defusing)
 	if (defusing && TheCSBots()->GetBombTimeLeft() < takes + 3.5f)
 		return false;
 	// (likewise the round about to run out on a plant)
-	if (!defusing && CSGameRules() && CSGameRules()->GetRoundRemainingTime() < takes + 3.5f)
+	if (!defusing && CSGameRules() && LsTimeLeft() < takes + 3.5f)
 		return false;
 	if (m_lsObjStops >= 2)
 		return false;
