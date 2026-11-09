@@ -865,7 +865,7 @@ void CCSBot::LsFightHabits(float range, bool crouchAndHold)
 		// crouch while shooting: close and mid range, the bots with the habit
 		if (!crouchAndHold && range < 900.0f && LsCrouchFactor() >= 1.0f && RANDOM_FLOAT(0.0f, 1.0f) < 0.3f && (pev->flags & FL_ONGROUND))
 		{
-			m_lsCrouchBurstUntil = now + RANDOM_FLOAT(0.4f, 1.2f);
+			m_lsCrouchBurstUntil = now + LsCrouchTapTime();	// (mostly a tap: cs_bot_ls_moves.cpp)
 			Crouch();
 		}
 	}

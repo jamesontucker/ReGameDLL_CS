@@ -150,6 +150,10 @@ void CCSBot::Hide(CNavArea *searchFromArea, float duration, float hideRange, boo
 	Vector useSpot;
 
 	const Vector *pos = FindNearbyHidingSpot(this, &sourcePos, source, hideRange, IsSniper());
+
+	// Loner-Strike: some pick a spot off to the side of where someone coming in would look
+	pos = LsOffAngle(pos, &sourcePos, source, hideRange);
+
 	if (!pos)
 	{
 		PrintIfWatched("No available hiding spots.\n");
@@ -272,6 +276,7 @@ bool CCSBot::TryToRetreat()
 		StandUp();
 		Run();
 		Hide(spot, holdTime);
+		LsFallBack();	// Loner-Strike: eyes on the threat, not its back to it
 
 		PrintIfWatched("Retreating to a safe spot!\n");
 		return true;

@@ -89,7 +89,8 @@ void CCSBot::UpdateLookAngles()
 	// where it's going (people don't walk backwards looking at something behind them)
 	// (only while really on the move: at a walk or a stop the direction of travel jumps about
 	// and would drag the view with it)
-	if (LsFight() && !IsAttacking() && !IsUsingLadder() && pev->velocity.Length2D() > 150.0f)
+	// (and not while falling back looking over its shoulder at the threat)
+	if (LsFight() && !IsAttacking() && !IsUsingLadder() && pev->velocity.Length2D() > 150.0f && !LsLookingBack())
 	{
 		float moveYaw = UTIL_VecToYaw(pev->velocity);
 		float off = NormalizeAngle(useYaw - moveYaw);
@@ -160,6 +161,9 @@ void CCSBot::UpdateLookAngles()
 		{
 			useYaw = DirectionToAngle(faceDir) + StayOnLadderLine(this, m_pathLadder);
 			usePitch = -ladderPitch;
+
+			// Loner-Strike: turned on the ladder for a diagonal climb
+			LsLadderYaw(DirectionToAngle(faceDir), &useYaw);
 			break;
 		}
 		case MOUNT_DESCENDING_LADDER:
@@ -595,6 +599,9 @@ void CCSBot::UpdateLookAround(bool updateNow)
 
 				// glance at the spot for minimum time
 				SetLookAt("Encounter Spot", &pos, PRIORITY_LOW, 0, true, 10.0f);
+
+				// Loner-Strike: or put a few bullets into it first (some, up close)
+				LsPrefire(pos);
 
 				// immediately mark it as "checked", so we don't check it again
 				// if we get distracted before we check it - that's the way it goes

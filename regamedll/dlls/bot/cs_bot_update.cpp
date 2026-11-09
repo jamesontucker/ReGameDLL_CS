@@ -798,6 +798,9 @@ void CCSBot::Update()
 	// Loner-Strike: whatever a plugin asked of it for a moment (ls_bot)
 	LsPuppetUpdate();
 
+	// Loner-Strike: a prefire, looking back while falling back
+	LsMovesUpdate();
+
 	if (m_isWaitingToTossGrenade)
 	{
 		ResetStuckMonitor();

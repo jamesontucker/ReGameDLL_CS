@@ -758,6 +758,7 @@ void CCSBot::ReloadCheck()
 					StandUp();
 					Hide(spot, 0.0f);
 					LsWhy("reload-hide");
+					LsFallBack();	// Loner-Strike: eyes on the threat, not its back to it
 				}
 			}
 		}

@@ -533,6 +533,9 @@ bool CCSBot::UpdateLadderMovement()
 
 		// move up ladder
 		MoveForward();
+
+		// Loner-Strike: or diagonally, the faster climb (turned, with a strafe)
+		LsLadderClimb();
 		break;
 	}
 	case DESCEND_LADDER:
@@ -1470,6 +1473,10 @@ CCSBot::PathResult CCSBot::UpdatePathMovement(bool allowSpeedChange)
 
 	// initialize "adjusted" goal to current goal
 	Vector adjustedGoal = m_goalPosition;
+
+	// Loner-Strike: a blind corner ahead: a jiggle peek, a wide swing or the outside line
+	if (LsCornerMoves(&adjustedGoal))
+		return PROGRESSING;
 
 	// Use short "feelers" to veer away from close-range obstacles
 	// Feelers come from our ankles, just above StepHeight, so we avoid short walls, too
