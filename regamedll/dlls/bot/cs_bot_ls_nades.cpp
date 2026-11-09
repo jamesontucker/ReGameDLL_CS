@@ -1101,3 +1101,10 @@ void CCSBot::LsSaveCheck()
 	LsWhy("saving its gun");
 	PrintIfWatched("Alone against too many: saving my gun.\n");
 }
+
+// Deathmatch with nothing but a knife and grenades (Gun Game's HE level): the grenade stays
+// out to be thrown, not swapped for the knife
+bool CCSBot::LsNadeOnly() const
+{
+	return LsFight() && LsSolo() && !m_rgpPlayerItems[PRIMARY_WEAPON_SLOT] && !m_rgpPlayerItems[PISTOL_SLOT] && m_rgpPlayerItems[GRENADE_SLOT];
+}

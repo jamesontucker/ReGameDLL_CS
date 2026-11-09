@@ -1069,10 +1069,7 @@ public:
 	void LsBuyExtras();								// grenades and the defuse kit (instead of the stock picks)
 	void LsSaveCheck();								// alone against many late in a lost round: hide, keep the gun
 	bool LsSavingGun() const { return m_lsSaving; }
-	bool LsNadeOnly() const							// deathmatch with nothing but a knife and grenades (Gun Game's HE level)
-	{
-		return LsFight() && LsSolo() && !m_rgpPlayerItems[PRIMARY_WEAPON_SLOT] && !m_rgpPlayerItems[PISTOL_SLOT] && m_rgpPlayerItems[GRENADE_SLOT];
-	}
+	bool LsNadeOnly() const;						// deathmatch with nothing but a knife and grenades (Gun Game's HE level)
 	// (end nades)
 	// Loner-Strike moves (cs_bot_ls_moves.cpp)
 	bool LsCornerMoves(Vector *goal);				// a blind corner ahead: jiggle, wide swing or outside line (true: a jiggle moves it)
