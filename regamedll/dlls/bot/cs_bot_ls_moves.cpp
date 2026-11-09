@@ -87,7 +87,7 @@ static bool LsCornerFree(CCSBot *me)
 int CCSBot::LsPickCornerPlan()
 {
 	float skill = GetProfile()->GetSkill();
-	float aggro = GetProfile()->GetAggression();
+	float aggro = LsAggro();
 	bool sneaking = !IsRunning();
 
 	// a jiggle: good players, a pub or a match (deathmatch is run and gun)
@@ -348,7 +348,7 @@ const Vector *CCSBot::LsOffAngle(const Vector *stockPick, const Vector *pos, CNa
 		return stockPick;
 
 	float skill = GetProfile()->GetSkill();
-	float aggro = GetProfile()->GetAggression();
+	float aggro = LsAggro();
 	float bent = 0.5f * skill + 0.5f * (1.0f - aggro) + (LsMatch() ? 0.15f : 0.0f);
 	if (LsTrait(62) > bent - 0.1f || RANDOM_FLOAT(0.0f, 1.0f) > 0.7f)
 		return stockPick;
@@ -451,7 +451,7 @@ void CCSBot::LsPrefire(const Vector &spot)
 		return;
 
 	float skill = GetProfile()->GetSkill();
-	float aggro = GetProfile()->GetAggression();
+	float aggro = LsAggro();
 	float want = 0.5f * aggro + 0.5f * skill;
 	if (LsTrait(64) > want - 0.25f)
 		return;
