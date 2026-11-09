@@ -840,12 +840,16 @@ void CCSBot::Update()
 	{
 		if (GetMorale() < NEUTRAL && IsSafe() && GetSafeTimeRemaining() < 2.0f && IsHunting())
 		{
-			if (GetMorale() * -40.0 > RANDOM_FLOAT(0.0f, 100.0f))
+			// (Loner-Strike: only the side defending, once a round and briefly: the attackers
+			// sitting in their own spawn over and over is no human habit)
+			bool lsOk = !LsFight() || (!TheCSBots()->IsOnOffense(this) && m_lsMoraleHideRound != LsRoundSerial());
+			if (lsOk && GetMorale() * -40.0 > RANDOM_FLOAT(0.0f, 100.0f))
 			{
 				if (TheCSBots()->IsOnOffense(this) || !TheCSBots()->IsDefenseRushing())
 				{
+					m_lsMoraleHideRound = LsRoundSerial();
 					SetDisposition(OPPORTUNITY_FIRE);
-					Hide(m_lastKnownArea, RANDOM_FLOAT(3.0f, 15.0f));
+					Hide(m_lastKnownArea, LsFight() ? RANDOM_FLOAT(3.0f, 8.0f) : RANDOM_FLOAT(3.0f, 15.0f));
 					LsWhy("low-morale");
 					GetChatter()->Say("WaitingHere");
 				}

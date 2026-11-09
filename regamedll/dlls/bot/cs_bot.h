@@ -1262,6 +1262,7 @@ private:
 	int m_lsTeamRound = -1;							// the round LsTeamTick last saw
 	float m_lsDefuseNoticeAt = -1.0f;				// when it takes in the defuse it hears
 	int m_lsWinReloadRound = -1;
+	int m_lsMoraleHideRound = -1;					// the round it hid on low morale (once is enough)
 	float m_lsSwapCheckAt = 0.0f;
 	EntityHandle<CBaseEntity> m_lsSwapBox;		// the gun it's walking over to swap for
 	float m_lsSwapUntil = 0.0f;
