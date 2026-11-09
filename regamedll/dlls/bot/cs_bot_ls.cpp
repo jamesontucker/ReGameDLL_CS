@@ -76,14 +76,31 @@ bool LsFight()
 }
 
 // Every bot for itself (deathmatch-type modes, bot_ls_solo)
+// How much who a bot is shapes how it plays: the app's personality slider (gm_personality,
+// 0-200): at 0 the bot style alone, at 100 mostly the person, at 200 nearly all of it
+static float LsPersonWeight()
+{
+	static cvar_t *s_pers = nullptr;
+	if (!s_pers)
+		s_pers = CVAR_GET_POINTER("gm_personality");
+	float p = s_pers ? s_pers->value / 100.0f : 1.0f;
+	return Q_max(0.0f, Q_min(0.9f, 0.6f * p + (p > 1.0f ? -0.3f * (p - 1.0f) : 0.0f)));
+}
+
 // How aggressive and how much of a team player this bot is: mostly who it is (its
 // playstyle, temper...), partly the bot style's profile, so a Newbie lobby's rusher and a
 // Gods lobby's rusher still differ. A team style (profile teamwork of 45 and up, as
 // Matchmaking gives) keeps at least that much teamwork, whoever the bot is
+int CCSBot::LsStyle() const
+{
+	return LsPersonWeight() > 0.0f ? m_lsStyle : -1;
+}
+
 float CCSBot::LsAggro() const
 {
 	float profile = GetProfile()->GetAggression();
-	return m_lsAggro >= 0.0f ? 0.6f * m_lsAggro + 0.4f * profile : profile;
+	float w = LsPersonWeight();
+	return m_lsAggro >= 0.0f ? w * m_lsAggro + (1.0f - w) * profile : profile;
 }
 
 float CCSBot::LsTeamwork() const
@@ -91,7 +108,9 @@ float CCSBot::LsTeamwork() const
 	float profile = GetProfile()->GetTeamwork();
 	if (m_lsTeam < 0.0f)
 		return profile;
-	return profile >= 0.45f ? Q_max(profile, m_lsTeam) : 0.6f * m_lsTeam + 0.4f * profile;
+	float w = LsPersonWeight();
+	float mixed = w * m_lsTeam + (1.0f - w) * profile;
+	return profile >= 0.45f ? Q_max(profile, mixed) : mixed;
 }
 
 bool LsSolo()
@@ -111,9 +130,9 @@ bool CCSBot::LsLoner() const
 	if (LsSolo())
 		return true;
 	// lurkers and ninjas go their own way, objective players stay with it
-	if (m_lsStyle == LS_STYLE_LURKER || m_lsStyle == LS_STYLE_NINJA)
+	if (LsStyle() == LS_STYLE_LURKER || LsStyle() == LS_STYLE_NINJA)
 		return true;
-	if (m_lsStyle == LS_STYLE_OBJECTIVE)
+	if (LsStyle() == LS_STYLE_OBJECTIVE)
 		return false;
 	return GetProfile() && LsTeamwork() < 0.35f;
 }
@@ -919,7 +938,7 @@ void CCSBot::LsFightHabits(float range, bool crouchAndHold)
 // teammate defusing, hold the site they're at and answer a hostage; a few never do
 bool CCSBot::LsShirksObjective()
 {
-	if (IsCarryingBomb() || m_lsStyle == LS_STYLE_OBJECTIVE || !IsRogue())
+	if (IsCarryingBomb() || LsStyle() == LS_STYLE_OBJECTIVE || !IsRogue())
 		return false;
 	if (cv_bot_ls_solo.value <= 0.0f || LsSolo())
 		return true;

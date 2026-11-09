@@ -155,7 +155,7 @@ bool CCSBot::LsPlayForTime()
 		return false;
 	float bold = LsAggro();
 	// (campers and careful players hold back; rushers and knifers go in)
-	float lean = (m_lsStyle == LS_STYLE_CAMPER || m_lsStyle == LS_STYLE_CAREFUL) ? 1.3f : (m_lsStyle == LS_STYLE_RUSHER || m_lsStyle == LS_STYLE_KNIFER) ? 0.5f : 1.0f;
+	float lean = (LsStyle() == LS_STYLE_CAMPER || LsStyle() == LS_STYLE_CAREFUL) ? 1.3f : (LsStyle() == LS_STYLE_RUSHER || LsStyle() == LS_STYLE_KNIFER) ? 0.5f : 1.0f;
 	return RANDOM_FLOAT(0.0f, 1.0f) < Q_min(0.95f, (LsMatch() ? 0.8f : 0.55f) * (1.2f - bold) * lean);
 }
 
@@ -166,7 +166,7 @@ bool CCSBot::LsHoldsPlant()
 	if (!LsFight() || LsSolo() || m_iTeam != TERRORIST || !TheCSBots()->IsBombPlanted() || GetTask() != GUARD_TICKING_BOMB)
 		return false;
 	// (a rusher can't sit still; a camper loves it)
-	float lean = m_lsStyle == LS_STYLE_CAMPER ? 1.3f : m_lsStyle == LS_STYLE_RUSHER ? 0.6f : 1.0f;
+	float lean = LsStyle() == LS_STYLE_CAMPER ? 1.3f : LsStyle() == LS_STYLE_RUSHER ? 0.6f : 1.0f;
 	return RANDOM_FLOAT(0.0f, 1.0f) < Q_min(0.97f, (LsMatch() ? 0.9f : 0.65f) * lean);
 }
 

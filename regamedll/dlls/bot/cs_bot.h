@@ -1027,7 +1027,7 @@ public:
 	// profile alone
 	float LsAggro() const;
 	float LsTeamwork() const;
-	int LsStyle() const { return m_lsStyle; }		// LS_STYLE_*, -1 when not told
+	int LsStyle() const;							// LS_STYLE_*, -1 when not told (or the personality slider is at 0)
 	int LsTemper() const { return m_lsTemper; }
 	int LsHumor() const { return m_lsHumor; }
 	void LsSetPersona(float aggro, float team, int style, int temper, int humor) { m_lsAggro = aggro; m_lsTeam = team; m_lsStyle = style; m_lsTemper = temper; m_lsHumor = humor; }
