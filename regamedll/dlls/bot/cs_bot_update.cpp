@@ -79,10 +79,11 @@ void CCSBot::Upkeep()
 				if (aimBlocked)
 					m_aimSpot.z -= feetOffset * 0.25f;
 
-				// (Loner-Strike: the head showing: aimed from the upper chest (a newcomer) to the
-				// head (a good player), the hand's landing error and the recoil spreading it)
+				// (Loner-Strike: the head showing: aimed from the chest (a newcomer) to the neck (a
+				// good player), the hand's landing error and the recoil spreading it. Batch 27's
+				// 4-20 units made headshots 41-52% of kills and halved hits per shot)
 				else if (LsFight() && IsEnemyPartVisible(HEAD))
-					m_aimSpot.z += 4.0f + 16.0f * LsSkill();
+					m_aimSpot.z += 2.0f + 9.0f * LsSkill();
 
 				else if (!IsEnemyPartVisible(HEAD))
 				{
