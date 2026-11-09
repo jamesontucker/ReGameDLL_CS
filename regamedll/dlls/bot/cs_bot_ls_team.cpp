@@ -509,6 +509,11 @@ static void LsExecuteRound()
 	}
 }
 
+bool CCSBot::LsLurksOtherSite()
+{
+	return LsStyle() == LS_STYLE_LURKER ? LsTrait(89) < 0.6f : LsTrait(89) < 0.12f;
+}
+
 bool CCSBot::LsExecuting()
 {
 	return m_iTeam == TERRORIST && m_lsPushRound == LsRoundSerial() && !TheCSBots()->IsBombPlanted() && IsAlive();

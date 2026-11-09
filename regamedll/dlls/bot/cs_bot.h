@@ -1053,7 +1053,7 @@ public:
 	bool LsRetakeRush();							// a CT after the plant who can still make it to the bomb: no dawdling
 	bool LsExecuting();								// a T in the round's site push: no dawdling
 	bool LsRushing() { return LsRetakeRush() || LsExecuting(); }
-	bool LsLurksOtherSite() { return LsStyle() == LS_STYLE_LURKER ? LsTrait(89) < 0.6f : LsTrait(89) < 0.12f; }
+	bool LsLurksOtherSite();						// a T who goes for the other site this round (a lurker, mostly)
 	void LsExecuteTick();							// Ts staging near the site, then going in together
 	void LsHideNearBomb(const Vector &bomb);		// guarding the planted bomb: a spot near it no teammate has (stock: the same best spot for all)								// at the site with the bomb: plant now, or walk in to a better spot first
 	bool LsFetchesBomb();							// one of the nearest two Ts to a dropped bomb
