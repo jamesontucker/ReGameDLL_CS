@@ -364,7 +364,16 @@ void CCSBot::Update()
 		// (Loner-Strike: not a flash or smoke it was getting out for something else: the gun)
 		if (IsUsingGrenade() && !LsNadeGunUp())
 		{
-			ThrowGrenade(&threat->pev->origin);
+			// (Loner-Strike: Gun Game's grenade level: an arc that lands on them, from far
+			// enough not to get caught in it)
+			Vector aim, burst;
+			float range = float((threat->pev->origin - pev->origin).Length());
+			if (LsFight() && LsNadeOnly() && range > 250.0f && range < 1100.0f && LsPlanThrow(WEAPON_HEGRENADE, threat->pev->origin, 220.0f, &aim, &burst))
+				ThrowGrenade(&aim);
+			else if (!(LsFight() && LsNadeOnly() && range <= 250.0f))
+				ThrowGrenade(&threat->pev->origin);
+			else
+				EquipPistol();	// (too close for it: the Glock)
 		}
 		else
 		{
@@ -547,7 +556,7 @@ void CCSBot::Update()
 	}
 #endif
 
-	if (IsHunting() && IsWellPastSafe() && IsUsingGrenade() && !LsNadeBusy() && !LsNadeOnly())	// (Loner-Strike: not mid-throw, nor on Gun Game's grenade level)
+	if (IsHunting() && IsWellPastSafe() && IsUsingGrenade() && !LsNadeBusy() && !(LsFight() && LsNadeOnly()))	// (Loner-Strike: not mid-throw, nor on Gun Game's grenade level)
 	{
 		EquipBestWeapon(MUST_EQUIP);
 	}

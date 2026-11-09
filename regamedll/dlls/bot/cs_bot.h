@@ -1041,6 +1041,7 @@ public:
 	bool LsPlayForTime();							// a CT alone against several before the plant: fall back
 	bool LsHoldsPlant();							// guarding the planted bomb: hold, don't chase
 	void LsEarlyPick(CBasePlayer *pVictim, CBasePlayer *pKiller);	// a T teammate got an early kill: push
+	bool LsFetchesBomb();							// one of the nearest two Ts to a dropped bomb
 	// (end team)
 	// Loner-Strike nades (cs_bot_ls_nades.cpp)
 	void LsNadeReset();								// a new round
@@ -1096,6 +1097,7 @@ public:
 	bool LsDucksOff(const CNavArea *area, const Vector &spot) const;	// getting off a ladder into a low space: crouch
 	bool LsCalm() const;							// nothing has startled it lately (calm looks turn slower)
 	bool LsPuppetLooking() const { return gpGlobals->time < m_lsPuppet.lookUntil; }	// a plugin has it looking somewhere
+	bool LsStuck() const { return m_isStuck; }
 	// (end moves)
 	// Loner-Strike (cs_bot_ls.cpp): each bot keeps to itself and moves like a person
 	unsigned int LsSeed();
@@ -1166,6 +1168,8 @@ private:
 		float nextJump = 0.0f, jumpEvery = 0.0f, jumpUntil = 0.0f;
 		float walkUntil = 0.0f;
 		float followUntil = 0.0f;
+		char holdTag[8] = "";					// who asked for the hold (gm_botfun bf, gm_humanbots hb, gm_botchat bc)
+		bool fast = false;							// a quick look (a flick, a spin): not the calm turn
 	};
 	LsPuppet m_lsPuppet;
 	void LsCheckMap();
@@ -1906,12 +1910,11 @@ public:
 			if (ladder)
 			{
 				// (Loner-Strike: a ladder this bot just got stuck on is out for a while)
-				if (m_bot->LsBadLadder(ladder))
-					return -1.0f;
-
 				// ladders are slow to use
 				const float ladderPenalty = 1.0f;
 				dist = ladderPenalty * ladder->m_length;
+				if (m_bot->LsBadLadder(ladder))
+					dist *= 20.0f;
 
 				// if we are currently escorting hostages, avoid ladders (hostages are confused by them)
 				//if (m_bot->GetHostageEscortCount())

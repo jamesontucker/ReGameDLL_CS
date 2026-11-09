@@ -492,6 +492,8 @@ void CCSBot::LsNadeUpdate()
 		if ((pev->origin - m_lsNadeFrom).IsLengthGreaterThan(180.0f))
 		{
 			LsNadeStop();
+			if (!m_lsSneaking && !IsRunning())
+				Run();
 			return;
 		}
 		UTIL_MakeVectors(m_lsNadeAng);
@@ -847,8 +849,6 @@ static bool LsScrimEconomy()
 // The pistol round (the first, or after a reset or a half: everyone on next to nothing)
 static bool LsPistolRound()
 {
-	if (CSGameRules()->m_iTotalRoundsPlayed == 0)
-		return true;
 	for (int i = 1; i <= gpGlobals->maxClients; i++)
 	{
 		CBasePlayer *pPlayer = UTIL_PlayerByIndex(i);
@@ -1068,8 +1068,15 @@ void CCSBot::LsSaveCheck()
 				Idle();
 			return;
 		}
-		if (IsAttacking() || IsDefusingBomb())
+		if (IsDefusingBomb())
 			return;
+		// spotted while saving: out of their sight, not standing there tracking them
+		if (IsAttacking() || IsEnemyVisible())
+		{
+			if (!IsHiding() && GetTimeSinceAttacked() > 1.0f)
+				TryToRetreat();
+			return;
+		}
 
 		// away from the bomb, or somewhere out of the way, only shooting if it must
 		const Vector *bomb = planted ? GetGameState()->GetBombPosition() : nullptr;
@@ -1126,7 +1133,11 @@ void CCSBot::LsSaveCheck()
 // out to be thrown, not swapped for the knife
 bool CCSBot::LsNadeOnly() const
 {
-	return TheCSBots() && TheCSBots()->GetScenario() == CCSBotManager::SCENARIO_DEATHMATCH && !m_rgpPlayerItems[PRIMARY_WEAPON_SLOT] && !m_rgpPlayerItems[PISTOL_SLOT] && m_rgpPlayerItems[GRENADE_SLOT];
+	if (!TheCSBots() || TheCSBots()->GetScenario() != CCSBotManager::SCENARIO_DEATHMATCH || m_rgpPlayerItems[PRIMARY_WEAPON_SLOT] || !m_rgpPlayerItems[GRENADE_SLOT])
+		return false;
+	// (Gun Game may hand out a Glock with the grenade: still the grenade level)
+	CBasePlayerItem *pPistol = m_rgpPlayerItems[PISTOL_SLOT];
+	return !pPistol || pPistol->m_iId == WEAPON_GLOCK18;
 }
 
 // The pistol round: not ten vests. Each bot its own way, the same every time (from its name):

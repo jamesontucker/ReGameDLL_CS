@@ -127,7 +127,8 @@ float CCSBot::LsTeamwork() const
 		return profile;
 	float pull = 0.8f * LsPersonWeight();
 	float v = Q_max(0.0f, Q_min(1.0f, profile + pull * (m_lsTeam - profile)));
-	return profile >= 0.45f ? Q_max(0.45f, v) : v;
+	// (a team style, or a match: a team player whoever it is)
+	return (profile >= 0.45f || LsMatch()) ? Q_max(0.45f, v) : v;
 }
 
 float CCSBot::LsSkill() const
@@ -141,7 +142,11 @@ float CCSBot::LsSkill() const
 // Every bot for itself (deathmatch-type modes, bot_ls_solo)
 bool LsSolo()
 {
-	return cv_bot_ls_solo.value > 0.0f && TheCSBots() && TheCSBots()->GetScenario() == CCSBotManager::SCENARIO_DEATHMATCH;
+	// (the mode says so: bot_deathmatch or free-for-all; a map with no bomb or hostages but
+	// rounds and teams, an aim_ or fy_ map, isn't deathmatch)
+	if (cv_bot_ls_solo.value <= 0.0f || !TheCSBots() || TheCSBots()->GetScenario() != CCSBotManager::SCENARIO_DEATHMATCH)
+		return false;
+	return cv_bot_deathmatch.value > 0.0f || (CSGameRules() && CSGameRules()->IsFreeForAll());
 }
 
 // This bot goes its own way: everyone in deathmatch, and on objective maps a bot with
@@ -188,13 +193,61 @@ static float LsUnit(unsigned int h)
 
 // From the bot's name, so a regular (the same name every time it shows up) keeps the same
 // habits; worked out again when the name changes
+// A name without its clan tag: a bracketed tag at the start or end ([TAG], (TAG), {TAG},
+// <TAG>, |TAG|, -=TAG=-) is dropped, so "[FX]Dave" and "Dave" are the same person
+static void LsBareName(const char *name, char *out, size_t size)
+{
+	static const char *const opens = "[({<|", *const closes = "])}>|";
+	const char *s = name ? name : "";
+	size_t len = Q_strlen(s);
+	size_t a = 0, b = len;
+	for (int pass = 0; pass < 2; pass++)
+	{
+		// leading
+		while (a < b && s[a] == ' ')
+			a++;
+		const char *o = a < b ? Q_strchr(opens, s[a]) : nullptr;
+		if (o && *o)
+		{
+			char c = closes[o - opens];
+			for (size_t k = a + 1; k < b; k++)
+				if (s[k] == c) { a = k + 1; break; }
+		}
+		else if (b - a > 4 && s[a] == '-' && s[a + 1] == '=')
+		{
+			for (size_t k = a + 2; k + 1 < b; k++)
+				if (s[k] == '=' && s[k + 1] == '-') { a = k + 2; break; }
+		}
+		// trailing
+		while (b > a && s[b - 1] == ' ')
+			b--;
+		const char *c2 = b > a ? Q_strchr(closes, s[b - 1]) : nullptr;
+		if (c2 && *c2)
+		{
+			char op = opens[c2 - closes];
+			for (size_t k = b - 1; k-- > a;)
+				if (s[k] == op) { b = k; break; }
+		}
+	}
+	if (b <= a)
+	{
+		a = 0;
+		b = len;
+	}
+	size_t n = Q_min(b - a, size - 1);
+	Q_memcpy(out, s + a, n);
+	out[n] = 0;
+}
+
 unsigned int CCSBot::LsSeed()
 {
 	if (!(pev->netname == m_lsSeedName))
 	{
 		m_lsSeedName = pev->netname;
+		char bare[64];
+		LsBareName(STRING(pev->netname), bare, sizeof(bare));
 		unsigned int h = 2166136261U;
-		for (const char *c = STRING(pev->netname); c && *c; c++)
+		for (const char *c = bare; *c; c++)
 			h = (h ^ (unsigned char)*c) * 16777619U;
 		m_lsSeed = LsMix(h);
 	}
@@ -450,8 +503,8 @@ bool CCSBot::LsUpdatePause()
 		return false;
 	m_lsNextPauseCheck = gpGlobals->time + RANDOM_FLOAT(0.8f, 1.2f);
 
-	// only when nothing is going on
-	if (IsAttacking() || GetTimeSinceLastSawEnemy() < 8.0f || IsOnLadder() || IsCarryingBomb() || LsBusy())
+	// only when nothing is going on (and not stuck: getting free comes first)
+	if (IsAttacking() || GetTimeSinceLastSawEnemy() < 8.0f || IsOnLadder() || IsCarryingBomb() || LsBusy() || m_isStuck)
 		return false;
 
 	// the bomb is down: no time for that
@@ -526,8 +579,8 @@ void CCSBot::LsPuppetUpdate()
 		return;
 
 	// a fight, or anything that matters, comes first
-	// (and nothing holds it on a ladder, in the air, or blinded)
-	if (IsAttacking() || m_isEnemyVisible || LsBusy() || !LsPuppetActive() || IsOnLadder() || !(pev->flags & FL_ONGROUND) || IsBlind())
+	// (and nothing holds it on a ladder or blinded)
+	if (IsAttacking() || m_isEnemyVisible || LsBusy() || !LsPuppetActive() || IsOnLadder() || IsBlind())
 	{
 		LsPuppetRelease();
 		return;
@@ -535,13 +588,15 @@ void CCSBot::LsPuppetUpdate()
 
 	float now = gpGlobals->time;
 
-	if (now < p.holdUntil)
+	// in the air (a jump in spawn): a look carries on, a hold or crouch waits for the ground
+	bool grounded = (pev->flags & FL_ONGROUND) != 0;
+	if (grounded && now < p.holdUntil)
 	{
 		ClearMovement();
 		ResetStuckMonitor();
 	}
 
-	if (now < p.crouchUntil)
+	if (grounded && now < p.crouchUntil)
 	{
 		bool down = true;
 		if (p.crouchEvery > 0.0f)
@@ -626,8 +681,9 @@ void Bot_LsServerCommand()
 	const char *what = CMD_ARGV(2);
 	float now = gpGlobals->time;
 
-	// not while it's in a fight or busy with something that matters
-	if (!FStrEq(what, "release") && (me->IsAttacking() || me->IsEnemyVisible() || me->LsBusy()))
+	// not while it's in a fight or busy with something that matters, nor while something
+	// has startled it
+	if (!FStrEq(what, "release") && (me->IsAttacking() || me->IsEnemyVisible() || me->LsBusy() || (LsFight() && !me->LsCalm())))
 		return;
 
 	me->LsPuppetCommand(what, now);
@@ -638,15 +694,26 @@ void CCSBot::LsPuppetCommand(const char *what, float now)
 	LsPuppet &p = m_lsPuppet;
 	const float most = 30.0f;
 
+	// release [tag]: with a tag, only that plugin's hold goes (one plugin's habit doesn't
+	// cancel another's)
 	if (FStrEq(what, "release"))
 	{
+		const char *tag = CMD_ARGC() > 3 ? CMD_ARGV(3) : "";
+		if (tag[0] && p.holdTag[0] && !FStrEq(tag, p.holdTag))
+			return;
 		LsPuppetRelease();
 		return;
 	}
 
+	// hold <secs> [tag]: the longest hold asked for stands
 	if (FStrEq(what, "hold"))
 	{
-		p.holdUntil = now + Q_min(LsArg(3, 1.0f), most);
+		float until = now + Q_min(LsArg(3, 1.0f), most);
+		if (until > p.holdUntil)
+		{
+			p.holdUntil = until;
+			Q_strlcpy(p.holdTag, CMD_ARGC() > 4 ? CMD_ARGV(4) : "");
+		}
 	}
 	else if (FStrEq(what, "crouch"))
 	{
@@ -667,7 +734,9 @@ void CCSBot::LsPuppetCommand(const char *what, float now)
 		p.lookAt = Vector(LsArg(3), LsArg(4), LsArg(5));
 		p.lookStart = now;
 		p.lookUntil = now + Q_min(LsArg(6, 1.0f), most);
-		p.nodEvery = FStrEq(what, "nod") ? Q_max(0.15f, LsArg(7, 0.35f)) : 0.0f;
+		p.nodEvery = FStrEq(what, "nod") ? Q_max(0.08f, LsArg(7, 0.35f)) : 0.0f;
+		// (look ... 1: a quick look, a flick or a spin; a nod is always quick)
+		p.fast = FStrEq(what, "nod") || LsArg(7) > 0.0f;
 	}
 	else if (FStrEq(what, "goto"))
 	{
@@ -789,6 +858,10 @@ CNavArea *CCSBot::LsPickHuntArea()
 			for (int k = 0; k < n; k++)
 				nearest = Q_min(nearest, float((*c - avoid[k]).Length2D()));
 			score += nearest;
+
+			// a deathmatch with hardly anyone left: toward where an enemy was last seen
+			if (LsSolo() && GetEnemiesRemaining() <= 2 && GetTimeSinceLastSawEnemy() < 30.0f)
+				score -= 0.5f * float((*c - GetLastKnownEnemyPosition()).Length2D());
 
 			// near what this side looks after
 			if (kept)
@@ -1052,7 +1125,8 @@ void CCSBot::LsSneak()
 	float sneaky = 0.6f * (1.0f - LsAggro()) + 0.4f * LsTrait(21);
 	if (LsMatch())
 		sneaky += 0.25f;
-	bool sneakyCarrier = IsCarryingBomb() && (LsStyle() == LS_STYLE_LURKER || LsStyle() == LS_STYLE_NINJA || LsStyle() == LS_STYLE_CAREFUL);
+	bool sneakyCarrier = IsCarryingBomb() && (LsStyle() == LS_STYLE_LURKER || LsStyle() == LS_STYLE_NINJA || LsStyle() == LS_STYLE_CAREFUL)
+		&& CSGameRules() && CSGameRules()->GetRoundRemainingTime() > 40.0f;
 	bool loud = IsHurrying() || GetTimeSinceAttacked() < 5.0f || GetTimeSinceLastSawEnemy() < 6.0f || IsSafe()
 		|| (TheCSBots() && TheCSBots()->IsBombPlanted()) || (IsCarryingBomb() && !sneakyCarrier) || GetHostageEscortCount() > 0;
 
@@ -1244,7 +1318,7 @@ void CCSBot::LsTrace()
 // it turns towards where the shots came from and treats it as a loud noise there.
 void CCSBot::LsShotAt(CBasePlayer *pShooter, const Vector &impact)
 {
-	if (!IsAlive() || !pShooter->IsPlayer() || pShooter == this || !pShooter->IsAlive() || !IsEnemy(pShooter))
+	if (!IsAlive() || IsBlind() || !pShooter->IsPlayer() || pShooter == this || !pShooter->IsAlive() || !IsEnemy(pShooter))
 		return;
 	if (IsAttacking() && IsEnemyVisible())
 		return;
@@ -1348,9 +1422,10 @@ bool CCSBot::LsObjectiveThreat(bool defusing)
 	}
 	if (threat <= 0.0f)
 		return false;
-	// a threat it already decided about
+	// a threat it already decided about (a noise: at most once every few seconds; footsteps
+	// keep refreshing it)
 	float stamp = Q_max(GetTimeSinceAttacked() < 0.4f ? now : -1.0f, Q_max(m_lsShotAtAt, m_noiseTimestamp));
-	if (stamp <= m_lsObjRolledAt + 0.5f)
+	if (stamp <= m_lsObjRolledAt + (threat < 0.5f ? 3.0f : 0.5f))
 		return false;
 	m_lsObjRolledAt = stamp;
 
@@ -1478,9 +1553,16 @@ bool CCSBot::LsBangThrough(const Vector &target)
 		return false;
 	if ((in.vecEndPos - out.vecEndPos).IsLengthGreaterThan(pWeapon->m_iId == WEAPON_AWP ? 40.0f : 22.0f))
 		return false;
-	// nobody on this side of the wall in the way
+	// nobody on this side of the wall in the way, nor one of ours just past it
 	UTIL_TraceLine(eye, in.vecEndPos, dont_ignore_monsters, ENT(pev), &mates);
 	if (mates.flFraction < 1.0f && mates.pHit && CBaseEntity::Instance(mates.pHit) && CBaseEntity::Instance(mates.pHit)->IsPlayer())
+		return false;
+	bool mateBehind = false;
+	LsForTeammates(this, [&](CBasePlayer *pPlayer) {
+		if ((pPlayer->pev->origin - target).IsLengthLessThan(160.0f))
+			mateBehind = true;
+	});
+	if (mateBehind)
 		return false;
 
 	bool slow = pWeapon->m_iId == WEAPON_AWP || pWeapon->m_iId == WEAPON_SCOUT || pWeapon->m_iId == WEAPON_DEAGLE;
@@ -1547,6 +1629,20 @@ void CCSBot::LsHeard(GameEventType event, CBasePlayer *pPlayer, float dist)
 	if (IsVisible(pPlayer, false))
 		return;
 
+	// a floor above or below (a ceiling in between, a long way round): a glance up or down,
+	// listening; no pre-aim at the ceiling, no spraying through it, no rush
+	float dz = float(pPlayer->pev->origin.z - pev->origin.z);
+	if (dz > 120.0f || dz < -120.0f)
+	{
+		Vector glance = pev->origin + pev->view_ofs + Vector(0, 0, dz > 0.0f ? 80.0f : -80.0f);
+		if (now - m_lsPreAimAt > 3.0f)
+		{
+			SetLookAt("Loner-Strike: listening", &glance, PRIORITY_LOW, RANDOM_FLOAT(0.6f, 1.2f));
+			m_lsPreAimAt = now;
+		}
+		return;
+	}
+
 	// where they are, as heard (less exact further away)
 	float err = dist * 0.15f;
 	Vector heard = pPlayer->pev->origin + Vector(RANDOM_FLOAT(-err, err), RANDOM_FLOAT(-err, err), 0.0f);
@@ -1557,6 +1653,7 @@ void CCSBot::LsHeard(GameEventType event, CBasePlayer *pPlayer, float dist)
 		&& RANDOM_FLOAT(0.0f, 1.0f) < 0.5f + 0.4f * (aggro - 0.6f))
 	{
 		Run();
+		Hurry(2.5f);
 		MoveTo(&heard, FASTEST_ROUTE);
 		LsWhy("reload-push");
 		return;

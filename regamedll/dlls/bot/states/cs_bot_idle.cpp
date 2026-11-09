@@ -215,7 +215,8 @@ void IdleState::OnUpdate(CCSBot *me)
 				}
 
 				// if the bomb is loose (on the ground), go get it
-				if (me->NoticeLooseBomb())
+				// (Loner-Strike: the nearest one or two, not the whole team)
+				if (me->NoticeLooseBomb() && me->LsFetchesBomb())
 				{
 					me->FetchBomb();
 					return;

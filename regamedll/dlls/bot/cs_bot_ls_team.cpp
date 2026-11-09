@@ -241,3 +241,21 @@ void CCSBot::LsAvenge(CBasePlayer *pVictim, CBasePlayer *pKiller)
 		LsWhy("avenge");
 	}
 }
+
+// A dropped bomb: the nearest one or two Ts go for it (the rest carry on), so the whole team
+// doesn't run into the doorway the carrier just died in
+bool CCSBot::LsFetchesBomb()
+{
+	if (!LsFight())
+		return true;
+	CBaseEntity *pBomb = TheCSBots()->GetLooseBomb();
+	if (!pBomb)
+		return true;
+	float mine = float((pBomb->pev->origin - pev->origin).Length());
+	int closer = 0;
+	LsForTeammates(this, [&](CBasePlayer *pPlayer) {
+		if ((pBomb->pev->origin - pPlayer->pev->origin).IsLengthLessThan(mine))
+			closer++;
+	});
+	return closer < 2;
+}

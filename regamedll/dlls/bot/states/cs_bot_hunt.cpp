@@ -76,7 +76,8 @@ void HuntState::OnUpdate(CCSBot *me)
 			}
 
 			// if we notice the bomb lying on the ground, go get it
-			if (me->NoticeLooseBomb())
+			// (Loner-Strike: the nearest one or two, not the whole team)
+			if (me->NoticeLooseBomb() && me->LsFetchesBomb())
 			{
 				me->FetchBomb();
 				return;

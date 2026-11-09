@@ -289,7 +289,11 @@ void AttackState::OnUpdate(CCSBot *me)
 
 		if (repath && m_repathTimer.IsElapsed())
 		{
-			me->ComputePath(TheNavAreaGrid.GetNearestNavArea(&pEnemy->pev->origin), &pEnemy->pev->origin, FASTEST_ROUTE);
+			// (Loner-Strike: someone out of sight: to where it last saw them)
+			const Vector *to = (LsFight() && !me->IsEnemyVisible()) ? &me->GetLastKnownEnemyPosition() : &pEnemy->pev->origin;
+			me->ComputePath(TheNavAreaGrid.GetNearestNavArea(to), to, FASTEST_ROUTE);
+			if (LsFight() && me->IsEnemyVisible() && (pEnemy->pev->origin - me->pev->origin).IsLengthLessThan(160.0f) && RANDOM_FLOAT(0.0f, 1.0f) < 0.25f)
+				me->Jump();
 
 			const float repathInterval = 0.5f;
 			m_repathTimer.Start(repathInterval);
@@ -483,7 +487,7 @@ void AttackState::OnUpdate(CCSBot *me)
 	// (Loner-Strike: in deathmatch people go after someone who ducked out of sight, the
 	// aggressive ones straight away)
 	if (LsFight() && LsSolo())
-		chaseTime = 0.3f + 1.7f * (1.0f - me->LsAggro());
+		chaseTime = (0.3f + 1.7f * (1.0f - me->LsAggro())) * (me->pev->health < 20.0f ? 2.0f : 1.0f);
 	else if (LsFight())
 		chaseTime = Q_max(0.2f, chaseTime - me->LsChaseExtra());
 

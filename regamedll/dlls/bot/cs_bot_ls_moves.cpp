@@ -75,7 +75,7 @@ static bool LsCornerFree(CCSBot *me)
 	if (me->IsAttacking() || me->IsUsingLadder() || me->IsOnLadder() || me->IsBlind() || me->IsSafe()
 		|| !(me->pev->flags & FL_ONGROUND) || me->IsJumping() || me->IsCrouching() || me->IsReloading()
 		|| (me->IsHurrying() && me->LsSkill() < 0.5f) || me->GetHostageEscortCount() > 0 || me->IsDefusingBomb() || me->IsThrowingGrenade()
-		|| me->GetEnemiesRemaining() <= 0 || me->LsFallingBack())
+		|| me->GetEnemiesRemaining() <= 0 || me->LsFallingBack() || me->LsStuck())
 		return false;
 	const CNavArea *area = me->GetLastKnownArea();
 	if (area && (area->GetAttributes() & (NAV_JUMP | NAV_CROUCH)))
@@ -764,6 +764,9 @@ bool CCSBot::LsCalm() const
 	if (IsEnemyVisible() || GetTimeSinceLastSawEnemy() < 4.0f || GetTimeSinceAttacked() < 3.0f || now - m_lsShotAtAt < 3.0f)
 		return false;
 	if (m_noiseTimestamp > 0.0f && now - m_noiseTimestamp < 2.0f && m_noisePriority >= PRIORITY_MEDIUM)
+		return false;
+	// (a pre-aim at footsteps just now, or a quick look a plugin asked for: quick turns)
+	if (now - m_lsPreAimAt < 1.5f || (now < m_lsPuppet.lookUntil && m_lsPuppet.fast))
 		return false;
 	return !IsUsingLadder() && !IsBlind();
 }

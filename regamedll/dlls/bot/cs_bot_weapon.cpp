@@ -39,6 +39,14 @@ void CCSBot::FireWeaponAtEnemy()
 		return;
 	}
 
+	// Loner-Strike: spawn-protected (can't be hurt yet): the patient, better players hold fire
+	// till it wears off; newer and trigger-happy ones shoot at the glow anyway
+	if (LsFight() && pEnemy->pev->takedamage == DAMAGE_NO && LsTrait(80) < 0.15f + 0.7f * LsSkill() - 0.3f * (LsAggro() - 0.5f))
+	{
+		StopRapidFire();
+		return;
+	}
+
 	if (IsUsingSniperRifle())
 	{
 		// if we're using a sniper rifle, don't fire until we are standing still, are zoomed in, and not rapidly moving our view

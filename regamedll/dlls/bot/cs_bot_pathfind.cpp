@@ -279,7 +279,7 @@ bool CCSBot::UpdateLadderMovement()
 	{
 		// (Loner-Strike: that ladder is out for this bot for a while, so the next path
 		// doesn't send it straight back to it)
-		if (LsFight())
+		if (LsFight() && GetTimeSinceAttacked() > 3.0f && !IsAttacking())
 			LsLadderStuck(m_pathLadder);
 
 		// jump off ladder and give up
