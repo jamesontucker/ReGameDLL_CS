@@ -361,7 +361,8 @@ void CCSBot::Update()
 		// adjust our personal "safe" time
 		AdjustSafeTime();
 
-		if (IsUsingGrenade())
+		// (Loner-Strike: not a flash or smoke it was getting out for something else: the gun)
+		if (IsUsingGrenade() && !LsNadeGunUp())
 		{
 			ThrowGrenade(&threat->pev->origin);
 		}
@@ -503,7 +504,14 @@ void CCSBot::Update()
 		FireWeaponAtEnemy();
 	}
 
-	if (IsEndOfSafeTime() && IsUsingGrenade() && (IsWellPastSafe() || !IsUsingHEGrenade()) && !m_isWaitingToTossGrenade)
+	// Loner-Strike: grenades with a purpose, the newer players' early dumps, and keeping
+	// the gun in a lost round (cs_bot_ls_nades.cpp)
+	if (LsFight() && !LsSolo())
+	{
+		LsNadeUpdate();
+		LsSaveCheck();
+	}
+	else if (IsEndOfSafeTime() && IsUsingGrenade() && (IsWellPastSafe() || !IsUsingHEGrenade()) && !m_isWaitingToTossGrenade)
 	{
 		Vector target;
 		if (FindGrenadeTossPathTarget(&target))
@@ -539,7 +547,7 @@ void CCSBot::Update()
 	}
 #endif
 
-	if (IsHunting() && IsWellPastSafe() && IsUsingGrenade())
+	if (IsHunting() && IsWellPastSafe() && IsUsingGrenade() && !LsNadeBusy())	// (Loner-Strike: not mid-throw)
 	{
 		EquipBestWeapon(MUST_EQUIP);
 	}

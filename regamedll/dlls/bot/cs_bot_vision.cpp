@@ -328,6 +328,16 @@ bool CCSBot::IsVisible(CBasePlayer *pPlayer, bool testFOV, unsigned char *visPar
 		*visParts = testVisParts;
 
 	if (testVisParts != NONE)
+	{
+		// (Loner-Strike: its enemy seen with no smoke in the way, for the smoke rule below)
+		if (LsFight())
+			const_cast<CCSBot *>(this)->LsSawClear(pPlayer);
+		return true;
+	}
+
+	// Loner-Strike: hidden only by smoke: an enemy it was on before the smoke, or one
+	// shooting at it from in there, it still shoots at (for a moment)
+	if (LsFight() && const_cast<CCSBot *>(this)->LsSeeIntoSmoke(pPlayer, testFOV, visParts))
 		return true;
 
 	return false;
