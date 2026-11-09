@@ -1095,6 +1095,26 @@ CBasePlayer *CCSBot::FindMostDangerousThreat()
 			// (several facing it at once: it feels it; LsOverwhelmed reads this)
 			if (facing >= 2)
 				m_lsOverwhelmedAt = gpGlobals->time;
+			// (no flicking between two close threats: it stays on the one it's fighting for a
+			// moment, and switches only for one clearly worse, or one that's shooting it)
+			CBasePlayer *pCur = m_enemy;
+			if (pBest && pCur && pBest != pCur && pCur->IsAlive())
+			{
+				float curScore = -1.0f;
+				for (t = 0; t < threatCount; t++)
+				{
+					if (threat[t].enemy == pCur)
+					{
+						curScore = threat[t].range * (IsPlayerLookingAtMe(pCur) ? 0.3f : 1.0f) * 0.6f;
+						break;
+					}
+				}
+				bool shotBy = GetAttacker() == pBest && GetTimeSinceAttacked() < 0.5f;
+				if (curScore >= 0.0f && !shotBy && (gpGlobals->time - m_lsThreatSince < 0.4f + 0.4f * (1.0f - LsSkill()) || best > 0.5f * curScore))
+					return pCur;
+			}
+			if (pBest && pBest != static_cast<CBasePlayer *>(m_enemy))
+				m_lsThreatSince = gpGlobals->time;
 			if (pBest)
 				return pBest;
 		}

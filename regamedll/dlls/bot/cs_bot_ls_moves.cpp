@@ -1000,15 +1000,19 @@ void CCSBot::LsFlankCheck()
 	SetLookAt("Loner-Strike: shot from the side", &at, PRIORITY_HIGH, RANDOM_FLOAT(0.3f, 0.6f));
 }
 
-// The enemy's position as this bot's hand is following it: where they were a moment ago (60 ms
-// for the best, 200 ms for a newcomer). On a sudden change of direction the aim carries on the
-// old way, then catches up, as people's does
+// The enemy's position as this bot's eyes and hand estimate it: what it saw a moment ago (60 ms
+// for the best, 200 ms for a newcomer), a little noisy, run through a tracking filter (an
+// alpha-beta filter, the steady form of a Kalman filter) that keeps a position and a velocity
+// and predicts where they are now. A steady run is led well; a sudden change of direction takes
+// the filter a moment to believe, so the aim carries on past and comes back, further the faster
+// they were going, as people's does. The better the player, the quicker the filter adapts
 Vector CCSBot::LsLaggedEnemyPos()
 {
 	CBasePlayer *pEnemy = m_enemy;
 	float now = gpGlobals->time;
 	if (!pEnemy)
 		return m_lastEnemyPosition;
+	float skill = LsSkill();
 	if (pEnemy != static_cast<CBasePlayer *>(m_lsTrackOf) || now - m_lsTrackAt[(m_lsTrackN + 7) % 8] > 0.5f)
 	{
 		m_lsTrackOf = pEnemy;
@@ -1018,41 +1022,55 @@ Vector CCSBot::LsLaggedEnemyPos()
 			m_lsTrackPos[i] = pEnemy->pev->origin;
 			m_lsTrackAt[i] = now;
 		}
+		m_lsEstPos = pEnemy->pev->origin;
+		m_lsEstVel = g_vecZero;
+		m_lsEstAt = now;
 	}
-	// (a sample every 30 ms or so is plenty)
 	if (now - m_lsTrackAt[(m_lsTrackN + 7) % 8] >= 0.03f)
 	{
 		m_lsTrackPos[m_lsTrackN % 8] = pEnemy->pev->origin;
 		m_lsTrackAt[m_lsTrackN % 8] = now;
 		m_lsTrackN++;
 	}
-	float lag = 0.06f + 0.14f * (1.0f - LsSkill()) + 0.03f * LsTrait(94);
+	// what its eyes report: the position a moment ago
+	float lag = 0.06f + 0.14f * (1.0f - skill) + 0.03f * LsTrait(94);
 	float want = now - lag;
-	// the newest sample at or before then (the buffer holds about a quarter of a second)
-	Vector best = m_lsTrackPos[(m_lsTrackN + 7) % 8];
-	float bestAt = -1.0f;
+	Vector seen = m_lsTrackPos[(m_lsTrackN + 7) % 8];
+	float seenAt = -1.0f, oldest = 1e9f;
+	Vector oldestPos = seen;
 	for (int i = 0; i < 8; i++)
 	{
-		if (m_lsTrackAt[i] <= want && m_lsTrackAt[i] > bestAt)
+		if (m_lsTrackAt[i] <= want && m_lsTrackAt[i] > seenAt)
 		{
-			bestAt = m_lsTrackAt[i];
-			best = m_lsTrackPos[i];
+			seenAt = m_lsTrackAt[i];
+			seen = m_lsTrackPos[i];
+		}
+		if (m_lsTrackAt[i] < oldest)
+		{
+			oldest = m_lsTrackAt[i];
+			oldestPos = m_lsTrackPos[i];
 		}
 	}
-	if (bestAt < 0.0f)
-	{
-		// (not that far back yet: the oldest there is)
-		float oldest = 1e9f;
-		for (int i = 0; i < 8; i++)
-		{
-			if (m_lsTrackAt[i] < oldest)
-			{
-				oldest = m_lsTrackAt[i];
-				best = m_lsTrackPos[i];
-			}
-		}
-	}
-	return best;
+	if (seenAt < 0.0f)
+		seen = oldestPos;
+	// (and a little noisy: a few units, more for a newer player and further off)
+	float range = float((pEnemy->pev->origin - pev->origin).Length());
+	float noise = (2.0f + 6.0f * (1.0f - skill)) * Q_min(2.0f, range / 800.0f);
+	seen.x += RANDOM_FLOAT(-noise, noise);
+	seen.y += RANDOM_FLOAT(-noise, noise);
+
+	// the filter: predict, then correct toward what was seen (alpha for position, beta for
+	// velocity: higher for the better players, who adapt faster)
+	float dt = Q_max(0.001f, now - m_lsEstAt);
+	m_lsEstAt = now;
+	Vector predicted = m_lsEstPos + m_lsEstVel * dt;
+	Vector residual = seen - predicted;
+	float alpha = 0.35f + 0.35f * skill, beta = (0.08f + 0.22f * skill) / dt * 0.1f;
+	m_lsEstPos = predicted + residual * alpha;
+	m_lsEstVel = m_lsEstVel + residual * Q_min(beta, 3.0f);
+	m_lsEstVel.z = 0.0f;
+	// (aim where it thinks they are now: the estimate carried forward over its own lag)
+	return m_lsEstPos + m_lsEstVel * lag;
 }
 
 // A hand's tremor: a smooth wander that drifts back to centre (an Ornstein-Uhlenbeck walk),

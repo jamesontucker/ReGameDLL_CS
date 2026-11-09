@@ -1226,7 +1226,8 @@ private:
 	bool m_lsWasBlind = false;
 	float m_lsOverwhelmedAt = -10.0f;				// several enemies facing it at once, then
 	float m_lsFlankReactAt = 0.0f;
-	float m_lsOverwhelmRollAt = 0.0f;					// next check of a hit from someone it isn't fighting
+	float m_lsOverwhelmRollAt = 0.0f;
+	float m_lsThreatSince = 0.0f;					// when it last changed whom it's fighting					// next check of a hit from someone it isn't fighting
 	struct LsHand
 	{
 		bool moving = false;
@@ -1245,6 +1246,9 @@ private:
 	Vector m_lsTrackPos[8];
 	float m_lsTrackAt[8] = {};
 	int m_lsTrackN = 0;
+	Vector m_lsEstPos;								// the tracking filter's estimate of the enemy
+	Vector m_lsEstVel;
+	float m_lsEstAt = 0.0f;
 	float m_lsTremorYaw = 0.0f;
 	float m_lsTremorPitch = 0.0f;
 	float m_lsWhiffUntil = 0.0f;					// a spray that hit nothing: shakier till then
