@@ -1085,8 +1085,8 @@ void CCSBot::LsTremorTick()
 	// a long room is smaller than a shaky hand's wander)
 	if (IsAttacking() && m_enemy.IsValid())
 	{
-		float far = Q_max(0.0f, Q_min(1.0f, (float((m_enemy->pev->origin - pev->origin).Length()) - 500.0f) / 1000.0f));
-		sigma *= 1.0f - (0.25f + 0.35f * LsSkill()) * far;
+		float distant = Q_max(0.0f, Q_min(1.0f, (float((m_enemy->pev->origin - pev->origin).Length()) - 500.0f) / 1000.0f));
+		sigma *= 1.0f - (0.25f + 0.35f * LsSkill()) * distant;
 	}
 	const float theta = 6.0f;
 	auto gauss = []() { return (RANDOM_FLOAT(-1.0f, 1.0f) + RANDOM_FLOAT(-1.0f, 1.0f) + RANDOM_FLOAT(-1.0f, 1.0f)) * 0.577f; };
