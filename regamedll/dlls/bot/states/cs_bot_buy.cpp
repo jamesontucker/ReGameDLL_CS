@@ -255,6 +255,9 @@ void BuyState::OnUpdate(CCSBot *me)
 			return;
 
 		m_isInitialDelay = false;
+		// (Loner-Strike: planned again now: a scrim calls the side's buy a moment after
+		// the round starts, after OnEnter)
+		me->LsPlanBuy();
 	}
 
 	// if we're done buying and still in the freeze period, wait
