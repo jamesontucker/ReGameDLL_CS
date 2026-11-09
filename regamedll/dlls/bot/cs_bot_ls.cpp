@@ -402,18 +402,40 @@ int LsRoundSerial()
 }
 
 // The Ts' site for this round: one for the whole team (most head there, the carrier too)
+static int s_tSiteRound = -1;
+static int s_tSiteZone = 0;
+static int s_tSiteDeaths = 0;
+static float s_tSiteLastDeath = -1.0f;
+
 const CCSBotManager::Zone *LsTSite()
 {
-	static int s_round = -1;
-	static int s_zone = 0;
 	if (!TheCSBots() || TheCSBots()->GetZoneCount() <= 0)
 		return nullptr;
-	if (s_round != LsRoundSerial())
+	if (s_tSiteRound != LsRoundSerial())
 	{
-		s_round = LsRoundSerial();
-		s_zone = RANDOM_LONG(0, TheCSBots()->GetZoneCount() - 1);
+		s_tSiteRound = LsRoundSerial();
+		s_tSiteZone = RANDOM_LONG(0, TheCSBots()->GetZoneCount() - 1);
+		s_tSiteDeaths = 0;
 	}
-	return TheCSBots()->GetZone(Q_min(s_zone, TheCSBots()->GetZoneCount() - 1));
+	return TheCSBots()->GetZone(Q_min(s_tSiteZone, TheCSBots()->GetZoneCount() - 1));
+}
+
+// A T died near the round's site early on: two of those and the team reads it as the CTs
+// stacking that site, and goes for the other one ("they're all at b, go a")
+void LsTSiteDeath(CBasePlayer *pVictim)
+{
+	const CCSBotManager::Zone *site = LsTSite();
+	if (!site || pVictim->m_iTeam != TERRORIST || TheCSBots()->IsBombPlanted() || TheCSBots()->GetZoneCount() < 2
+		|| TheCSBots()->GetElapsedRoundTime() > 60.0f || gpGlobals->time == s_tSiteLastDeath)
+		return;
+	s_tSiteLastDeath = gpGlobals->time;
+	if ((pVictim->pev->origin - site->m_center).IsLengthGreaterThan(1300.0f))
+		return;
+	if (++s_tSiteDeaths >= 2)
+	{
+		s_tSiteZone = (s_tSiteZone + 1) % TheCSBots()->GetZoneCount();
+		s_tSiteDeaths = 0;
+	}
 }
 
 // The round's time left; with rounds that never run out, plenty (rather than below zero,
@@ -739,6 +761,38 @@ void CCSBot::LsPuppetUpdate()
 // up after a fight; it ends when it's done, runs out, the leader's gone, or "nvm"
 void CCSBot::LsOrderTick()
 {
+	// handing the bomb over: walk to them, face them, drop it at their feet
+	if (m_lsGiveTo.IsValid())
+	{
+		CBasePlayer *pTo = m_lsGiveTo;
+		float now = gpGlobals->time;
+		if (!IsCarryingBomb() || !pTo->IsAlive() || now > m_lsGiveUntil || TheCSBots()->IsBombPlanted())
+			m_lsGiveTo = nullptr;
+		else if (!IsAttacking())
+		{
+			Vector to = pTo->pev->origin - pev->origin;
+			if (to.Make2D().IsLengthLessThan(140.0f))
+			{
+				Vector face = pTo->pev->origin;
+				SetLookAt("Loner-Strike: handing the bomb", &face, PRIORITY_HIGH, 1.0f);
+				float off = NormalizeAngle(UTIL_VecToYaw(to) - pev->v_angle.y);
+				if (off > -35.0f && off < 35.0f)
+				{
+					SelectItem("weapon_c4");
+					DropPlayerItem("weapon_c4");
+					m_lsGiveTo = nullptr;
+					Idle();
+				}
+			}
+			else if (now >= m_lsGiveMoveAt)
+			{
+				m_lsGiveMoveAt = now + 1.0f;
+				Vector at = pTo->pev->origin;
+				MoveTo(&at, FASTEST_ROUTE);
+			}
+		}
+	}
+
 	LsOrder &o = m_lsOrder;
 	if (o.kind == 0)
 		return;
@@ -878,7 +932,13 @@ void Bot_LsServerCommand()
 	// (look ... 2: an urgent turn, toward someone it senses behind it mid-fight: only an
 	// enemy already in sight or a ladder stops it)
 	bool urgent = FStrEq(what, "look") && LsArg(7) >= 2.0f;
-	if (urgent)
+	// (plant / dropbomb: the carrier's own orders; only a fight or a ladder stops them)
+	if (FStrEq(what, "plant") || FStrEq(what, "dropbomb"))
+	{
+		if (!me->IsCarryingBomb() || me->IsAttacking() || me->IsEnemyVisible() || me->IsOnLadder() || TheCSBots()->IsBombPlanted())
+			return;
+	}
+	else if (urgent)
 	{
 		if (me->IsEnemyVisible() || me->IsOnLadder())
 			return;
@@ -1025,6 +1085,53 @@ void CCSBot::LsPuppetCommand(const char *what, float now)
 			pev->vuser1.x = m_lsOrder.until;	// (and on till then: gm_pubserver won't kick it)
 		}
 	}
+	else if (FStrEq(what, "plant"))
+	{
+		// plant -1 [x y z]: to the site nearest that point (or to the bot) and plant there
+		const CCSBotManager::Zone *zone = nullptr;
+		if (CMD_ARGC() > 6)
+		{
+			Vector at(LsArg(4), LsArg(5), LsArg(6));
+			zone = TheCSBots()->GetClosestZone(&at);
+		}
+		else
+			zone = TheCSBots()->GetClosestZone(&pev->origin);
+		const Vector *pos = zone ? TheCSBots()->GetRandomPositionInZone(zone) : nullptr;
+		if (!pos)
+			return;
+		m_lsPlantOrderZone = zone;
+		m_lsPlantOrderRound = LsRoundSerial();
+		// (no more tagging along or waiting for others: told to go)
+		m_lsCarrierFollowRound = LsRoundSerial();
+		m_lsCarrierWaits = 2;
+		if (IsFollowing())
+			StopFollowing();
+		m_lsCarrierFollowUntil = 0.0f;
+		SetTask(PLANT_BOMB);
+		Vector to = *pos;
+		MoveTo(&to, FASTEST_ROUTE);
+		pev->fuser4 = now; m_lsOrderFields = true;	// (taken)
+		LsWhy("plant-order");
+		return;
+	}
+	else if (FStrEq(what, "dropbomb"))
+	{
+		// dropbomb <player>: over to them and the bomb dropped at their feet
+		int index = Q_atoi(CMD_ARGV(3));
+		CBasePlayer *pTo = (index >= 1 && index <= gpGlobals->maxClients) ? UTIL_PlayerByIndex(index) : nullptr;
+		if (!pTo || !pTo->IsAlive() || pTo == this || pTo->m_iTeam != m_iTeam)
+			return;
+		m_lsGiveTo = pTo;
+		m_lsGiveUntil = now + 25.0f;
+		m_lsGiveMoveAt = 0.0f;
+		m_lsCarrierFollowRound = LsRoundSerial();
+		m_lsCarrierFollowUntil = 0.0f;
+		if (IsFollowing())
+			StopFollowing();
+		pev->fuser4 = now; m_lsOrderFields = true;	// (taken)
+		LsWhy("give-bomb");
+		return;
+	}
 	else if (FStrEq(what, "follow"))
 	{
 		int index = Q_atoi(CMD_ARGV(3));
@@ -1150,7 +1257,7 @@ CNavArea *CCSBot::LsPickHuntArea()
 		else if (m_iTeam == TERRORIST && TheCSBots()->GetScenario() == CCSBotManager::SCENARIO_RESCUE_HOSTAGES)
 		{
 			CBaseEntity *pHostage = nullptr;
-			while (kept < 16 && (pHostage = UTIL_FindEntityByClassname(pHostage, "hostage_entity")))
+			while (kept < 16 && (pHostage = UTIL_FindEntityByClassname(pHostage, "hostage_entity")))	// (kept close: the building, not the yard)
 			{
 				if (pHostage->IsAlive() && !(pHostage->pev->effects & EF_NODRAW))
 					keep[kept++] = pHostage->pev->origin;
@@ -1243,7 +1350,9 @@ CNavArea *CCSBot::LsPickHuntArea()
 						at = k;
 					}
 				}
-				score += site < 1400.0f ? 400.0f - 220.0f * float(Q_min(crowd[at], 4)) : -1500.0f;
+				// (Ts by the hostages: closer than to a bomb site, they hold the building)
+				float within = (m_iTeam == TERRORIST && TheCSBots()->GetScenario() == CCSBotManager::SCENARIO_RESCUE_HOSTAGES) ? 900.0f : 1400.0f;
+				score += site < within ? 400.0f - 220.0f * float(Q_min(crowd[at], 4)) : -1500.0f;
 			}
 
 			if (score > bestScore)
@@ -1279,10 +1388,11 @@ bool CCSBot::LsShouldSpread()
 
 	bool crowded = false;
 	LsForTeammates(this, [&](CBasePlayer *pPlayer) {
-		if ((pPlayer->pev->origin - pev->origin).IsLengthLessThan(320.0f) && (LsSolo() || !LsClanMates(this, pPlayer)))
+		// (deathmatch: a pair walking together is a blob in the making; further apart, and surely)
+		if ((pPlayer->pev->origin - pev->origin).IsLengthLessThan(LsSolo() ? 450.0f : 320.0f) && (LsSolo() || !LsClanMates(this, pPlayer)))
 			crowded = true;
 	});
-	if (!crowded || RANDOM_FLOAT(0.0f, 1.0f) > 0.7f)
+	if (!crowded || RANDOM_FLOAT(0.0f, 1.0f) > (LsSolo() ? 0.9f : 0.7f))
 		return false;
 
 	m_lsNextSpreadCheck = gpGlobals->time + RANDOM_FLOAT(5.0f, 8.0f);

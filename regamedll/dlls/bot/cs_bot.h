@@ -1048,7 +1048,9 @@ public:
 	void LsFloorGunTick();							// fy_ maps: no gun at the start of a round, it runs for one on the floor
 	void LsStalemateTick();						// rounds with no objective: a long quiet ends with someone going looking
 	const CCSBotManager::Zone *LsQuietZone();		// the bomb site with the fewest teammates at it (ties at random)
-	bool LsPlantHere();								// at the site with the bomb: plant now, or walk in to a better spot first
+	bool LsPlantHere();
+	const CCSBotManager::Zone *LsPlantOrder() const;	// where a person told it to plant, this round
+	void LsHideNearBomb(const Vector &bomb);		// guarding the planted bomb: a spot near it no teammate has (stock: the same best spot for all)								// at the site with the bomb: plant now, or walk in to a better spot first
 	bool LsFetchesBomb();							// one of the nearest two Ts to a dropped bomb
 	// (end team)
 	// Loner-Strike nades (cs_bot_ls_nades.cpp)
@@ -1061,7 +1063,9 @@ public:
 	bool LsNadeGunUp();								// an enemy turned up with a flash or smoke in hand: the gun instead
 	void LsNadeStart(int id, const Vector &aim, float pause);
 	void LsNadeStop();
-	void LsStartOver();							// respawned or teleported: what it was in the middle of ends
+	void LsStartOver();
+	bool LsOverwhelmed();							// several facing it at once: the less bold back off (once a fight, by its roll)
+	void LsFlankCheck();							// hit by someone it isn't fighting: turns to them, or a look, by its skill							// respawned or teleported: what it was in the middle of ends
 	bool LsBlindTick();
 	void LsSeedAs(const char *name) { if (!FStrEq(name, m_lsSeedAs)) { Q_strlcpy(m_lsSeedAs, name); m_lsSeedName = 0; } }	// (gm_people's persona comes as the bot joins, before its habits are used)
 	void LsSniperStep();							// after a sniper shot: a step aside while the zoom comes back							// flashed: its own way of coping (true: dealt with this frame)
@@ -1217,6 +1221,11 @@ private:
 	float m_lsMapCheckedAt = -1.0f;						// the frame the map was last checked (once a frame is enough)
 	float m_lsDiedAt = -100.0f;						// when it was last killed
 	bool m_lsWasBlind = false;
+	float m_lsOverwhelmedAt = -10.0f;				// several enemies facing it at once, then
+	float m_lsFlankReactAt = 0.0f;
+	float m_lsOverwhelmRollAt = 0.0f;					// next check of a hit from someone it isn't fighting
+	bool m_lsHandMoving = false;						// calm looks: a burst of the mouse under way
+	float m_lsHandRestUntil = 0.0f;					// ...and the hand resting till then
 	float m_lsSnipeStepAt = -10.0f;
 	int m_lsSnipeStepDir = 0;
 	float m_lsBlindTurnAt = 0.0f;					// flashed: next change of what it's doing
@@ -1274,7 +1283,12 @@ private:
 	float m_lsCarrierCheckAt = 0.0f;				// the carrier: next look at whether to let someone go first
 	int m_lsCarrierRound = -1;
 	int m_lsCarrierWaits = 0;
-	int m_lsCarrierFollowRound = -1;				// the round the carrier went along with a teammate
+	int m_lsCarrierFollowRound = -1;
+	const CCSBotManager::Zone *m_lsPlantOrderZone = nullptr;	// a person told it where to plant
+	int m_lsPlantOrderRound = -1;
+	EntityHandle<CBasePlayer> m_lsGiveTo;			// a person asked for the bomb: handing it over
+	float m_lsGiveUntil = 0.0f;
+	float m_lsGiveMoveAt = 0.0f;				// the round the carrier went along with a teammate
 	float m_lsCarrierFollowUntil = 0.0f;
 	EntityHandle<CBasePlayer> m_lsCarrierLeader;					// a T elsewhere: next look at a dropped bomb
 	float m_lsDefuseCheckAt = 0.0f;					// (looked at four times a second, not every frame)
@@ -1415,7 +1429,8 @@ bool LsOwnMemory();
 bool LsHeSafe(CCSBot *me, const Vector &burst);
 float LsTimeLeft();	// the round's time left (a lot, when the round never runs out)
 int LsRoundSerial();
-const CCSBotManager::Zone *LsTSite();	// the Ts' site this round	// a count of rounds that only goes up (a restart sets the game's own back to 0)
+const CCSBotManager::Zone *LsTSite();	// the Ts' site this round
+void LsTSiteDeath(CBasePlayer *pVictim);	// a T down at it early: two and the team goes for the other	// a count of rounds that only goes up (a restart sets the game's own back to 0)
 void Bot_LsRegisterCVars();
 void Bot_LsServerCommand();
 

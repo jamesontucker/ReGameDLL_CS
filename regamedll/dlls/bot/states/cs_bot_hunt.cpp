@@ -89,7 +89,7 @@ void HuntState::OnUpdate(CCSBot *me)
 			if (!me->LsShirksObjective() && me->GetGameState()->IsBombPlanted() && bombPos)
 			{
 				me->SetTask(CCSBot::GUARD_TICKING_BOMB);
-				me->Hide(TheNavAreaGrid.GetNavArea(bombPos));
+				me->LsHideNearBomb(*bombPos);	// (Loner-Strike: spread out round it, not one spot for all)
 				return;
 			}
 		}

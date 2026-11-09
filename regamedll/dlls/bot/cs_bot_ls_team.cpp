@@ -86,7 +86,7 @@ void CCSBot::LsTeamTick()
 			{
 				Follow(pBest);
 				m_lsCarrierLeader = pBest;
-				m_lsCarrierFollowUntil = now + RANDOM_FLOAT(15.0f, 30.0f);
+				m_lsCarrierFollowUntil = now + RANDOM_FLOAT(10.0f, 20.0f);
 				LsWhy("carrier-with-team");
 			}
 		}
@@ -116,7 +116,7 @@ void CCSBot::LsTeamTick()
 			Idle();
 			LsWhy("carrier-no-chase");
 		}
-		else if (GetTask() == PLANT_BOMB && HasPath() && !IsAtBombsite() && LsTimeLeft() > 40.0f && m_lsCarrierWaits < 3
+		else if (GetTask() == PLANT_BOMB && HasPath() && !IsAtBombsite() && LsTimeLeft() > 40.0f && m_lsCarrierWaits < 2
 			&& LsStyle() != LS_STYLE_RUSHER && TheCSBots()->GetElapsedRoundTime() < 75.0f)
 		{
 			Vector goal = GetPathEndpoint();
@@ -131,7 +131,7 @@ void CCSBot::LsTeamTick()
 			if (mine < 1500.0f && mine > 500.0f && mates > 0 && !ahead)
 			{
 				m_lsCarrierWaits++;
-				Hide(GetLastKnownArea(), RANDOM_FLOAT(2.0f, 4.5f), 250.0f);
+				Hide(GetLastKnownArea(), RANDOM_FLOAT(1.5f, 3.0f), 250.0f);
 				LsWhy("carrier-waits");
 			}
 		}
@@ -491,11 +491,49 @@ bool CCSBot::LsTeamHeard(GameEventType event, CBasePlayer *pPlayer)
 		}
 	}
 	m_lsTradeAt = now;
-	float chance = LsLoner() ? 0.15f : 0.35f + 0.5f * LsTeamwork();
+	// (loners mostly leave it, but a lurker or ninja may use it to get round them)
+	float chance = LsLoner() ? ((LsStyle() == LS_STYLE_LURKER || LsStyle() == LS_STYLE_NINJA) ? 0.4f : 0.15f) : 0.35f + 0.5f * LsTeamwork();
 	if (LsMatch())
 		chance = Q_min(0.95f, chance + 0.2f);
 	if (RANDOM_FLOAT(0.0f, 1.0f) > chance)
 		return false;
+	// how it helps, by who it is: the timid hang back out of it; lurkers, ninjas and the
+	// careful good ones go round and flank the enemy (from another side); the rest go in close
+	// behind them to trade
+	float aggro = LsAggro();
+	CBasePlayer *pFoe = pPlayer->IsBot() ? static_cast<CCSBot *>(pPlayer)->GetEnemy() : nullptr;
+	if (aggro < 0.25f && LsTrait(93) < 0.5f && !LsMatch())
+	{
+		Hide(GetLastKnownArea(), RANDOM_FLOAT(3.0f, 6.0f), 400.0f);
+		LsWhy("hang-back");
+		return true;
+	}
+	bool flanker = LsStyle() == LS_STYLE_LURKER || LsStyle() == LS_STYLE_NINJA || (LsStyle() == LS_STYLE_CAREFUL && LsSkill() > 0.5f);
+	if (flanker && pFoe && pFoe->IsAlive() && RANDOM_FLOAT(0.0f, 1.0f) < 0.6f)
+	{
+		// (a spot to the side of the enemy, away from the line the teammate is shooting along)
+		Vector line = pFoe->pev->origin - pPlayer->pev->origin;
+		line.z = 0.0f;
+		if (!line.IsZero())
+		{
+			line = line.Normalize();
+			Vector side(-line.y, line.x, 0.0f);
+			if (DotProduct(side, pev->origin - pPlayer->pev->origin) < 0.0f)
+				side = side * -1.0f;
+			Vector flank = pFoe->pev->origin + side * 450.0f;
+			CNavArea *pArea = TheNavAreaGrid.GetNearestNavArea(&flank);
+			if (pArea)
+			{
+				Vector to = *pArea->GetCenter();
+				MoveTo(&to, SAFEST_ROUTE);
+				if (HasPath())
+				{
+					LsWhy("flank");
+					return true;
+				}
+			}
+		}
+	}
 	// close behind them, not on top of them
 	Vector to = pPlayer->pev->origin - pev->origin;
 	Vector spot = pPlayer->pev->origin - to * (200.0f / d);
@@ -841,7 +879,7 @@ bool CCSBot::LsPlantHere()
 	if (!zone)
 		return true;
 	// (already in the middle of it, or right by cover: here's fine)
-	if ((pev->origin - zone->m_center).Make2D().IsLengthLessThan(200.0f))
+	if ((pev->origin - zone->m_center).Make2D().IsLengthLessThan(320.0f))
 		return true;
 	// (a few spots in the site: further in from where it came in, and near a hiding spot)
 	CNavArea *best = nullptr;
@@ -866,9 +904,65 @@ bool CCSBot::LsPlantHere()
 	if (!best)
 		return true;
 	m_lsPlantSpot = *best->GetCenter();
-	m_lsPlantBy = now + 6.0f;
+	m_lsPlantBy = now + 4.0f;
 	MoveTo(&m_lsPlantSpot, FASTEST_ROUTE);
 	SetTask(PLANT_BOMB);
 	LsWhy("plant-spot");
 	return false;
+}
+
+// Guarding the planted bomb. Stock gives every guard the same best hiding spot near it, and
+// three of them end up crouched shoulder to shoulder. People spread round it: a spot near the
+// bomb (seeing it if possible) that no teammate is at or on the way to
+void CCSBot::LsHideNearBomb(const Vector &bomb)
+{
+	CNavArea *pBombArea = TheNavAreaGrid.GetNavArea(&bomb);
+	if (!LsFight())
+	{
+		Hide(pBombArea);
+		return;
+	}
+	const Vector *best = nullptr;
+	float bestScore = -1e9f;
+	for (auto pSpot : TheHidingSpotList)
+	{
+		const Vector *pos = pSpot->GetPosition();
+		float d = float((*pos - bomb).Length2D());
+		if (d < 150.0f || d > 1000.0f || fabs(pos->z - bomb.z) > 250.0f)
+			continue;
+		bool taken = false;
+		LsForTeammates(this, [&](CBasePlayer *pPlayer) {
+			if ((pPlayer->pev->origin - *pos).IsLengthLessThan(300.0f))
+				taken = true;
+			else if (pPlayer->IsBot())
+			{
+				CCSBot *pBot = static_cast<CCSBot *>(pPlayer);
+				if (pBot->IsHiding() && (pBot->m_hideState.GetHidingSpot() - *pos).IsLengthLessThan(300.0f))
+					taken = true;
+			}
+		});
+		if (taken)
+			continue;
+		TraceResult tr;
+		Vector eye = *pos + Vector(0, 0, HalfHumanHeight);
+		UTIL_TraceLine(eye, bomb + Vector(0, 0, 8.0f), ignore_monsters, ENT(pev), &tr);
+		float score = RANDOM_FLOAT(0.0f, 250.0f) - 0.4f * float(fabs(d - 500.0f)) + (tr.flFraction >= 1.0f ? 400.0f : 0.0f);
+		if (score > bestScore)
+		{
+			bestScore = score;
+			best = pos;
+		}
+	}
+	if (!best)
+	{
+		Hide(pBombArea);
+		return;
+	}
+	Hide(best);
+	LsWhy("guard-spread");
+}
+
+const CCSBotManager::Zone *CCSBot::LsPlantOrder() const
+{
+	return m_lsPlantOrderRound == LsRoundSerial() ? m_lsPlantOrderZone : nullptr;
 }

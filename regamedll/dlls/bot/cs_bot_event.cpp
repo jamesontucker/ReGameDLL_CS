@@ -79,6 +79,9 @@ void CCSBot::OnEvent(GameEventType event, CBaseEntity *pEntity, CBaseEntity *pOt
 	// Loner-Strike: a teammate dying in sight is remembered as danger by this bot alone
 	if (event == EVENT_PLAYER_DIED && pPlayer && pPlayer != this && pPlayer->IsPlayer() && BotRelationship(pPlayer) == BOT_TEAMMATE)
 		LsSawTeammateDie(pPlayer);
+	// ...and Ts dying at the round's site early: the team may switch sites
+	if (event == EVENT_PLAYER_DIED && pPlayer && pPlayer->IsPlayer() && LsFight())
+		LsTSiteDeath(pPlayer);
 	// ...and an enemy dying early in the round to a teammate is a reason to push
 	if (event == EVENT_PLAYER_DIED && pPlayer && pPlayer->IsPlayer() && pOther && pOther->IsPlayer())
 		LsEarlyPick(pPlayer, static_cast<CBasePlayer *>(pOther));

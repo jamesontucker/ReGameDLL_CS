@@ -960,3 +960,42 @@ void CCSBot::LsSniperStep()
 	else if (m_lsSnipeStepDir == 2)
 		StrafeRight();
 }
+
+// Several enemies facing it at once (the threat ranking notes it): a person feels overrun and,
+// unless bold, gets out; the bold, or someone with the upper hand on health, fights on. Rolled
+// once per moment it happens, not every frame
+bool CCSBot::LsOverwhelmed()
+{
+	if (!LsFight() || LsSolo())
+		return false;
+	float now = gpGlobals->time;
+	if (now - m_lsOverwhelmedAt > 0.5f || now < m_lsOverwhelmRollAt)
+		return false;
+	m_lsOverwhelmRollAt = now + 4.0f;
+	float bold = 0.6f * LsAggro() + 0.4f * LsTrait(92);
+	return RANDOM_FLOAT(0.0f, 1.0f) > 0.25f + 0.6f * bold + (LsHealth() > 80.0f ? 0.1f : 0.0f);
+}
+
+// Hit by someone it isn't fighting (a flanker, while it's busy with another): it notices. The
+// better ones turn to the new threat when they can see them; the rest at least look that way
+// a moment (and in deathmatch and Gun Game too: being shot from the side is felt everywhere)
+void CCSBot::LsFlankCheck()
+{
+	if (!LsFight() || !IsAttacking() || !IsAlive())
+		return;
+	float now = gpGlobals->time;
+	if (now < m_lsFlankReactAt || GetTimeSinceAttacked() > 0.25f)
+		return;
+	CBasePlayer *pFlanker = GetAttacker();
+	if (!pFlanker || !pFlanker->IsAlive() || pFlanker == GetEnemy() || !IsEnemy(pFlanker))
+		return;
+	m_lsFlankReactAt = now + 0.8f;
+	if (IsVisible(pFlanker, false) && RANDOM_FLOAT(0.0f, 1.0f) < 0.35f + 0.5f * LsSkill())
+	{
+		Attack(pFlanker);
+		LsWhy("flanked");
+		return;
+	}
+	Vector at = pFlanker->pev->origin + Vector(0, 0, HalfHumanHeight);
+	SetLookAt("Loner-Strike: shot from the side", &at, PRIORITY_HIGH, RANDOM_FLOAT(0.3f, 0.6f));
+}

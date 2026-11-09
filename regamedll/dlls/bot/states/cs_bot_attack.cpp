@@ -229,7 +229,7 @@ void AttackState::OnUpdate(CCSBot *me)
 			? ((isPinnedDown && me->LsHealth() < 35.0f)
 				|| (!CSGameRules()->IsFreeForAll() && m_isCoward && me->LsStyle() != LS_STYLE_RUSHER
 					&& (me->OutnumberedCount() >= 3 || (me->OutnumberedCount() >= 2 && me->LsHealth() < 50.0f))))
-			: LsFight() ? (isPinnedDown || me->LsPlayForTime() || (me->IsOutnumbered() && m_isCoward))
+			: LsFight() ? (isPinnedDown || me->LsPlayForTime() || (me->IsOutnumbered() && m_isCoward) || me->LsOverwhelmed())
 			: (isPinnedDown ||
 			(me->IsOutnumbered() && m_isCoward) ||
 			(me->OutnumberedCount() >= 2 && me->GetProfile()->GetAggression() < 1.0f)))

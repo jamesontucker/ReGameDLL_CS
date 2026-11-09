@@ -85,9 +85,10 @@ void CCSBot::UpdateLookAngles()
 		// it turns it as fast as before
 		if (LsFight() && LsCalm())
 		{
-			stiffness = 110.0f;
-			damping = 21.0f;
-			maxAccel = 1400.0f;
+			// (a quick flick of the wrist, a touch past and back: see the hand below)
+			stiffness = 340.0f;
+			damping = 24.0f;
+			maxAccel = 4200.0f;
 		}
 	}
 
@@ -193,6 +194,41 @@ void CCSBot::UpdateLookAngles()
 		}
 		}
 	}
+
+	// Loner-Strike: a hand on a mouse, calm: the view sits still most of the time and moves in
+	// short quick bursts (a person's is still about two thirds of the time, a turn lasts about
+	// a fifth of a second), not the slow steady pan of a spring always chasing its target. It
+	// moves only once the target is a few degrees off and a moment has passed since the last
+	// turn; a big change goes at once
+	if (LsFight() && !IsAttacking() && LsCalm() && !IsUsingLadder())
+	{
+		float now = gpGlobals->time;
+		float offYaw = NormalizeAngle(useYaw - pev->v_angle.y);
+		float offPitch = NormalizeAngle(usePitch - pev->v_angle.x);
+		float off = Q_max(float(fabs(offYaw)), float(fabs(offPitch)));
+		if (!m_lsHandMoving)
+		{
+			float deadZone = 3.0f + 3.5f * LsTrait(91);
+			bool rested = now >= m_lsHandRestUntil;
+			if (off > 25.0f || (off > deadZone && rested))
+				m_lsHandMoving = true;
+			else
+			{
+				m_lookYawVel = m_lookPitchVel = 0.0f;
+				return;
+			}
+		}
+		// (arrived, and not still swinging: the hand stops, and rests a moment)
+		if (off < 1.5f && fabs(m_lookYawVel) < 25.0f && fabs(m_lookPitchVel) < 25.0f)
+		{
+			m_lsHandMoving = false;
+			m_lsHandRestUntil = now + RANDOM_FLOAT(0.12f, 0.45f) + 0.5f * LsTrait(90);
+			m_lookYawVel = m_lookPitchVel = 0.0f;
+			return;
+		}
+	}
+	else
+		m_lsHandMoving = false;
 
 	// Yaw
 	float angleDiff = NormalizeAngle(useYaw - pev->v_angle.y);
@@ -1031,6 +1067,43 @@ CBasePlayer *CCSBot::FindMostDangerousThreat()
 			return nullptr;
 
 		int t;
+
+		// Loner-Strike: the biggest threat, as a person weighs it: close, facing me, shooting me;
+		// the one already being fought keeps a little edge (no flicking between targets). Two
+		// coming at it from the side outrank one busy with someone else
+		if (LsFight())
+		{
+			CBasePlayer *pBest = nullptr;
+			float best = 1e18f;
+			int facing = 0;
+			for (t = 0; t < threatCount; t++)
+			{
+				CBasePlayer *pThreat = threat[t].enemy;
+				if (pThreat->IsProtectedByShield())
+					continue;
+				float score = threat[t].range;
+				bool looking = IsPlayerLookingAtMe(pThreat);
+				if (looking)
+				{
+					score *= 0.3f;
+					facing++;
+				}
+				if (GetAttacker() == pThreat && GetTimeSinceAttacked() < 1.5f)
+					score *= 0.4f;
+				if (pThreat == currentThreat)
+					score *= 0.6f;
+				if (score < best)
+				{
+					best = score;
+					pBest = pThreat;
+				}
+			}
+			// (several facing it at once: it feels it; LsOverwhelmed reads this)
+			if (facing >= 2)
+				m_lsOverwhelmedAt = gpGlobals->time;
+			if (pBest)
+				return pBest;
+		}
 
 #ifdef REGAMEDLL_ADD
 		bool sawCloserThreat = false;

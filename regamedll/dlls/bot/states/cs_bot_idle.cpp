@@ -187,11 +187,13 @@ void IdleState::OnUpdate(CCSBot *me)
 
 					return;
 				}
-				else if (TheCSBots()->IsTimeToPlantBomb())
+				// (Loner-Strike: or a person told it to go plant)
+				else if (TheCSBots()->IsTimeToPlantBomb() || (LsFight() && me->LsPlantOrder()))
 				{
 					// move to the closest bomb site
 					// (Loner-Strike: the team's site this round, unless time's short)
-					const CCSBotManager::Zone *zone = (LsFight() && LsTimeLeft() > 30.0f && LsTSite()) ? LsTSite()
+					const CCSBotManager::Zone *zone = (LsFight() && me->LsPlantOrder()) ? me->LsPlantOrder()
+						: (LsFight() && LsTimeLeft() > 30.0f && LsTSite()) ? LsTSite()
 						: TheCSBots()->GetClosestZone(me->GetLastKnownArea(), PathCost(me));
 					if (zone)
 					{
@@ -237,7 +239,7 @@ void IdleState::OnUpdate(CCSBot *me)
 					if (bombPos)
 					{
 						me->SetTask(CCSBot::GUARD_TICKING_BOMB);
-						me->Hide(TheNavAreaGrid.GetNavArea(bombPos));
+						me->LsHideNearBomb(*bombPos);	// (Loner-Strike: spread out round it, not one spot for all)
 						return;
 					}
 				}
@@ -258,7 +260,7 @@ void IdleState::OnUpdate(CCSBot *me)
 						if (!me->LsShirksObjective())
 						{
 							me->SetTask(CCSBot::GUARD_BOMB_DEFUSER);
-							me->Hide(TheNavAreaGrid.GetNavArea(bombPos));
+							me->LsHideNearBomb(*bombPos);	// (Loner-Strike: spread out round it, not one spot for all)
 							return;
 						}
 					}
@@ -274,7 +276,7 @@ void IdleState::OnUpdate(CCSBot *me)
 					{
 						// we're not allowed to defuse, guard the bomb zone
 						me->SetTask(CCSBot::GUARD_BOMB_ZONE);
-						me->Hide(TheNavAreaGrid.GetNavArea(bombPos));
+						me->LsHideNearBomb(*bombPos);	// (Loner-Strike: spread out round it, not one spot for all)
 						me->SetDisposition(CCSBot::OPPORTUNITY_FIRE);
 						return;
 					}
@@ -395,6 +397,28 @@ void IdleState::OnUpdate(CCSBot *me)
 						me->SetTask(CCSBot::MOVE_TO_SNIPER_SPOT);
 						me->Hide(snipingArea, -1.0f, sniperHideRange);
 						me->SetDisposition(CCSBot::OPPORTUNITY_FIRE);
+						return;
+					}
+				}
+			}
+
+			// (Loner-Strike: a CT mostly holds a site or the ways into it, the one fewer teammates
+			// cover, a while at a time, rather than roaming the map; the bold sometimes push, a
+			// rusher mostly)
+			if (LsFight() && LsTeamGame() && !TheCSBots()->IsBombPlanted() && !me->GetGameState()->IsLooseBombLocationKnown()
+				&& !me->LsShirksObjective() && TheCSBots()->GetZoneCount() > 0)
+			{
+				float push = me->LsStyle() == LS_STYLE_RUSHER ? 0.7f : 0.1f + 0.35f * me->LsAggro();
+				if (RANDOM_FLOAT(0.0f, 1.0f) > push)
+				{
+					const CCSBotManager::Zone *zone = me->LsQuietZone();
+					CNavArea *area = zone ? TheCSBots()->GetRandomAreaInZone(zone) : nullptr;
+					if (area)
+					{
+						me->SetTask(CCSBot::GUARD_BOMB_ZONE);
+						me->Hide(area, RANDOM_FLOAT(15.0f, 40.0f), 900.0f);
+						me->SetDisposition(CCSBot::OPPORTUNITY_FIRE);
+						me->LsWhy("hold-site");
 						return;
 					}
 				}
