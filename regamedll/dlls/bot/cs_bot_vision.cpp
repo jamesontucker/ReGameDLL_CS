@@ -100,7 +100,8 @@ void CCSBot::UpdateLookAngles()
 	// (only while really on the move: at a walk or a stop the direction of travel jumps about
 	// and would drag the view with it)
 	// (and not while falling back looking over its shoulder at the threat)
-	if (LsFight() && !IsAttacking() && !IsUsingLadder() && pev->velocity.Length2D() > 150.0f && !LsLookingBack())
+	// (nor a look at something that startled it: shots, a teammate going down, a check)
+	if (LsFight() && !IsAttacking() && !IsUsingLadder() && pev->velocity.Length2D() > 150.0f && !LsLookingBack() && m_lookAtSpotPriority < PRIORITY_HIGH)
 	{
 		float moveYaw = UTIL_VecToYaw(pev->velocity);
 		float off = NormalizeAngle(useYaw - moveYaw);
@@ -771,6 +772,10 @@ CBasePlayer *CCSBot::FindMostDangerousThreat()
 
 			// is it alive?
 			if (!pPlayer->IsAlive())
+				continue;
+
+			// Loner-Strike: spawn-protected (can't be hurt): people hold fire until it wears off
+			if (LsFight() && pPlayer->pev->takedamage == DAMAGE_NO)
 				continue;
 
 #ifdef REGAMEDLL_ADD // REGAMEDLL_FIXES ?

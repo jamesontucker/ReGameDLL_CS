@@ -20,6 +20,7 @@ void CCSBot::LsTeamTick()
 	{
 		m_lsTeamRound = round;
 		m_lsRotateAt = 0.0f;
+		m_lsForTimeRoll = -1;
 	}
 
 	// a teammate's call it looked into first: on its way now, unless something came up
@@ -34,7 +35,7 @@ void CCSBot::LsTeamTick()
 	}
 
 	// the round's over: a bot without a gun picks one up from the floor close by
-	if (TheCSBots()->IsRoundOver() && m_lsPickupRound != round && !m_bHasPrimary && !IsAttacking())
+	if (TheCSBots()->IsRoundOver() && m_lsPickupRound != round && !m_bHasPrimary && !IsAttacking() && !LsWeaponModeOn())
 	{
 		m_lsPickupRound = round;
 		CBaseEntity *pBox = nullptr, *pBest = nullptr;
@@ -81,7 +82,7 @@ void CCSBot::LsTeamTick()
 				m_lsRetakeRound = round;
 				if (RANDOM_FLOAT(0.0f, 1.0f) < (LsMatch() ? 0.85f : 0.5f) * (0.5f + 0.5f * LsTeamwork()))
 				{
-					Hide(GetLastKnownArea(), RANDOM_FLOAT(3.0f, 6.0f));
+					Hide(GetLastKnownArea(), RANDOM_FLOAT(3.0f, 6.0f), 200.0f);
 					LsWhy("retake-wait");
 				}
 			}
@@ -156,7 +157,10 @@ bool CCSBot::LsTeamHeard(GameEventType event, CBasePlayer *pPlayer)
 {
 	if (!LsFight() || !LsTeamGame() || event != EVENT_WEAPON_FIRED || !pPlayer || pPlayer == this || !pPlayer->IsAlive())
 		return false;
-	if (!LsFree())
+	if (!LsFree() || TheCSBots()->IsRoundOver())
+		return false;
+	// (a bot shooting glass, the sky or a wall isn't in a fight)
+	if (pPlayer->IsBot() && !static_cast<CCSBot *>(pPlayer)->IsAttacking())
 		return false;
 	float now = gpGlobals->time;
 	if (now - m_lsTradeAt < 5.0f)

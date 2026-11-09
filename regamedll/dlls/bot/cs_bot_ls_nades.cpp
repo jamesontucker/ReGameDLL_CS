@@ -69,6 +69,7 @@ void CCSBot::LsNadeReset()
 	m_lsNadeNextAt = 0.0f;
 	m_lsNadeNextThink = 0.0f;
 	m_lsNadeSmokeRolled = false;
+	m_lsPistolBought = false;
 	m_lsNadeCornerRolled = false;
 	m_lsSaving = false;
 	m_lsSaveDecided = false;
@@ -484,9 +485,11 @@ void CCSBot::LsNadeUpdate()
 		if (!m_isWaitingToTossGrenade && (pWeapon->m_flStartThrow <= 0.0f || now - pWeapon->m_flStartThrow < 0.55f))
 			return;
 
+		// (walking while it gets it out, as people slow to throw)
+		Walk();
 		// walked on too far since it planned this (the flight, and who'd be facing a flash,
 		// were worked out from there): called off; otherwise the same direction from here
-		if ((pev->origin - m_lsNadeFrom).IsLengthGreaterThan(96.0f))
+		if ((pev->origin - m_lsNadeFrom).IsLengthGreaterThan(180.0f))
 		{
 			LsNadeStop();
 			return;
@@ -499,6 +502,8 @@ void CCSBot::LsNadeUpdate()
 		if (!m_isWaitingToTossGrenade)
 			ThrowGrenade(&m_lsNadeAim);
 		m_lsNadePhase = 2;
+		if (!m_lsSneaking && !IsRunning())
+			Run();
 		m_lsNadePhaseAt = now;
 		return;
 	}
@@ -813,6 +818,12 @@ static int LsTeamPlan(int team)
 
 // A mode that hands out or limits the guns (Loner-Strike's gm_weapons: knife, pistols,
 // AWP, scoutz...; or the bot cvars that keep bots to one kind): stock buying only
+static bool LsWeaponMode();
+bool CCSBot::LsWeaponModeOn()
+{
+	return LsWeaponMode();
+}
+
 static bool LsWeaponMode()
 {
 	static cvar_t *s_weapons = nullptr;
@@ -851,8 +862,17 @@ static bool LsPistolRound()
 void CCSBot::LsPlanBuy()
 {
 	m_lsBuyPlan = LS_BUY;
-	if (!LsFight() || !LsTeamGame() || !CSGameRules() || !TheCSBots() || LsWeaponMode() || LsScrimEconomy())
+	if (!LsFight() || !LsTeamGame() || !CSGameRules() || !TheCSBots() || LsWeaponMode())
 		return;
+	// a scrim calls each side's buy (gm_scrim_buy_t / _ct: 0 buy, 1 save, 2 force): followed
+	if (LsScrimEconomy())
+	{
+		cvar_t *call = CVAR_GET_POINTER(m_iTeam == CT ? "gm_scrim_buy_ct" : "gm_scrim_buy_t");
+		int v = call ? int(call->value) : 0;
+		if (!LsPistolRound() && !m_bHasPrimary)
+			m_lsBuyPlan = v == 1 ? LS_SAVE : v == 2 ? LS_FORCE : LS_BUY;
+		return;
+	}
 
 	// the pistol round, or still holding a gun from last round: the usual
 	if (LsPistolRound() || m_bHasPrimary)
@@ -1106,5 +1126,44 @@ void CCSBot::LsSaveCheck()
 // out to be thrown, not swapped for the knife
 bool CCSBot::LsNadeOnly() const
 {
-	return LsFight() && LsSolo() && !m_rgpPlayerItems[PRIMARY_WEAPON_SLOT] && !m_rgpPlayerItems[PISTOL_SLOT] && m_rgpPlayerItems[GRENADE_SLOT];
+	return TheCSBots() && TheCSBots()->GetScenario() == CCSBotManager::SCENARIO_DEATHMATCH && !m_rgpPlayerItems[PRIMARY_WEAPON_SLOT] && !m_rgpPlayerItems[PISTOL_SLOT] && m_rgpPlayerItems[GRENADE_SLOT];
+}
+
+// The pistol round: not ten vests. Each bot its own way, the same every time (from its name):
+// a vest; a Deagle; a better pistol and a flash; grenades; or (a CT) a kit and a flash
+bool CCSBot::LsBuyPistolRound()
+{
+	if (!LsFight() || !LsTeamGame() || LsWeaponMode() || !CSGameRules() || !LsPistolRound() || m_lsPistolBought)
+		return false;
+	m_lsPistolBought = true;
+	float t = LsTrait(47);
+	bool ct = m_iTeam == CT;
+	if (t < 0.35f)
+		return false;					// the usual: a vest
+	if (t < 0.55f && TheCSBots()->AllowPistols())
+		ClientCommand("deagle");
+	else if (t < 0.7f && TheCSBots()->AllowPistols())
+	{
+		ClientCommand(ct ? "fn57" : "p228");
+		if (TheCSBots()->AllowGrenades())
+			ClientCommand("flash");
+	}
+	else if (t < 0.85f || !ct || TheCSBots()->GetScenario() != CCSBotManager::SCENARIO_DEFUSE_BOMB)
+	{
+		if (TheCSBots()->AllowGrenades())
+		{
+			ClientCommand("flash");
+			ClientCommand(RANDOM_FLOAT(0.0f, 1.0f) < 0.5f ? "flash" : "hegren");
+		}
+		else
+			return false;
+	}
+	else
+	{
+		ClientCommand("defuser");
+		if (TheCSBots()->AllowGrenades())
+			ClientCommand("flash");
+	}
+	PrintIfWatched("Pistol round buy.\n");
+	return true;
 }

@@ -144,6 +144,7 @@ private:
 	int m_prefIndex;
 	int m_retries;
 	bool m_doneBuying;
+	bool m_lsEquippedDone = false;				// Loner-Strike: the gun out once in freeze time
 	bool m_buyDefuseKit;
 	bool m_buyGrenade;
 	bool m_buyShield;
@@ -1070,6 +1071,8 @@ public:
 	void LsSaveCheck();								// alone against many late in a lost round: hide, keep the gun
 	bool LsSavingGun() const { return m_lsSaving; }
 	bool LsNadeOnly() const;						// deathmatch with nothing but a knife and grenades (Gun Game's HE level)
+	static bool LsWeaponModeOn();					// a mode that hands out or limits the guns
+	bool LsBuyPistolRound();						// its own pistol-round buy (true: done)
 	// (end nades)
 	// Loner-Strike moves (cs_bot_ls_moves.cpp)
 	bool LsCornerMoves(Vector *goal);				// a blind corner ahead: jiggle, wide swing or outside line (true: a jiggle moves it)
@@ -1118,7 +1121,7 @@ public:
 	void LsShotAt(CBasePlayer *pShooter, const Vector &impact);	// enemy bullets landing or passing close
 	float LsObjUseAt() const { return m_lsObjUseAt; }	// planting/defusing started again then (after a threat)
 	void LsObjectiveBegins() { m_lsObjStops = 0; m_lsForTimeRoll = -1; }	// a plant or defuse starts
-	void LsFightBegins() { m_lsForTimeRoll = -1; }	// a new fight
+	void LsFightBegins() {}							// a new fight (playing for time is decided once a round)
 	bool LsTeamGame() const;						// a mode with teams and objectives (not deathmatch, whatever bot_ls_solo)
 	bool LsFree() const;							// free to go somewhere for team play: not busy, saving, puppeted
 	void LsCheckBeforeDefuse();						// a look round the site before defusing
@@ -1225,7 +1228,8 @@ private:
 	float m_lsSmokeUntil = 0.0f;					// still shooting into the smoke where they went till then
 	Vector m_lsNadeFrom;							// where it was when it got the grenade out
 	Vector m_lsNadeAng;								// the throw's view angles, worked out there
-	float m_lsNadeRetryAt = 0.0f;					// a smoke or HE plan that didn't fit: not again till then
+	float m_lsNadeRetryAt = 0.0f;
+	bool m_lsPistolBought = false;					// this round's pistol-round buy done					// a smoke or HE plan that didn't fit: not again till then
 	// (end nades members)
 	// Loner-Strike moves (cs_bot_ls_moves.cpp): members
 	Vector m_lsCornerAt;							// the corner the plan is for
@@ -1258,6 +1262,8 @@ private:
 	float m_lsPreAimAt = -10.0f;					// last pre-aimed at footsteps
 	float m_lsHeardAt = -10.0f;						// last weighed something heard
 	EntityHandle<CBasePlayer> m_lsShotBy;			// whose bullets those were
+	Vector m_lsPeekCorner;							// the corner its peek was decided for
+	bool m_lsPeekThis = false;
 	int m_lsSneakRound = -1;						// the round the late-round sneak was rolled for
 	bool m_lsSneakLate = false;
 	float m_lsBangUntil = 0.0f;						// spraying through a wall at where the enemy went until then

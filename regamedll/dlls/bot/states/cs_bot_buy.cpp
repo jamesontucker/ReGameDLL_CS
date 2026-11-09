@@ -52,6 +52,7 @@ void BuyState::OnEnter(CCSBot *me)
 	m_prefIndex = 0;
 
 	m_doneBuying = false;
+	m_lsEquippedDone = false;
 	m_isInitialDelay = true;
 
 	// this will force us to stop holding live grenade
@@ -263,8 +264,14 @@ void BuyState::OnUpdate(CCSBot *me)
 		{
 #ifdef REGAMEDLL_FIXES
 			// make sure we're locked and loaded
-			me->EquipBestWeapon(MUST_EQUIP);
-			me->Reload();
+			// (Loner-Strike: once, not every frame: a knife flick or weapon flicking in freeze
+			// time would be undone the moment it started)
+			if (!LsFight() || !m_lsEquippedDone)
+			{
+				me->EquipBestWeapon(MUST_EQUIP);
+				me->Reload();
+				m_lsEquippedDone = true;
+			}
 			me->ResetStuckMonitor();
 #endif
 			return;
@@ -295,6 +302,13 @@ void BuyState::OnUpdate(CCSBot *me)
 		if (me->LsSavingMoney())
 		{
 			me->LsBuyEco();
+			m_doneBuying = true;
+			return;
+		}
+
+		// Loner-Strike: the pistol round: everyone their own way (not all a vest)
+		if (me->LsBuyPistolRound())
+		{
 			m_doneBuying = true;
 			return;
 		}
@@ -508,7 +522,7 @@ void BuyState::OnUpdate(CCSBot *me)
 			}
 
 			// Loner-Strike: grenades and the defuse kit with a plan (cs_bot_ls_nades.cpp)
-			if (LsFight() && !LsSolo())
+			if (LsFight() && !LsSolo() && !CCSBot::LsWeaponModeOn())
 				me->LsBuyExtras();
 			// buy a grenade if we wish, and we don't already have one
 			else if (m_buyGrenade && !me->HasGrenade())
@@ -549,7 +563,7 @@ void BuyState::OnUpdate(CCSBot *me)
 				}
 			}
 
-			if (m_buyDefuseKit && !(LsFight() && !LsSolo()))	// (Loner-Strike: see above)
+			if (m_buyDefuseKit && !(LsFight() && !LsSolo() && !CCSBot::LsWeaponModeOn()))	// (Loner-Strike: see above; weapon modes buy as stock)
 			{
 				me->ClientCommand("defuser");
 			}

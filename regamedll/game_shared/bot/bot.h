@@ -315,7 +315,8 @@ inline float CBot::GetMoveSpeed()
 
 	// Loner-Strike: a player walking (holding shift) moves at cl_movespeedkey 0.52 of their
 	// speed, still silent; the stock 0.4 made walking bots look slow
-	return 0.52f * pev->maxspeed;
+	// (Loner-Strike: a person's shift-walk speed; stock bots keep theirs)
+	return (CVAR_GET_FLOAT("bot_ls_fight") > 0.0f ? 0.52f : 0.4f) * pev->maxspeed;
 }
 
 inline void CBot::Run()

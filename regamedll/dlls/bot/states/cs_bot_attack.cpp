@@ -216,7 +216,8 @@ void AttackState::OnUpdate(CCSBot *me)
 		// roll, in place of stock's "outnumbered by two: always back off")
 		if (LsFight() && LsSolo()
 			? ((isPinnedDown && me->pev->health < 35.0f)
-				|| (!CSGameRules()->IsFreeForAll() && me->OutnumberedCount() >= 2 && me->pev->health < 50.0f && me->LsStyle() != LS_STYLE_RUSHER && m_isCoward))
+				|| (!CSGameRules()->IsFreeForAll() && m_isCoward && me->LsStyle() != LS_STYLE_RUSHER
+					&& (me->OutnumberedCount() >= 3 || (me->OutnumberedCount() >= 2 && me->pev->health < 50.0f))))
 			: LsFight() ? (isPinnedDown || me->LsPlayForTime() || (me->IsOutnumbered() && m_isCoward))
 			: (isPinnedDown ||
 			(me->IsOutnumbered() && m_isCoward) ||
@@ -256,7 +257,9 @@ void AttackState::OnUpdate(CCSBot *me)
 		me->StandUp();
 
 		// if we are using a knife and our prey is looking towards us, run at him
-		if (me->IsPlayerFacingMe(pEnemy))
+		// (Loner-Strike: in deathmatch-type modes nobody creeps up with the knife: they run
+		// at people, walking only the last bit behind someone)
+		if (me->IsPlayerFacingMe(pEnemy) || (LsFight() && LsSolo() && (pEnemy->pev->origin - me->pev->origin).IsLengthGreaterThan(250.0f)))
 		{
 			me->ForceRun(5.0f);
 			me->Hurry(10.0f);

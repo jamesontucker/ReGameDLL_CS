@@ -65,6 +65,7 @@ void MoveToState::OnEnter(CCSBot *me)
 // Move to a potentially far away position.
 void MoveToState::OnUpdate(CCSBot *me)
 {
+	me->LsSneak();	// Loner-Strike
 	// assume that we are paying attention and close enough to know our enemy died
 	if (me->GetTask() == CCSBot::MOVE_TO_LAST_KNOWN_ENEMY_POSITION)
 	{

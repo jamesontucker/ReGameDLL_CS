@@ -74,7 +74,7 @@ static bool LsCornerFree(CCSBot *me)
 {
 	if (me->IsAttacking() || me->IsUsingLadder() || me->IsOnLadder() || me->IsBlind() || me->IsSafe()
 		|| !(me->pev->flags & FL_ONGROUND) || me->IsJumping() || me->IsCrouching() || me->IsReloading()
-		|| me->IsHurrying() || me->GetHostageEscortCount() > 0 || me->IsDefusingBomb() || me->IsThrowingGrenade()
+		|| (me->IsHurrying() && me->LsSkill() < 0.5f) || me->GetHostageEscortCount() > 0 || me->IsDefusingBomb() || me->IsThrowingGrenade()
 		|| me->GetEnemiesRemaining() <= 0 || me->LsFallingBack())
 		return false;
 	const CNavArea *area = me->GetLastKnownArea();
@@ -487,7 +487,7 @@ static void LsPrefireTick(CCSBot *me, const Vector &at, float &until, float &fir
 	float now = gpGlobals->time;
 	if (now >= until)
 		return;
-	if (me->IsAttacking() || me->IsReloading() || me->IsActiveWeaponClipEmpty() || me->IsUsingKnife() || me->IsUsingGrenade()
+	if (me->IsAttacking() || me->IsBlind() || me->IsReloading() || me->IsActiveWeaponClipEmpty() || me->IsUsingKnife() || me->IsUsingGrenade()
 		|| LsTeammateNear(me, at, 200.0f))
 	{
 		until = 0.0f;

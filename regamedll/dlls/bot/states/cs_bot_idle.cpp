@@ -867,7 +867,8 @@ void IdleState::OnUpdate(CCSBot *me)
 	{
 		// sniping check
 		// (Loner-Strike: in deathmatch a sniper holds a spot now and then, briefly)
-		if (me->GetFriendsRemaining() && me->IsSniper() && RANDOM_FLOAT(0, 100.0f) < (LsFight() && LsSolo() ? 0.3f * offenseSniperCampChance : offenseSniperCampChance))
+		if ((me->GetFriendsRemaining() || (LsFight() && LsSolo())) && me->IsSniper()
+			&& RANDOM_FLOAT(0, 100.0f) < (LsFight() && LsSolo() ? ((me->LsStyle() == LS_STYLE_AWPER || me->LsStyle() == LS_STYLE_CAMPER) ? 35.0f : 0.3f * offenseSniperCampChance) : offenseSniperCampChance))
 		{
 			me->SetTask(CCSBot::MOVE_TO_SNIPER_SPOT);
 			me->Hide(me->GetLastKnownArea(), LsFight() && LsSolo() ? RANDOM_FLOAT(4.0f, 9.0f) : RANDOM_FLOAT(10.0f, 30.0f), sniperHideRange);

@@ -107,16 +107,17 @@ int CCSBot::LsStyle() const
 }
 
 // How aggressive, how much of a team player and how good this bot is: the bot style's
-// profile (its range: a Newbie lobby's, Gods', Matchmaking's teamwork), moved by who the bot
-// is (its playstyle, temper, skill...) within it, so a rusher in a Newbie lobby and one in
-// Gods both rush but still differ. A team style (profile teamwork of 45 and up) never drops
+// profile (its range: a Newbie lobby's, Gods', Matchmaking's teamwork), pulled toward who
+// the bot is (its playstyle, temper, skill...): about half way at the personality slider's
+// 100, so a lurker in Gods lurks too, and a style still shows. A team style (profile teamwork of 45 and up) never drops
 // below that. Stock bots (bot_ls_fight 0) and bots nobody described: the profile alone
 float CCSBot::LsAggro() const
 {
 	float profile = GetProfile()->GetAggression();
 	if (!LsFight() || m_lsAggro < 0.0f)
 		return profile;
-	return Q_max(0.0f, Q_min(1.0f, profile + 0.9f * LsPersonWeight() * (m_lsAggro - 0.5f)));
+	float pull = 0.8f * LsPersonWeight();
+	return Q_max(0.0f, Q_min(1.0f, profile + pull * (m_lsAggro - profile)));
 }
 
 float CCSBot::LsTeamwork() const
@@ -124,7 +125,8 @@ float CCSBot::LsTeamwork() const
 	float profile = GetProfile()->GetTeamwork();
 	if (!LsFight() || m_lsTeam < 0.0f)
 		return profile;
-	float v = Q_max(0.0f, Q_min(1.0f, profile + 0.9f * LsPersonWeight() * (m_lsTeam - 0.3f)));
+	float pull = 0.8f * LsPersonWeight();
+	float v = Q_max(0.0f, Q_min(1.0f, profile + pull * (m_lsTeam - profile)));
 	return profile >= 0.45f ? Q_max(0.45f, v) : v;
 }
 
@@ -426,7 +428,7 @@ void CCSBot::LsShiftPortalPoint(const CNavArea *from, const CNavArea *to, NavDir
 bool CCSBot::LsUpdatePause()
 {
 	// (the personality slider scales them: at 0 nobody stops; deathmatch keeps few)
-	float strength = cv_bot_ls_pauses.value * (LsPersonWeight() / 0.6f) * (LsSolo() ? 0.3f : 1.0f);
+	float strength = LsFight() ? cv_bot_ls_pauses.value * (LsPersonWeight() / 0.6f) * (LsSolo() ? 0.3f : 1.0f) : 0.0f;
 	if (strength <= 0.0f)
 		return false;
 
@@ -727,6 +729,12 @@ CNavArea *CCSBot::LsPickHuntArea()
 			for (int z = 0; z < TheCSBots()->GetZoneCount() && kept < 16; z++)
 				keep[kept++] = TheCSBots()->GetZone(z)->m_center;
 		}
+		else if (m_iTeam == TERRORIST && TheCSBots()->GetScenario() == CCSBotManager::SCENARIO_DEFUSE_BOMB && !TheCSBots()->IsBombPlanted())
+		{
+			// (Ts work toward the bomb sites, by their own ways, rather than into dead ends)
+			for (int z = 0; z < TheCSBots()->GetZoneCount() && kept < 16; z++)
+				keep[kept++] = TheCSBots()->GetZone(z)->m_center;
+		}
 		else if (m_iTeam == TERRORIST && TheCSBots()->GetScenario() == CCSBotManager::SCENARIO_RESCUE_HOSTAGES)
 		{
 			CBaseEntity *pHostage = nullptr;
@@ -974,7 +982,7 @@ void CCSBot::LsFightHabits(float range, bool crouchAndHold)
 // teammate defusing, hold the site they're at and answer a hostage; a few never do
 bool CCSBot::LsShirksObjective()
 {
-	if (IsCarryingBomb() || LsStyle() == LS_STYLE_OBJECTIVE || !IsRogue())
+	if (IsCarryingBomb() || (LsFight() && LsStyle() == LS_STYLE_OBJECTIVE) || !IsRogue())
 		return false;
 	if (cv_bot_ls_solo.value <= 0.0f || LsSolo())
 		return true;
@@ -991,14 +999,20 @@ bool CCSBot::LsCornerPeek()
 	if (!LsFight() || IsSafe() || IsUsingLadder() || IsAttacking())
 		return false;
 
-	float skill = LsSkill();
-	float chance = Q_min(0.95f, 0.25f + 0.7f * skill + 0.25f * (LsTrait(20) - 0.5f));
-	// deathmatch: mostly running round corners; a match: careful
-	if (LsSolo())
-		chance *= 0.45f;
-	else if (LsMatch())
-		chance = Q_min(0.98f, chance + 0.2f);
-	if (RANDOM_FLOAT(0.0f, 1.0f) > chance)
+	// (decided once for each corner, not every frame near it)
+	if ((m_goalPosition - m_lsPeekCorner).IsLengthGreaterThan(32.0f))
+	{
+		m_lsPeekCorner = m_goalPosition;
+		float skill = LsSkill();
+		float chance = Q_min(0.95f, 0.25f + 0.7f * skill + 0.25f * (LsTrait(20) - 0.5f));
+		// deathmatch: mostly running round corners; a match: careful
+		if (LsSolo())
+			chance *= 0.45f;
+		else if (LsMatch())
+			chance = Q_min(0.98f, chance + 0.2f);
+		m_lsPeekThis = RANDOM_FLOAT(0.0f, 1.0f) <= chance;
+	}
+	if (!m_lsPeekThis)
 		return false;
 
 	// the first path point well past the corner
@@ -1206,11 +1220,13 @@ void CCSBot::LsTrace()
 	}
 	// (a line naming the map whenever it changes: the clock restarts with each map)
 	static char s_map[64] = "";
-	if (Q_strcmp(s_map, STRING(gpGlobals->mapname)) != 0)
+	static float s_last = 0.0f;
+	if (Q_strcmp(s_map, STRING(gpGlobals->mapname)) != 0 || gpGlobals->time < s_last)
 	{
 		Q_strlcpy(s_map, STRING(gpGlobals->mapname));
 		fprintf(s_file, "#map,%s\n", s_map);
 	}
+	s_last = gpGlobals->time;
 	CBasePlayer *pEnemy = GetEnemy();
 	CBasePlayer *pLeader = IsFollowing() ? GetFollowLeader() : nullptr;
 	Vector goal = HasPath() ? GetPathEndpoint() : Vector(0, 0, 0);
@@ -1324,6 +1340,12 @@ bool CCSBot::LsObjectiveThreat(bool defusing)
 		threat = 0.35f;
 		where = &m_noisePosition;
 	}
+	else if (IsNoiseHeard() && (m_noisePosition - pev->origin).IsLengthLessThan(500.0f))
+	{
+		// (footsteps close by)
+		threat = 0.25f;
+		where = &m_noisePosition;
+	}
 	if (threat <= 0.0f)
 		return false;
 	// a threat it already decided about
@@ -1336,7 +1358,12 @@ bool CCSBot::LsObjectiveThreat(bool defusing)
 	float takes = defusing ? (m_bHasDefuser ? 5.0f : 10.0f) : 3.0f;
 	float done = (now - Q_max(GetStateTimestamp(), m_lsObjUseAt)) / takes;
 	if (done > 0.75f)
+	{
+		// nearly done: it finishes, whatever turns up (the stock self-defence would stop it)
+		if (GetDisposition() != IGNORE_ENEMIES)
+			SetDisposition(IGNORE_ENEMIES);
 		return false;
+	}
 	// the bomb about to go: nothing else matters (a stop costs up to 2.5 s); and twice is
 	// enough for one plant or defuse
 	if (defusing && TheCSBots()->GetBombTimeLeft() < takes + 3.5f)
@@ -1495,6 +1522,9 @@ void CCSBot::LsHeard(GameEventType event, CBasePlayer *pPlayer, float dist)
 	float now = gpGlobals->time;
 	float aggro = LsAggro();
 	float skill = LsSkill();
+	// (a plugin's hold or look gives way to an enemy heard close by)
+	if (LsPuppetActive() && dist < 700.0f)
+		LsPuppetRelease();
 	bool busy = m_state == &m_plantBombState || m_state == &m_defuseBombState || IsUsingLadder() || m_lsSaving || LsPuppetActive() || IsBlind();
 
 	// in a fight with them: their reload is the moment to push
