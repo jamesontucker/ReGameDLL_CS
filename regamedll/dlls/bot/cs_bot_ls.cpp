@@ -785,6 +785,38 @@ void CCSBot::LsPuppetCommand(const char *what, float now)
 	p.any = true;
 }
 
+// Two players of the same clan: both names carry the same tag (what's left once LsBareName
+// takes it off). Clan mates stick together: no spreading out from each other
+bool LsClanMates(CBasePlayer *a, CBasePlayer *b)
+{
+	char bareA[64], bareB[64];
+	const char *na = STRING(a->pev->netname), *nb = STRING(b->pev->netname);
+	LsBareName(na, bareA, sizeof(bareA));
+	LsBareName(nb, bareB, sizeof(bareB));
+	// (the tag: the name with the bare part cut out)
+	char tagA[64] = "", tagB[64] = "";
+	auto tagOf = [](const char *name, const char *bare, char *out, size_t size) {
+		const char *at = bare[0] ? Q_strstr(name, bare) : nullptr;
+		if (!at)
+			return;
+		size_t pre = size_t(at - name);
+		Q_strlcpy(out, name, Q_min(size, pre + 1));
+		Q_strlcat(out, at + Q_strlen(bare), size);
+	};
+	tagOf(na, bareA, tagA, sizeof(tagA));
+	tagOf(nb, bareB, tagB, sizeof(tagB));
+	// (a tag needs a letter or digit in it: "(1)" from a duplicate name isn't a clan)
+	bool real = false;
+	for (const char *c = tagA; *c; c++)
+	{
+		if (isalnum((unsigned char)*c))
+			real = true;
+	}
+	if (tagA[0] == '(' && Q_strlen(tagA) <= 4)
+		real = false;
+	return real && FStrEq(tagA, tagB);
+}
+
 // ---- every bot for itself (deathmatch-type modes) -----------------------------------------
 
 
@@ -800,6 +832,8 @@ CNavArea *CCSBot::LsPickHuntArea()
 	Vector avoid[64];
 	int n = 0;
 	LsForTeammates(this, [&](CBasePlayer *pPlayer) {
+		if (LsClanMates(this, pPlayer))
+			return;
 		if (n < 64)
 			avoid[n++] = pPlayer->pev->origin;
 		if (n < 64 && pPlayer->IsBot())
@@ -946,7 +980,7 @@ bool CCSBot::LsShouldSpread()
 
 	bool crowded = false;
 	LsForTeammates(this, [&](CBasePlayer *pPlayer) {
-		if ((pPlayer->pev->origin - pev->origin).IsLengthLessThan(320.0f))
+		if ((pPlayer->pev->origin - pev->origin).IsLengthLessThan(320.0f) && !LsClanMates(this, pPlayer))
 			crowded = true;
 	});
 	if (!crowded || RANDOM_FLOAT(0.0f, 1.0f) > 0.7f)
