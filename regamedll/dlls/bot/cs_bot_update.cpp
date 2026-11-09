@@ -64,8 +64,10 @@ void CCSBot::Upkeep()
 				bool aimBlocked = false;
 				const float sharpshooter = 0.8f;
 
-				if (IsUsingAWP() || IsUsingShotgun() || IsUsingMachinegun() || GetProfile()->GetSkill() < sharpshooter
-					|| (IsActiveWeaponRecoilHigh() && !IsUsingPistol() && !IsUsingSniperRifle()))
+				// (Loner-Strike: people place their crosshair at head height whatever their skill;
+				// only the big guns go for the body)
+				if (IsUsingAWP() || IsUsingShotgun() || IsUsingMachinegun()
+					|| (!LsFight() && (GetProfile()->GetSkill() < sharpshooter || (IsActiveWeaponRecoilHigh() && !IsUsingPistol() && !IsUsingSniperRifle()))))
 				{
 					if (IsEnemyPartVisible(CHEST))
 					{
@@ -76,6 +78,11 @@ void CCSBot::Upkeep()
 
 				if (aimBlocked)
 					m_aimSpot.z -= feetOffset * 0.25f;
+
+				// (Loner-Strike: the head showing: aimed from the upper chest (a newcomer) to the
+				// head (a good player), the hand's landing error and the recoil spreading it)
+				else if (LsFight() && IsEnemyPartVisible(HEAD))
+					m_aimSpot.z += 4.0f + 16.0f * LsSkill();
 
 				else if (!IsEnemyPartVisible(HEAD))
 				{
