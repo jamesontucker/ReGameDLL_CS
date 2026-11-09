@@ -823,7 +823,7 @@ static int LsTeamPlan(int team)
 	// (a new map: last map's pistol round is no guide)
 	if (CSGameRules()->m_iTotalRoundsPlayed == 0 && !LsPistolRound())
 		s_lastPistol = -100;
-	bool freshHalf = n > 0 && LsAllNearStart(team);
+	bool freshHalf = n > 0 && CSGameRules()->m_iTotalRoundsPlayed == 0 && LsAllNearStart(team);
 
 	int plan = LS_BUY;
 	if (n > 0 && afford < 0.6f * n && !freshHalf)

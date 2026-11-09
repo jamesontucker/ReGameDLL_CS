@@ -983,6 +983,7 @@ void CCSBot::LsPuppetCommand(const char *what, float now)
 		if (chat)
 		{
 			m_lsOrder = LsOrder();
+			pev->vuser1.x = 0.0f;
 			// (somewhere it can't get to isn't taken: gm_botchat then says it can't)
 			if (!HasPath())
 				return;

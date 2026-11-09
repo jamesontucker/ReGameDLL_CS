@@ -28,8 +28,10 @@ void CCSBot::LsTeamTick()
 	// (not one running from the blast, nor for a defuse that can't finish in time)
 	CBasePlayer *pDefuser = TheCSBots()->GetBombDefuser();
 	if (m_iTeam == TERRORIST && pDefuser && !IsHiding() && !IsAttacking() && !LsOrderActive() && !IsEscapingFromBomb()
-		&& TheCSBots()->GetBombTimeLeft() > (pDefuser->m_bHasDefuser ? 5.0f : 10.0f) && now - m_lsDefuseActedAt > 12.0f)
+		&& TheCSBots()->GetBombTimeLeft() > (pDefuser->m_bHasDefuser ? 5.0f : 10.0f) && now - m_lsDefuseActedAt > 12.0f
+		&& now >= m_lsDefuseCheckAt)
 	{
+		m_lsDefuseCheckAt = now + 0.25f;
 		// (quiet a while only after heading for it; one it saw and shot at, it keeps listening for)
 		if (LsDefuseHeard(TheCSBots()->GetBombDefuser()) == 1 && IsMovingTo())
 			m_lsDefuseActedAt = now;
@@ -304,6 +306,9 @@ int CCSBot::LsDefuseHeard(CBasePlayer *pDefuser)
 	if (!LsFight() || !LsTeamGame())
 		return 0;
 	float now = gpGlobals->time;
+	// (too far to hear it: nothing to trace for)
+	if ((pDefuser->pev->origin - pev->origin).IsLengthGreaterThan(2000.0f))
+		return 2;
 	if (IsVisible(pDefuser, true))
 	{
 		Attack(pDefuser);
@@ -598,8 +603,8 @@ bool CCSBot::LsPlantHere()
 	for (int t = 0; t < 8; t++)
 	{
 		CNavArea *pArea = TheCSBots()->GetRandomAreaInZone(zone);
-		if (!pArea)
-			continue;
+		if (!pArea || TheCSBots()->GetZone(pArea->GetCenter()) != zone)
+			continue;	// (an area whose middle is outside the plant zone won't do)
 		// (in toward the middle of the site, near cover; not across it to the far entrance)
 		float d = float((*pArea->GetCenter() - pev->origin).Length2D());
 		if (d < 140.0f || d > 500.0f)
