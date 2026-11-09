@@ -91,17 +91,20 @@ void CCSBot::LsTeamTick()
 	// a T without the bomb, late with no plant: goes with the carrier to its site, as a team
 	// does when the clock's running out (once a round; not mid-fight or under an order)
 	if (m_iTeam == TERRORIST && !IsCarryingBomb() && m_lsEscortRound != round && TheCSBots()->GetScenario() == CCSBotManager::SCENARIO_DEFUSE_BOMB
-		&& !TheCSBots()->IsBombPlanted() && !CSGameRules()->IsFreezePeriod() && LsTimeLeft() < 25.0f && LsFree() && !m_lsSaving)
+		&& !TheCSBots()->IsBombPlanted() && !CSGameRules()->IsFreezePeriod() && LsTimeLeft() < 25.0f && LsFree() && !m_lsSaving && now >= m_lsEscortCheckAt)
 	{
-		m_lsEscortRound = round;
+		m_lsEscortCheckAt = now + 2.0f;
 		CCSBot *pCarrier = nullptr;
 		LsForTeammates(this, [&](CBasePlayer *pPlayer) {
 			if (pPlayer->IsBot() && pPlayer->m_bHasC4)
 				pCarrier = static_cast<CCSBot *>(pPlayer);
 		});
-		if (pCarrier && pCarrier->HasPath() && (pCarrier->pev->origin - pev->origin).IsLengthLessThan(1500.0f))
+		// (to its site: where it's walking if it's going to plant, else the site closest to it)
+		if (pCarrier && (pCarrier->pev->origin - pev->origin).IsLengthLessThan(1500.0f))
 		{
-			Vector to = pCarrier->GetPathEndpoint();
+			const CCSBotManager::Zone *zone = TheCSBots()->GetClosestZone(&pCarrier->pev->origin);
+			Vector to = (pCarrier->GetTask() == PLANT_BOMB && pCarrier->HasPath()) ? pCarrier->GetPathEndpoint() : zone ? zone->m_center : pCarrier->pev->origin;
+			m_lsEscortRound = round;
 			MoveTo(&to, FASTEST_ROUTE);
 			Hurry(15.0f);
 			LsWhy("escort-late-bomb");
@@ -150,7 +153,7 @@ void CCSBot::LsTeamTick()
 			bool byHostage = false;
 			CBaseEntity *pHostage = nullptr;
 			while (!byHostage && (pHostage = UTIL_FindEntityByClassname(pHostage, "hostage_entity")))
-				byHostage = pHostage->IsAlive() && (pHostage->pev->origin - pev->origin).IsLengthLessThan(600.0f);
+				byHostage = pHostage->IsAlive() && !(pHostage->pev->effects & EF_NODRAW) && (pHostage->pev->origin - pev->origin).IsLengthLessThan(600.0f);
 			if (byHostage && RANDOM_FLOAT(0.0f, 1.0f) < 0.4f + 0.4f * (1.0f - LsAggro()))
 			{
 				float secs = RANDOM_FLOAT(8.0f, 20.0f);
@@ -181,15 +184,30 @@ void CCSBot::LsTeamTick()
 	}
 
 	// mid-round, out of a fight, with an SMG, a shotgun or nothing: a rifle or an AWP lying close
-	// by is picked up (people swap for a dead player's AK)
-	if (!TheCSBots()->IsRoundOver() && now >= m_lsSwapCheckAt && !IsAttacking() && !LsOrderActive() && !IsCarryingBomb() && LsFree()
-		&& !CSGameRules()->IsFreezePeriod() && !LsWeaponModeOn())
+	// by is picked up (people swap for a dead player's AK). It walks over first and drops its
+	// own only once there; one bot to a gun
+	if (m_lsSwapBox.IsValid())
+	{
+		CBaseEntity *pBox = m_lsSwapBox;
+		CBasePlayerItem *pMine = m_rgpPlayerItems[PRIMARY_WEAPON_SLOT];
+		if (IsAttacking() || !IsMovingTo() || now > m_lsSwapUntil)
+			m_lsSwapBox = nullptr;
+		else if ((pBox->pev->origin - pev->origin).Make2D().IsLengthLessThan(80.0f))
+		{
+			if (pMine)
+				DropPlayerItem(STRING(pMine->pev->classname));
+			m_lsSwapBox = nullptr;
+		}
+	}
+	else if (!TheCSBots()->IsRoundOver() && now >= m_lsSwapCheckAt && !IsAttacking() && !LsOrderActive() && !IsCarryingBomb() && LsFree()
+		&& !CSGameRules()->IsFreezePeriod() && !LsWeaponModeOn() && !TheCSBots()->IsBombPlanted() && GetHostageEscortCount() == 0
+		&& GetTask() != DEFUSE_BOMB && GetTask() != COLLECT_HOSTAGES && GetTask() != RESCUE_HOSTAGES && GetTimeSinceLastSawEnemy() > 8.0f)
 	{
 		m_lsSwapCheckAt = now + 2.0f;
 		CBasePlayerItem *pPrimary = m_rgpPlayerItems[PRIMARY_WEAPON_SLOT];
 		bool poor = !pPrimary || pPrimary->m_iId == WEAPON_MP5N || pPrimary->m_iId == WEAPON_TMP || pPrimary->m_iId == WEAPON_MAC10 || pPrimary->m_iId == WEAPON_UMP45
 			|| pPrimary->m_iId == WEAPON_P90 || pPrimary->m_iId == WEAPON_M3 || pPrimary->m_iId == WEAPON_XM1014;
-		if (poor && GetTimeSinceLastSawEnemy() > 3.0f)
+		if (poor)
 		{
 			static const char *const better[] = { "models/w_ak47.mdl", "models/w_m4a1.mdl", "models/w_awp.mdl", "models/w_sg552.mdl", "models/w_aug.mdl",
 				"models/w_galil.mdl", "models/w_famas.mdl" };
@@ -203,11 +221,20 @@ void CCSBot::LsTeamTick()
 					good = good || FStrEq(STRING(pBox->pev->model), g);
 				if (!good || !FVisible(pBox->pev->origin + Vector(0, 0, 8)))
 					continue;
-				// (dropped what it has first, so the new one is picked up on touch)
-				if (pPrimary)
-					DropPlayerItem(STRING(pPrimary->pev->classname));
+				// (another bot already on its way to it)
+				bool taken = false;
+				LsForTeammates(this, [&](CBasePlayer *pPlayer) {
+					if (pPlayer->IsBot() && static_cast<CBaseEntity *>(static_cast<CCSBot *>(pPlayer)->m_lsSwapBox) == pBox)
+						taken = true;
+				});
+				if (taken)
+					continue;
 				Vector to = pBox->pev->origin;
 				MoveTo(&to, FASTEST_ROUTE);
+				if (!HasPath())
+					continue;
+				m_lsSwapBox = pBox;
+				m_lsSwapUntil = now + 6.0f;
 				LsWhy("swap-gun");
 				break;
 			}
@@ -572,7 +599,8 @@ bool CCSBot::LsFetchesBomb()
 		if (!pPlayer->IsBot() || (pBomb->pev->origin - pPlayer->pev->origin).IsLengthGreaterThan(mine))
 			return;
 		CCSBot *pBot = static_cast<CCSBot *>(pPlayer);
-		if (pBot->m_state == &pBot->m_fetchBombState || ((pBot->m_state == &pBot->m_idleState || pBot->IsHunting()) && pBot->LsFree()))
+		bool looks = pBot->m_state == &pBot->m_idleState || pBot->IsHunting() || pBot->IsMovingTo() || pBot->IsHiding();
+		if (pBot->m_state == &pBot->m_fetchBombState || (looks && !pBot->IsAttacking() && !pBot->LsSavingGun() && !pBot->LsOrderActive() && pBot->GetTask() != PLANT_BOMB))
 			closer++;
 	});
 	return closer < 2;
@@ -675,7 +703,7 @@ void CCSBot::LsStalemateTick()
 	if (TheCSBots()->GetElapsedRoundTime() < wait || GetTimeSinceLastSawEnemy() < 12.0f || GetTimeSinceAttacked() < 8.0f)
 		return;
 	// (the most patient never do, unless they're the last, or it's been two minutes)
-	if (mates > 0 && aggro < 0.3f && LsTrait(86) < 0.6f && (TheCSBots()->GetElapsedRoundTime() < 120.0f || RANDOM_FLOAT(0.0f, 1.0f) < 0.5f))
+	if (mates > 0 && aggro < 0.3f && LsTrait(86) < 0.6f && TheCSBots()->GetElapsedRoundTime() < 120.0f + 60.0f * LsTrait(87))
 		return;
 	m_lsStaleRound = round;
 	if (mates == 0)

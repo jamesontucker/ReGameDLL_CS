@@ -1261,8 +1261,11 @@ private:
 	int m_lsTeamRound = -1;							// the round LsTeamTick last saw
 	float m_lsDefuseNoticeAt = -1.0f;				// when it takes in the defuse it hears
 	int m_lsWinReloadRound = -1;
-	float m_lsSwapCheckAt = 0.0f;					// mid-round: next look for a better gun on the floor
-	int m_lsEscortRound = -1;						// the round it went with a late carrier					// the round it reloaded after winning
+	float m_lsSwapCheckAt = 0.0f;
+	EntityHandle<CBaseEntity> m_lsSwapBox;		// the gun it's walking over to swap for
+	float m_lsSwapUntil = 0.0f;					// mid-round: next look for a better gun on the floor
+	int m_lsEscortRound = -1;						// the round it went with a late carrier
+	float m_lsEscortCheckAt = 0.0f;					// the round it reloaded after winning
 	float m_lsFetchCheckAt = 0.0f;
 	float m_lsCarrierCheckAt = 0.0f;				// the carrier: next look at whether to let someone go first
 	int m_lsCarrierRound = -1;
