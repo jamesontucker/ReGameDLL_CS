@@ -1126,9 +1126,6 @@ void CCSBot::LsHandUpdate(float goalYaw, float goalPitch, float dt)
 	// (standing still and calm, a person barely moves the view: 88-90% still in the playtest,
 	// against about half when moving; moving looks already matched)
 	bool standing = calm && pev->velocity.Length2D() < 60.0f;
-	// (a threat in view or a hit just now: the turn itself is a fight's, as fast as the hand
-	// goes, though resting and letting drift go stay as they are)
-	bool quick = fight || IsEnemyVisible() || GetTimeSinceAttacked() < 1.5f;
 	float oldY = pev->v_angle.y, oldP = pev->v_angle.x;
 
 	float offY = NormalizeAngle(goalYaw - pev->v_angle.y);
@@ -1218,15 +1215,15 @@ void CCSBot::LsHandUpdate(float goalYaw, float goalPitch, float dt)
 			// of a big turn, about 5 on a small adjustment)
 			// (fight 0.62, calm 0.8: batch 22 peaked at about 30 deg per 0.1 s on big fight turns and
 			// 38 calm, against a person's 45)
-			float b = (0.08f + 0.07f * (1.0f - skill)) * (quick ? 0.62f : calm ? 0.8f : 0.72f);
-			float flickWidth = h.corrections > 0 ? width : quick ? Q_max(8.0f, 3.0f * width) : 10.0f;
+			float b = (0.08f + 0.07f * (1.0f - skill)) * (fight ? 0.62f : calm ? 0.8f : 0.72f);
+			float flickWidth = h.corrections > 0 ? width : fight ? Q_max(8.0f, 3.0f * width) : 10.0f;
 			float dur = 0.1f + b * log2f(1.0f + off / flickWidth);
 			// (and a hand has a top speed: a minimum-jerk stroke peaks at 1.875 times its average,
 			// so a long turn takes long enough to stay under it; quicker for the skilled and in a
 			// fight. Keeps the faster flicks from becoming inhuman snaps)
 			// (batch 23: a person flicks past 90 deg per 0.1 s once or twice a minute; the bots
 			// almost never did)
-			float vmax = quick ? 700.0f + 450.0f * skill : 520.0f + 260.0f * skill;
+			float vmax = fight ? 700.0f + 450.0f * skill : 520.0f + 260.0f * skill;
 			dur = Q_max(dur, 1.875f * off / vmax);
 			if (m_lsPuppet.fast && now < m_lsPuppet.lookUntil)
 				dur *= 0.6f;
