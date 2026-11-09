@@ -42,8 +42,9 @@ void CCSBot::LsTeamTick()
 				if (!pMate || pMate == this || FNullEnt(pMate->pev) || pMate->m_iTeam != CT)
 					continue;
 				bool atBomb = (pMate->pev->origin - bomb).IsLengthLessThan(1200.0f);
-				// (alive there, or a body there from the last 20 s: a person's last words)
-				bool fresh = pMate->IsAlive() || !pMate->IsBot() || static_cast<CCSBot *>(pMate)->LsSinceDied() < 20.0f;
+				// (alive there, or a bot's body there from the last 20 s: its last words. A dead
+				// person's position is their spectator camera, so not theirs)
+				bool fresh = pMate->IsAlive() || (pMate->IsBot() && static_cast<CCSBot *>(pMate)->LsSinceDied() < 20.0f);
 				called = atBomb && fresh;
 			}
 			if (called)
@@ -495,15 +496,17 @@ bool CCSBot::LsRetakeRush()
 // other site, and a team down to one or two, don't wait.
 
 static int s_execRound = -1;
+static const CCSBotManager::Zone *s_execSite = nullptr;
 static float s_execFirstAt = 0.0f;
 static float s_execGoAt = 0.0f;
 
-/// The round's push: (re)set for a new round.
-static void LsExecuteRound()
+/// The round's push: (re)set for a new round, or when the team switches site
+static void LsExecuteRound(const CCSBotManager::Zone *site)
 {
-	if (s_execRound != LsRoundSerial())
+	if (s_execRound != LsRoundSerial() || s_execSite != site)
 	{
 		s_execRound = LsRoundSerial();
+		s_execSite = site;
 		s_execFirstAt = 0.0f;
 		s_execGoAt = 0.0f;
 	}
@@ -516,7 +519,8 @@ bool CCSBot::LsLurksOtherSite()
 
 bool CCSBot::LsExecuting()
 {
-	return m_iTeam == TERRORIST && m_lsPushRound == LsRoundSerial() && !TheCSBots()->IsBombPlanted() && IsAlive();
+	return m_iTeam == TERRORIST && m_lsPushRound == LsRoundSerial() && m_lsExecSite == LsTSite() && !TheCSBots()->IsBombPlanted() && IsAlive()
+		&& !LsOrderActive();
 }
 
 void CCSBot::LsExecuteTick()
@@ -524,11 +528,20 @@ void CCSBot::LsExecuteTick()
 	if (!LsFight() || !LsTeamGame() || m_iTeam != TERRORIST || !IsAlive() || TheCSBots()->GetScenario() != CCSBotManager::SCENARIO_DEFUSE_BOMB
 		|| TheCSBots()->IsBombPlanted() || CSGameRules()->IsFreezePeriod() || LsOrderActive())
 		return;
-	LsExecuteRound();
 	int round = LsRoundSerial();
 	float now = gpGlobals->time;
 	const CCSBotManager::Zone *site = LsTSite();
-	if (!site || m_lsPushRound == round || LsLurksOtherSite())
+	if (!site || LsLurksOtherSite())
+		return;
+	LsExecuteRound(site);
+	// (its own marks count for this round's site only: a switch starts over)
+	if (m_lsExecSite != site)
+	{
+		m_lsExecSite = site;
+		m_lsStagedRound = -1;
+		m_lsPushRound = -1;
+	}
+	if (m_lsPushRound == round)
 		return;
 
 	// gone already: one who comes up after it goes straight in
@@ -549,12 +562,13 @@ void CCSBot::LsExecuteTick()
 	}
 	if (s_execGoAt > 0.0f)
 	{
-		if (dist < 1700.0f)
+		// (in a fight at the go: it goes once the fight is over)
+		if (dist < 1700.0f && !IsAttacking())
 		{
-			m_lsPushRound = round;
 			const Vector *pos = TheCSBots()->GetRandomPositionInZone(site);
-			if (pos && !IsAttacking())
+			if (pos)
 			{
+				m_lsPushRound = round;
 				if (IsCarryingBomb())
 					SetTask(PLANT_BOMB);
 				MoveTo(pos, FASTEST_ROUTE);
@@ -572,7 +586,7 @@ void CCSBot::LsExecuteTick()
 		if (!pT || FNullEnt(pT->pev) || !pT->IsAlive() || pT->m_iTeam != TERRORIST)
 			continue;
 		alive++;
-		if (pT->IsBot() && static_cast<CCSBot *>(pT)->m_lsStagedRound == round)
+		if (pT->IsBot() && static_cast<CCSBot *>(pT)->m_lsStagedRound == round && static_cast<CCSBot *>(pT)->m_lsExecSite == site)
 			staged++;
 	}
 	float left = LsTimeLeft();

@@ -1305,6 +1305,7 @@ private:
 	int m_lsTeamRound = -1;							// the round LsTeamTick last saw
 	int m_lsStagedRound = -1;						// the round it waited near the site for the push
 	int m_lsPushRound = -1;							// the round it went in with the push
+	const CCSBotManager::Zone *m_lsExecSite = nullptr;	// the site those were for (the team can switch)
 	float m_lsDefuseNoticeAt = -1.0f;				// when it takes in the defuse it hears
 	int m_lsWinReloadRound = -1;
 	int m_lsMoraleHideRound = -1;					// the round it hid on low morale (once is enough)
