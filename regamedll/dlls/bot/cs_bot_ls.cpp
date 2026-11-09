@@ -250,9 +250,14 @@ unsigned int CCSBot::LsSeed()
 		char bare[64];
 		const char *name = STRING(pev->netname);
 		LsBareName(name, bare, sizeof(bare));
+		// (a regular whose name came out a little different this time, "Dave_" or "dave"
+		// (gm_pubserver's tweak_name): the same person: case aside, one such end off)
+		size_t len = Q_strlen(bare);
+		if (len > 3 && Q_strchr("^_.x2!~-", bare[len - 1]))
+			bare[len - 1] = '\0';
 		unsigned int h = 2166136261U;
 		for (const char *c = bare; *c; c++)
-			h = (h ^ (unsigned char)*c) * 16777619U;
+			h = (h ^ (unsigned char)tolower((unsigned char)*c)) * 16777619U;
 		// (a second bot with the same name, "(1)Dave": a person of its own, not Dave's twin)
 		if (name[0] == '(' && isdigit((unsigned char)name[1]))
 		{
