@@ -1067,6 +1067,8 @@ public:
 	bool LsOverwhelmed();							// several facing it at once: the less bold back off (once a fight, by its roll)
 	void LsFlankCheck();							// hit by someone it isn't fighting: turns to them, or a look, by its skill							// respawned or teleported: what it was in the middle of ends
 	bool LsBlindTick();
+	Vector LsLaggedEnemyPos();						// the enemy as its hand follows them: a moment behind (by skill)
+	void LsTremorTick();							// a hand's tremor on the aim
 	void LsSeedAs(const char *name) { if (!FStrEq(name, m_lsSeedAs)) { Q_strlcpy(m_lsSeedAs, name); m_lsSeedName = 0; } }	// (gm_people's persona comes as the bot joins, before its habits are used)
 	void LsSniperStep();							// after a sniper shot: a step aside while the zoom comes back							// flashed: its own way of coping (true: dealt with this frame)
 	bool LsKnifeOnly() const { return !m_rgpPlayerItems[PRIMARY_WEAPON_SLOT] && !m_rgpPlayerItems[PISTOL_SLOT]; }	// a knife and nothing else to shoot with
@@ -1224,7 +1226,13 @@ private:
 	float m_lsOverwhelmedAt = -10.0f;				// several enemies facing it at once, then
 	float m_lsFlankReactAt = 0.0f;
 	float m_lsOverwhelmRollAt = 0.0f;					// next check of a hit from someone it isn't fighting
-	bool m_lsHandMoving = false;						// calm looks: a burst of the mouse under way
+	bool m_lsHandMoving = false;
+	EntityHandle<CBasePlayer> m_lsTrackOf;			// whose positions the aim lag buffer holds
+	Vector m_lsTrackPos[8];
+	float m_lsTrackAt[8] = {};
+	int m_lsTrackN = 0;
+	float m_lsTremorYaw = 0.0f;
+	float m_lsTremorPitch = 0.0f;						// calm looks: a burst of the mouse under way
 	float m_lsHandRestUntil = 0.0f;					// ...and the hand resting till then
 	float m_lsSnipeStepAt = -10.0f;
 	int m_lsSnipeStepDir = 0;

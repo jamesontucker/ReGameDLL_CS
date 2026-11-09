@@ -999,3 +999,72 @@ void CCSBot::LsFlankCheck()
 	Vector at = pFlanker->pev->origin + Vector(0, 0, HalfHumanHeight);
 	SetLookAt("Loner-Strike: shot from the side", &at, PRIORITY_HIGH, RANDOM_FLOAT(0.3f, 0.6f));
 }
+
+// The enemy's position as this bot's hand is following it: where they were a moment ago (60 ms
+// for the best, 200 ms for a newcomer). On a sudden change of direction the aim carries on the
+// old way, then catches up, as people's does
+Vector CCSBot::LsLaggedEnemyPos()
+{
+	CBasePlayer *pEnemy = m_enemy;
+	float now = gpGlobals->time;
+	if (!pEnemy)
+		return m_lastEnemyPosition;
+	if (pEnemy != static_cast<CBasePlayer *>(m_lsTrackOf) || now - m_lsTrackAt[(m_lsTrackN + 7) % 8] > 0.5f)
+	{
+		m_lsTrackOf = pEnemy;
+		m_lsTrackN = 0;
+		for (int i = 0; i < 8; i++)
+		{
+			m_lsTrackPos[i] = pEnemy->pev->origin;
+			m_lsTrackAt[i] = now;
+		}
+	}
+	// (a sample every 30 ms or so is plenty)
+	if (now - m_lsTrackAt[(m_lsTrackN + 7) % 8] >= 0.03f)
+	{
+		m_lsTrackPos[m_lsTrackN % 8] = pEnemy->pev->origin;
+		m_lsTrackAt[m_lsTrackN % 8] = now;
+		m_lsTrackN++;
+	}
+	float lag = 0.06f + 0.14f * (1.0f - LsSkill()) + 0.03f * LsTrait(94);
+	float want = now - lag;
+	// the newest sample at or before then (the buffer holds about a quarter of a second)
+	Vector best = m_lsTrackPos[(m_lsTrackN + 7) % 8];
+	float bestAt = -1.0f;
+	for (int i = 0; i < 8; i++)
+	{
+		if (m_lsTrackAt[i] <= want && m_lsTrackAt[i] > bestAt)
+		{
+			bestAt = m_lsTrackAt[i];
+			best = m_lsTrackPos[i];
+		}
+	}
+	if (bestAt < 0.0f)
+	{
+		// (not that far back yet: the oldest there is)
+		float oldest = 1e9f;
+		for (int i = 0; i < 8; i++)
+		{
+			if (m_lsTrackAt[i] < oldest)
+			{
+				oldest = m_lsTrackAt[i];
+				best = m_lsTrackPos[i];
+			}
+		}
+	}
+	return best;
+}
+
+// A hand's tremor: a smooth wander that drifts back to centre (an Ornstein-Uhlenbeck walk),
+// a fraction of a degree for a steady hand, more for a shaky one
+void CCSBot::LsTremorTick()
+{
+	float dt = g_flBotCommandInterval;
+	float sigma = 0.25f + 0.9f * (1.0f - LsSkill());
+	const float theta = 6.0f;
+	auto gauss = []() { return (RANDOM_FLOAT(-1.0f, 1.0f) + RANDOM_FLOAT(-1.0f, 1.0f) + RANDOM_FLOAT(-1.0f, 1.0f)) * 0.577f; };
+	m_lsTremorYaw += -theta * m_lsTremorYaw * dt + sigma * 2.4f * sqrtf(dt) * gauss();
+	m_lsTremorPitch += -theta * m_lsTremorPitch * dt + sigma * 1.8f * sqrtf(dt) * gauss();
+	m_lsTremorYaw = Q_max(-2.5f, Q_min(2.5f, m_lsTremorYaw));
+	m_lsTremorPitch = Q_max(-2.0f, Q_min(2.0f, m_lsTremorPitch));
+}

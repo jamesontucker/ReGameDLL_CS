@@ -73,6 +73,25 @@ void CCSBot::UpdateLookAngles()
 		stiffness = 300.0f;
 		damping = 30.0f * (LsFight() ? LsAimDamping() : 1.0f);
 		maxAccel = 3000.0f;
+
+		// Loner-Strike: a flick in two parts, as hands do: a fast, loose throw for most of a big
+		// turn (the better the player, the quicker), then a slower, steadier settle for the last
+		// few degrees
+		if (LsFight())
+		{
+			float off = float(fabs(NormalizeAngle(m_lookYaw - pev->v_angle.y)));
+			if (off > 10.0f)
+			{
+				stiffness = 280.0f + 220.0f * LsSkill();
+				damping = 20.0f;
+				maxAccel = 3600.0f + 1800.0f * LsSkill();
+			}
+			else if (off < 4.0f)
+			{
+				stiffness = 220.0f;
+				damping = 30.0f * LsAimDamping();
+			}
+		}
 	}
 	else
 	{
@@ -272,7 +291,8 @@ void CCSBot::UpdateLookAngles()
 	{
 		// simple angular spring/damper
 		// double the stiffness since pitch is only +/- 90 and yaw is +/- 180
-		float accel = 2.0f * stiffness * angleDiff - damping * m_lookPitchVel;
+		// (Loner-Strike: a little less: up and down is the slower way for a wrist)
+		float accel = (LsFight() ? 1.6f : 2.0f) * stiffness * angleDiff - damping * m_lookPitchVel;
 
 		// limit rate
 		if (accel > maxAccel)

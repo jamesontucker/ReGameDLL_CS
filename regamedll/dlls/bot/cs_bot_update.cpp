@@ -49,7 +49,11 @@ void CCSBot::Upkeep()
 
 			if (IsEnemyVisible())
 			{
-				if (GetProfile()->GetSkill() > 0.5f)
+				// (Loner-Strike: where its eyes last told it they were, a moment ago: a hand
+				// follows the target with a lag, so a sudden strafe is overshot then caught up)
+				if (LsFight())
+					m_aimSpot = LsLaggedEnemyPos();
+				else if (GetProfile()->GetSkill() > 0.5f)
 				{
 					const float k = 3.0f;
 					m_aimSpot = (m_enemy->pev->velocity - pev->velocity) * g_flBotCommandInterval * k + m_enemy->pev->origin;
@@ -121,6 +125,15 @@ void CCSBot::Upkeep()
 			// Loner-Strike: pulling down against the recoil, as well as its skill allows
 			if (LsFight())
 				idealAngle.x -= (0.2f + 0.6f * GetProfile()->GetSkill()) * pev->punchangle.x;
+
+			// Loner-Strike: a hand's tremor on the aim, never quite still (smooth, drifting back
+			// to centre; the steadier the better the player)
+			if (LsFight())
+			{
+				LsTremorTick();
+				idealAngle.y += m_lsTremorYaw;
+				idealAngle.x += m_lsTremorPitch;
+			}
 
 			SetLookAngles(idealAngle.y, idealAngle.x);
 		}
