@@ -86,7 +86,7 @@ static bool LsCornerFree(CCSBot *me)
 // What this bot does at this corner (rolled once per corner)
 int CCSBot::LsPickCornerPlan()
 {
-	float skill = GetProfile()->GetSkill();
+	float skill = LsSkill();
 	float aggro = LsAggro();
 	bool sneaking = !IsRunning();
 
@@ -271,7 +271,7 @@ bool CCSBot::LsCornerMoves(Vector *goal)
 		m_lsJigglePhase = 0;
 		m_lsJigglePhaseEnd = now + RANDOM_FLOAT(0.1f, 0.2f);
 		// (the better ones sometimes do it twice)
-		m_lsJiggleLeft = (GetProfile()->GetSkill() > 0.75f && RANDOM_FLOAT(0.0f, 1.0f) < 0.35f) ? 2 : 1;
+		m_lsJiggleLeft = (LsSkill() > 0.75f && RANDOM_FLOAT(0.0f, 1.0f) < 0.35f) ? 2 : 1;
 		m_lsJiggleUntil = now + 1.2f;
 		LsWhy("jiggle");
 		Vector to = pev->origin + Vector(out.x, out.y, 0.0f) * 100.0f;
@@ -347,7 +347,7 @@ const Vector *CCSBot::LsOffAngle(const Vector *stockPick, const Vector *pos, CNa
 	if (!LsFight() || LsSolo() || !stockPick || !source || !pos || IsSniper())
 		return stockPick;
 
-	float skill = GetProfile()->GetSkill();
+	float skill = LsSkill();
 	float aggro = LsAggro();
 	float bent = 0.5f * skill + 0.5f * (1.0f - aggro) + (LsMatch() ? 0.15f : 0.0f);
 	if (LsTrait(62) > bent - 0.1f || RANDOM_FLOAT(0.0f, 1.0f) > 0.7f)
@@ -450,7 +450,7 @@ void CCSBot::LsPrefire(const Vector &spot)
 	if (IsUsingKnife() || IsUsingGrenade() || IsUsingSniperRifle() || !GetActiveWeapon() || GetActiveWeaponAmmoRatio() < 0.35f)
 		return;
 
-	float skill = GetProfile()->GetSkill();
+	float skill = LsSkill();
 	float aggro = LsAggro();
 	float want = 0.5f * aggro + 0.5f * skill;
 	if (LsTrait(64) > want - 0.25f)
@@ -519,7 +519,7 @@ void CCSBot::LsFallBack()
 {
 	if (!LsFight())
 		return;
-	float skill = GetProfile()->GetSkill();
+	float skill = LsSkill();
 	if (GetEnemy())
 		m_lsBackFrom = GetLastKnownEnemyPosition();
 	else if (GetAttacker())
@@ -591,7 +591,7 @@ bool CCSBot::LsScopesClose()
 {
 	if (!LsFight() || LsMatch())
 		return false;
-	return GetProfile()->GetSkill() < 0.45f && LsTrait(67) < 0.6f;
+	return LsSkill() < 0.45f && LsTrait(67) < 0.6f;
 }
 
 // ---- panic ------------------------------------------------------------------------------
@@ -604,7 +604,7 @@ void CCSBot::LsAttackBegins(bool crouchAndHold)
 	m_lsPanicKind = 0;
 	if (!LsFight() || LsMatch() || IsUsingKnife() || IsUsingLadder() || IsBlind())
 		return;
-	if (GetProfile()->GetSkill() >= 0.4f || LsTrait(68) >= 0.55f)
+	if (LsSkill() >= 0.4f || LsTrait(68) >= 0.55f)
 		return;
 
 	CBasePlayer *pEnemy = GetEnemy();
@@ -663,7 +663,7 @@ int CCSBot::LsLadderSide()
 	if (m_lsLadderFor != m_pathLadderTimestamp)
 	{
 		m_lsLadderFor = m_pathLadderTimestamp;
-		float skill = GetProfile()->GetSkill();
+		float skill = LsSkill();
 		float chance = skill > 0.6f ? 0.85f : skill > 0.4f ? 0.3f : 0.05f;
 		m_lsLadderSide = (RANDOM_FLOAT(0.0f, 1.0f) < chance) ? (LsTrait(70) < 0.5f ? 1 : -1) : 0;
 	}

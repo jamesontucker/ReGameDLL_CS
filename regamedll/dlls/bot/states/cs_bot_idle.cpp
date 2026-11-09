@@ -40,7 +40,8 @@ void IdleState::OnEnter(CCSBot *me)
 	me->SetEnemy(nullptr);
 
 	// lurking death
-	if (me->IsUsingKnife() && me->IsWellPastSafe() && !me->IsHurrying())
+	// (Loner-Strike: not in deathmatch-type modes, where nobody creeps about with a knife)
+	if (me->IsUsingKnife() && me->IsWellPastSafe() && !me->IsHurrying() && !(LsFight() && LsSolo()))
 		me->Walk();
 
 	// Since Idle assigns tasks, we assume that coming back to Idle means our task is complete

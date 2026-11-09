@@ -32,7 +32,8 @@
 void HuntState::OnEnter(CCSBot *me)
 {
 	// lurking death
-	if (me->IsUsingKnife() && me->IsWellPastSafe() && !me->IsHurrying())
+	// (Loner-Strike: not in deathmatch-type modes, where nobody creeps about with a knife)
+	if (me->IsUsingKnife() && me->IsWellPastSafe() && !me->IsHurrying() && !(LsFight() && LsSolo()))
 		me->Walk();
 	else
 		me->Run();
@@ -174,8 +175,9 @@ void HuntState::OnUpdate(CCSBot *me)
 	// (Loner-Strike: or, every bot for itself, it finds itself walking with a teammate)
 	if (me->GetLastKnownArea() == m_huntArea || me->UpdatePathMovement() != CCSBot::PROGRESSING || (me->LsLoner() && me->LsShouldSpread()))
 	{
-		// Loner-Strike: every bot for itself: somewhere its teammates aren't
-		if (me->LsLoner())
+		// Loner-Strike: every bot for itself: somewhere its teammates aren't (and on a hostage
+		// map every T, so the Ts hold the building rather than wander to the CT spawn)
+		if (me->LsLoner() || (LsFight() && me->m_iTeam == TERRORIST && TheCSBots()->GetScenario() == CCSBotManager::SCENARIO_RESCUE_HOSTAGES))
 		{
 			m_huntArea = me->LsPickHuntArea();
 			if (m_huntArea)

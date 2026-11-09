@@ -15,6 +15,12 @@ void CCSBot::LsTeamTick()
 		return;
 	float now = gpGlobals->time;
 	int round = CSGameRules()->m_iTotalRoundsPlayed;
+	// (a call from last round is no reason to go anywhere now)
+	if (m_lsTeamRound != round)
+	{
+		m_lsTeamRound = round;
+		m_lsRotateAt = 0.0f;
+	}
 
 	// a teammate's call it looked into first: on its way now, unless something came up
 	if (m_lsRotateAt > 0.0f && now >= m_lsRotateAt)
@@ -33,11 +39,20 @@ void CCSBot::LsTeamTick()
 		m_lsPickupRound = round;
 		CBaseEntity *pBox = nullptr, *pBest = nullptr;
 		float best = 700.0f;
+		static const char *const good[] = { "models/w_ak47.mdl", "models/w_m4a1.mdl", "models/w_awp.mdl", "models/w_sg552.mdl", "models/w_aug.mdl",
+			"models/w_galil.mdl", "models/w_famas.mdl", "models/w_m249.mdl", "models/w_g3sg1.mdl", "models/w_sg550.mdl" };
 		while ((pBox = UTIL_FindEntityByClassname(pBox, "weaponbox")))
 		{
-			if (FStrEq(STRING(pBox->pev->model), "models/w_backpack.mdl"))
+			const char *model = STRING(pBox->pev->model);
+			if (FStrEq(model, "models/w_backpack.mdl"))
 				continue;
 			float d = float((pBox->pev->origin - pev->origin).Length());
+			// (a rifle counts as twice as close as a pistol)
+			for (const char *g : good)
+			{
+				if (FStrEq(model, g))
+					d *= 0.5f;
+			}
 			if (d < best)
 			{
 				best = d;
@@ -99,7 +114,23 @@ bool CCSBot::LsRadioAnswer()
 			return true;
 		if (LsLoner() && RANDOM_FLOAT(0.0f, 1.0f) < 0.6f)
 			return true;
-		float skill = GetProfile()->GetSkill();
+		float skill = LsSkill();
+		if ((m_radioPosition - pev->origin).IsLengthGreaterThan(2500.0f))
+			return true;
+		int closer = 0;
+		float mine = float((m_radioPosition - pev->origin).Length());
+		LsForTeammates(this, [&](CBasePlayer *pPlayer) {
+			if (pPlayer->IsAlive() && (m_radioPosition - pPlayer->pev->origin).IsLengthLessThan(mine))
+				closer++;
+		});
+		if (closer >= 2)
+			return true;
+		if (m_lastRadioCommand == EVENT_RADIO_ENEMY_SPOTTED)
+		{
+			Vector look = m_radioPosition + Vector(0, 0, HalfHumanHeight);
+			SetLookAt("Loner-Strike: a call", &look, PRIORITY_MEDIUM, 1.0f);
+			return true;
+		}
 		m_lsRotateTo = m_radioPosition;
 		if (skill < 0.4f && !LsMatch())
 		{
@@ -188,4 +219,21 @@ void CCSBot::LsEarlyPick(CBasePlayer *pVictim, CBasePlayer *pKiller)
 	float aggro = LsAggro();
 	if (RANDOM_FLOAT(0.0f, 1.0f) < (LsMatch() ? 0.75f : 0.4f + 0.4f * aggro))
 		Hurry(RANDOM_FLOAT(8.0f, 14.0f));
+}
+
+// A teammate went down to someone this bot can't see: it knows roughly where the shots came
+// from, looks that way, hurries a little, and (if it's free to) goes to where the teammate
+// fell rather than straight at the killer (which would look like it sees through walls)
+void CCSBot::LsAvenge(CBasePlayer *pVictim, CBasePlayer *pKiller)
+{
+	float far = float((pKiller->pev->origin - pev->origin).Length());
+	float err = far * (0.15f - 0.08f * LsSkill());
+	Vector heard = pKiller->pev->origin + Vector(RANDOM_FLOAT(-err, err), RANDOM_FLOAT(-err, err), HalfHumanHeight);
+	SetLookAt("Loner-Strike: where the shots came from", &heard, PRIORITY_HIGH, RANDOM_FLOAT(1.0f, 2.0f));
+	Hurry(RANDOM_FLOAT(4.0f, 7.0f));
+	if (LsFree() && !LsLoner())
+	{
+		MoveTo(&pVictim->pev->origin, FASTEST_ROUTE);
+		LsWhy("avenge");
+	}
 }

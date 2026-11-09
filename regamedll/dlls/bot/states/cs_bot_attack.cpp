@@ -86,7 +86,7 @@ void AttackState::OnEnter(CCSBot *me)
 				else if ((me->pev->origin - pEnemy->pev->origin).IsLengthGreaterThan(crouchFarRange))
 					crouchChance = 50.0f;
 				else
-					crouchChance = 20.0f * (1.0f - me->GetProfile()->GetAggression());
+					crouchChance = 20.0f * (1.0f - me->LsAggro());
 
 				// Loner-Strike: crouching is a habit some have, not a coin flip for everyone
 				if (LsFight())
@@ -144,7 +144,7 @@ void AttackState::OnEnter(CCSBot *me)
 	m_dodge = (RANDOM_FLOAT(0.0f, 100.0f) < dodgeChance) != 0;
 
 	// decide whether we might bail out of this fight
-	m_isCoward = (RANDOM_FLOAT(0.0f, 100.0f) > 100.0f * me->GetProfile()->GetAggression());
+	m_isCoward = (RANDOM_FLOAT(0.0f, 100.0f) > 100.0f * me->LsAggro());
 
 	// Loner-Strike: caught by surprise, a newer player may hold walk or crouch
 	me->LsAttackBegins(m_crouchAndHold);
@@ -215,7 +215,8 @@ void AttackState::OnUpdate(CCSBot *me)
 		// (Loner-Strike: on a team map, a lone CT before the plant plays for time by its own
 		// roll, in place of stock's "outnumbered by two: always back off")
 		if (LsFight() && LsSolo()
-			? (isPinnedDown && me->pev->health < 35.0f)
+			? ((isPinnedDown && me->pev->health < 35.0f)
+				|| (!CSGameRules()->IsFreeForAll() && me->OutnumberedCount() >= 2 && me->pev->health < 50.0f && me->LsStyle() != LS_STYLE_RUSHER && m_isCoward))
 			: LsFight() ? (isPinnedDown || me->LsPlayForTime() || (me->IsOutnumbered() && m_isCoward))
 			: (isPinnedDown ||
 			(me->IsOutnumbered() && m_isCoward) ||
@@ -475,13 +476,13 @@ void AttackState::OnUpdate(CCSBot *me)
 	}
 
 	// if we haven't seen our enemy for a long time, chase after them
-	float chaseTime = 2.0f + 2.0f * (1.0f - me->GetProfile()->GetAggression());
+	float chaseTime = 2.0f + 2.0f * (1.0f - me->LsAggro());
 	// (Loner-Strike: in deathmatch people go after someone who ducked out of sight, the
 	// aggressive ones straight away)
 	if (LsFight() && LsSolo())
-		chaseTime = 0.3f + 1.7f * (1.0f - me->GetProfile()->GetAggression());
+		chaseTime = 0.3f + 1.7f * (1.0f - me->LsAggro());
 	else if (LsFight())
-		chaseTime += me->LsChaseExtra();
+		chaseTime = Q_max(0.2f, chaseTime - me->LsChaseExtra());
 
 	// if we are sniping, be very patient
 	if (me->IsUsingSniperRifle())

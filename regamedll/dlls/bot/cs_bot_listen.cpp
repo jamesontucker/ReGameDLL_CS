@@ -70,7 +70,7 @@ bool CCSBot::ShouldInvestigateNoise(float *retNoiseDist)
 		}
 
 		// if we are hiding, only react to noises very nearby, depending on how aggressive we are
-		if (IsAtHidingSpot() && noiseDist > 100.0f + 400.0f * GetProfile()->GetAggression())
+		if (IsAtHidingSpot() && noiseDist > 100.0f + 400.0f * LsAggro())
 			return false;
 
 		// chance of investigating is inversely proportional to distance

@@ -102,6 +102,14 @@ void CCSBot::OnEvent(GameEventType event, CBaseEntity *pEntity, CBaseEntity *pOt
 					// snipers stay put
 					if (!IsSniper() && IsVisible(&pVictim->pev->origin))
 					{
+						// Loner-Strike: a killer it can't see: a look his way (as heard) and on
+						// to where the teammate fell, not a run straight at him
+						if (LsFight() && !IsVisible(pKiller, true))
+						{
+							LsAvenge(pVictim, pKiller);
+							return;
+						}
+
 						// people are dying - we should hurry
 						Hurry(RANDOM_FLOAT(10.0f, 15.0f));
 

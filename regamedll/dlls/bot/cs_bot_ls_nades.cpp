@@ -81,14 +81,14 @@ bool CCSBot::LsNadeDumper()
 {
 	if (LsMatch())
 		return false;
-	float skill = GetProfile()->GetSkill();
+	float skill = LsSkill();
 	return (skill < 0.45f && LsTrait(40) < 0.75f) || (skill < 0.6f && LsTrait(40) < 0.15f);
 }
 
 // How much it uses its grenades well: skill and its own taste for them, everyone in a match
 float CCSBot::LsNadeUse()
 {
-	float use = LsMatch() ? 0.85f : 0.2f + 0.7f * GetProfile()->GetSkill();
+	float use = LsMatch() ? 0.85f : 0.2f + 0.7f * LsSkill();
 	return use * (0.6f + 0.8f * LsTrait(42));
 }
 
@@ -511,7 +511,7 @@ void CCSBot::LsNadeUpdate()
 			EquipBestWeapon(MUST_EQUIP);
 
 			// a flash: a look away while it goes off (the careless don't bother)
-			bool turns = GetProfile()->GetSkill() >= 0.45f || LsMatch() || LsTrait(43) > 0.4f;
+			bool turns = LsSkill() >= 0.45f || LsMatch() || LsTrait(43) > 0.4f;
 			if (m_lsNadeId == WEAPON_FLASHBANG && turns)
 			{
 				Vector away = GetEyePosition() - (m_lsNadeBurst - GetEyePosition()).Normalize() * 300.0f;
@@ -701,7 +701,7 @@ float CCSBot::LsSmokeSprayTime()
 {
 	if (LsMatch())
 		return 0.5f + 0.5f * LsTrait(44);
-	return 0.6f + 2.2f * LsTrait(44) * (1.2f - GetProfile()->GetSkill());
+	return 0.6f + 2.2f * LsTrait(44) * (1.2f - LsSkill());
 }
 
 // In sight but for smoke (FOV and walls as usual)
@@ -811,6 +811,28 @@ static int LsTeamPlan(int team)
 	return plan;
 }
 
+// A mode that hands out or limits the guns (Loner-Strike's gm_weapons: knife, pistols,
+// AWP, scoutz...; or the bot cvars that keep bots to one kind): stock buying only
+static bool LsWeaponMode()
+{
+	static cvar_t *s_weapons = nullptr;
+	if (!s_weapons)
+		s_weapons = CVAR_GET_POINTER("gm_weapons");
+	if (s_weapons && s_weapons->value != 0.0f)
+		return true;
+	return cv_bot_allow_rifles.value == 0.0f || (cv_bot_allow_snipers.value == 0.0f && cv_bot_allow_pistols.value == 0.0f);
+}
+
+// A scrim (gm_scrim) runs its own team economy and calls the buys in chat: the bots follow
+// that money (it caps it on an eco) rather than rolling their own save or force
+static bool LsScrimEconomy()
+{
+	static cvar_t *s_phase = nullptr;
+	if (!s_phase)
+		s_phase = CVAR_GET_POINTER("gm_scrim_phase");
+	return s_phase && s_phase->value > 0.0f;
+}
+
 // The pistol round (the first, or after a reset or a half: everyone on next to nothing)
 static bool LsPistolRound()
 {
@@ -829,7 +851,7 @@ static bool LsPistolRound()
 void CCSBot::LsPlanBuy()
 {
 	m_lsBuyPlan = LS_BUY;
-	if (!LsFight() || !LsTeamGame() || !CSGameRules() || !TheCSBots())
+	if (!LsFight() || !LsTeamGame() || !CSGameRules() || !TheCSBots() || LsWeaponMode() || LsScrimEconomy())
 		return;
 
 	// the pistol round, or still holding a gun from last round: the usual
@@ -858,7 +880,7 @@ void CCSBot::LsPlanBuy()
 	else
 	{
 		// a pub: some always buy whatever they can (the stock buy does exactly that)
-		float skill = GetProfile()->GetSkill();
+		float skill = LsSkill();
 		bool spender = LsTrait(45) < 0.3f || (skill < 0.4f && LsTrait(45) < 0.55f);
 		m_lsBuyPlan = spender ? LS_BUY : LS_SAVE;
 	}
@@ -878,6 +900,8 @@ void CCSBot::LsBuyEco()
 // money for a vest (or just the dearest it can have)
 void CCSBot::LsBuyForce()
 {
+	if (LsWeaponMode())
+		return;
 	struct Gun { const char *alias; int cost; int team; int kind; };	// kind: 0 rifle, 1 SMG, 2 shotgun
 	static const Gun guns[] =
 	{
@@ -912,7 +936,7 @@ void CCSBot::LsBuyForce()
 // Grenades and the defuse kit, instead of the stock random picks
 void CCSBot::LsBuyExtras()
 {
-	if (m_lsBuyPlan == LS_SAVE)
+	if (m_lsBuyPlan == LS_SAVE || LsWeaponMode())
 		return;
 
 	// a kit for each site among the CTs: not everyone, and not no one
@@ -947,7 +971,7 @@ void CCSBot::LsBuyExtras()
 
 	const char *list[5];
 	int n = 0;
-	float skill = GetProfile()->GetSkill();
+	float skill = LsSkill();
 
 	if (LsNadeDumper())
 	{
@@ -1003,6 +1027,8 @@ void CCSBot::LsBuyExtras()
 // better players, and a few heroes never
 void CCSBot::LsSaveCheck()
 {
+	if (LsWeaponMode())
+		return;
 	float now = gpGlobals->time;
 	if (now < m_lsSaveNext || !TheCSBots() || !CSGameRules())
 		return;
@@ -1063,7 +1089,7 @@ void CCSBot::LsSaveCheck()
 		return;
 
 	m_lsSaveDecided = true;
-	float skill = GetProfile()->GetSkill();
+	float skill = LsSkill();
 	float chance = LsMatch() ? 0.9f : 0.25f + 0.6f * skill;
 	if (LsTrait(48) > 0.85f)
 		chance *= 0.15f;

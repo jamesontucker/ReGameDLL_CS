@@ -789,7 +789,7 @@ bool CCSBot::IsRogue() const
 		m_rogueTimer.Start(RANDOM_FLOAT(10, 30));
 
 		// our chance of going rogue is inversely proportional to our teamwork attribute
-		const float rogueChance = 100.0f * (1.0f - GetProfile()->GetTeamwork());
+		const float rogueChance = 100.0f * (1.0f - LsTeamwork());
 
 		m_isRogue = (RANDOM_FLOAT(0, 100) < rogueChance);
 	}

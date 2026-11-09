@@ -1030,11 +1030,13 @@ public:
 	int LsStyle() const;							// LS_STYLE_*, -1 when not told (or the personality slider is at 0)
 	int LsTemper() const { return m_lsTemper; }
 	int LsHumor() const { return m_lsHumor; }
-	void LsSetPersona(float aggro, float team, int style, int temper, int humor) { m_lsAggro = aggro; m_lsTeam = team; m_lsStyle = style; m_lsTemper = temper; m_lsHumor = humor; }
+	void LsSetPersona(float aggro, float team, int style, int temper, int humor, int skill) { m_lsAggro = aggro; m_lsTeam = team; m_lsStyle = style; m_lsTemper = temper; m_lsHumor = humor; m_lsSkillTrait = skill; }
+	float LsSkill() const;							// the profile's skill, leaned toward who the bot is
 	// Loner-Strike team (cs_bot_ls_team.cpp)
 	void LsTeamTick();								// team play each frame: retakes, rotations, pickups
 	bool LsRadioAnswer();							// a teammate's radio call, answered like a person (true: handled)
 	bool LsTeamHeard(GameEventType event, CBasePlayer *pPlayer);	// a teammate's gunfire close by: go and trade
+	void LsAvenge(CBasePlayer *pVictim, CBasePlayer *pKiller);	// a teammate killed by someone it can't see
 	bool LsPlayForTime();							// a CT alone against several before the plant: fall back
 	bool LsHoldsPlant();							// guarding the planted bomb: hold, don't chase
 	void LsEarlyPick(CBasePlayer *pVictim, CBasePlayer *pKiller);	// a T teammate got an early kill: push
@@ -1067,6 +1069,10 @@ public:
 	void LsBuyExtras();								// grenades and the defuse kit (instead of the stock picks)
 	void LsSaveCheck();								// alone against many late in a lost round: hide, keep the gun
 	bool LsSavingGun() const { return m_lsSaving; }
+	bool LsNadeOnly() const							// deathmatch with nothing but a knife and grenades (Gun Game's HE level)
+	{
+		return LsFight() && LsSolo() && !m_rgpPlayerItems[PRIMARY_WEAPON_SLOT] && !m_rgpPlayerItems[PISTOL_SLOT] && m_rgpPlayerItems[GRENADE_SLOT];
+	}
 	// (end nades)
 	// Loner-Strike moves (cs_bot_ls_moves.cpp)
 	bool LsCornerMoves(Vector *goal);				// a blind corner ahead: jiggle, wide swing or outside line (true: a jiggle moves it)
@@ -1089,6 +1095,7 @@ public:
 	void LsLadderStuck(const CNavLadder *ladder) { m_lsBadLadder = ladder; m_lsBadLadderUntil = gpGlobals->time + 25.0f; }
 	bool LsDucksOff(const CNavArea *area, const Vector &spot) const;	// getting off a ladder into a low space: crouch
 	bool LsCalm() const;							// nothing has startled it lately (calm looks turn slower)
+	bool LsPuppetLooking() const { return gpGlobals->time < m_lsPuppet.lookUntil; }	// a plugin has it looking somewhere
 	// (end moves)
 	// Loner-Strike (cs_bot_ls.cpp): each bot keeps to itself and moves like a person
 	unsigned int LsSeed();
@@ -1189,12 +1196,14 @@ private:
 	int m_lsStyle = -1;								// rusher roamer lurker careful camper awper knifer nader ninja objective weirdgun
 	int m_lsTemper = 1;								// 0 chill, 1 normal, 2 tilty
 	int m_lsHumor = 1;								// 0 none, 1 dry, 2 goofy, 3 troll
+	int m_lsSkillTrait = -1;						// gm_people's skill: 0 newbie .. 3 pro, -1 not told
 	// Loner-Strike team (cs_bot_ls_team.cpp): members
 	float m_lsRotateAt = 0.0f;						// going to a teammate's call then (after a look)
 	Vector m_lsRotateTo;
 	float m_lsTradeAt = -10.0f;						// last went to trade a teammate
 	int m_lsRetakeRound = -1;						// the round it waited for teammates before a retake
 	int m_lsPickupRound = -1;						// the round it went for a dropped gun after
+	int m_lsTeamRound = -1;							// the round LsTeamTick last saw
 	int m_lsForTimeRoll = -1;						// this fight: does it play for time (-1 not rolled)
 	// (end team members)
 	// Loner-Strike nades (cs_bot_ls_nades.cpp): members
@@ -1250,6 +1259,10 @@ private:
 	// (end moves members)
 	float m_lsBangHeardAt = -10.0f;					// last sprayed a wall at someone heard behind it
 	float m_lsPreAimAt = -10.0f;					// last pre-aimed at footsteps
+	float m_lsHeardAt = -10.0f;						// last weighed something heard
+	EntityHandle<CBasePlayer> m_lsShotBy;			// whose bullets those were
+	int m_lsSneakRound = -1;						// the round the late-round sneak was rolled for
+	bool m_lsSneakLate = false;
 	float m_lsBangUntil = 0.0f;						// spraying through a wall at where the enemy went until then
 	float m_lsBangRolledAt = -1.0f;					// the lost sight it decided about
 	Vector m_lsBangAt;
@@ -1263,6 +1276,19 @@ private:
 	float m_lsWhyAt = 0.0f;
 	float m_lsTraceAt = 0.0f;
 };
+
+// Loner-Strike: each living teammate of a bot, other than itself (cs_bot_ls*.cpp)
+template <typename F>
+inline void LsForTeammates(CCSBot *me, F f)
+{
+	for (int i = 1; i <= gpGlobals->maxClients; i++)
+	{
+		CBasePlayer *pPlayer = UTIL_PlayerByIndex(i);
+		if (!pPlayer || pPlayer == me || !pPlayer->IsAlive() || me->BotRelationship(pPlayer) != CCSBot::BOT_TEAMMATE)
+			continue;
+		f(pPlayer);
+	}
+}
 
 // Loner-Strike: the playstyles gm_people tells the bot brain (LsStyle)
 enum { LS_STYLE_RUSHER, LS_STYLE_ROAMER, LS_STYLE_LURKER, LS_STYLE_CAREFUL, LS_STYLE_CAMPER, LS_STYLE_AWPER,
@@ -1855,7 +1881,7 @@ public:
 		const float baseDangerFactor = 100.0f;
 
 		// respond to the danger modulated by our aggression (even super-aggressives pay SOME attention to danger)
-		float dangerFactor = (1.0f - (0.95f * m_bot->GetProfile()->GetAggression())) * baseDangerFactor;
+		float dangerFactor = (1.0f - (0.95f * m_bot->LsAggro())) * baseDangerFactor;
 
 		if (fromArea == nullptr)
 		{
@@ -1926,7 +1952,7 @@ public:
 						return -1.0f;
 
 					// if we need to get there in a hurry, ignore minor pain
-					const float painTolerance = 15.0f * m_bot->GetProfile()->GetAggression() + 10.0f;
+					const float painTolerance = 15.0f * m_bot->LsAggro() + 10.0f;
 					if (m_route != FASTEST_ROUTE || fallDamage > painTolerance)
 					{
 						// cost is proportional to how much it hurts when we fall

@@ -547,7 +547,7 @@ void CCSBot::Update()
 	}
 #endif
 
-	if (IsHunting() && IsWellPastSafe() && IsUsingGrenade() && !LsNadeBusy())	// (Loner-Strike: not mid-throw)
+	if (IsHunting() && IsWellPastSafe() && IsUsingGrenade() && !LsNadeBusy() && !LsNadeOnly())	// (Loner-Strike: not mid-throw, nor on Gun Game's grenade level)
 	{
 		EquipBestWeapon(MUST_EQUIP);
 	}
@@ -654,7 +654,7 @@ void CCSBot::Update()
 	{
 		// flee if the bomb is ready to blow and we aren't defusing it or attacking and we know where the bomb is
 		// (aggressive players wait until its almost too late)
-		float gonnaBlowTime = 8.0f - (2.0f * GetProfile()->GetAggression());
+		float gonnaBlowTime = 8.0f - (2.0f * LsAggro());
 
 		// if we have a defuse kit, can wait longer
 		if (m_bHasDefuser)
@@ -704,7 +704,7 @@ void CCSBot::Update()
 	const float earliestAutoFollowTime = 5.0f;
 	const float minAutoFollowTeamwork = 0.4f;
 	if (TheCSBots()->GetElapsedRoundTime() > earliestAutoFollowTime
-		&& GetProfile()->GetTeamwork() > minAutoFollowTeamwork
+		&& LsTeamwork() > minAutoFollowTeamwork
 		&& CanAutoFollow()
 		&& !LsSolo()	// Loner-Strike: every bot for itself
 		&& !IsBusy()
@@ -712,7 +712,7 @@ void CCSBot::Update()
 		&& !GetGameState()->IsAtPlantedBombsite())
 	{
 		// chance of following is proportional to teamwork attribute
-		if (GetProfile()->GetTeamwork() > RANDOM_FLOAT(0.0f, 1.0f))
+		if (LsTeamwork() > RANDOM_FLOAT(0.0f, 1.0f))
 		{
 			CBasePlayer *pLeader = GetClosestVisibleHumanFriend();
 			if (pLeader && pLeader->IsAutoFollowAllowed())
@@ -752,7 +752,7 @@ void CCSBot::Update()
 		else
 		{
 			// we decided not to follow, don't re-check for a duration
-			m_allowAutoFollowTime = gpGlobals->time + 15.0f + (1.0f - GetProfile()->GetTeamwork()) * 30.0f;
+			m_allowAutoFollowTime = gpGlobals->time + 15.0f + (1.0f - LsTeamwork()) * 30.0f;
 		}
 	}
 
@@ -767,10 +767,10 @@ void CCSBot::Update()
 
 		// decide whether to continue following them
 		const float highTeamwork = 0.85f;
-		if (GetProfile()->GetTeamwork() < highTeamwork)
+		if (LsTeamwork() < highTeamwork)
 		{
 			float minFollowDuration = 15.0f;
-			if (GetFollowDuration() > minFollowDuration + 40.0f * GetProfile()->GetTeamwork())
+			if (GetFollowDuration() > minFollowDuration + 40.0f * LsTeamwork())
 			{
 				// we are bored of following our leader
 				StopFollowing();

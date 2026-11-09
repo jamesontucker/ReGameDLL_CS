@@ -86,10 +86,6 @@ static float LsPersonWeight()
 	return Q_max(0.0f, Q_min(0.9f, 0.6f * p + (p > 1.0f ? -0.3f * (p - 1.0f) : 0.0f)));
 }
 
-// How aggressive and how much of a team player this bot is: mostly who it is (its
-// playstyle, temper...), partly the bot style's profile, so a Newbie lobby's rusher and a
-// Gods lobby's rusher still differ. A team style (profile teamwork of 45 and up, as
-// Matchmaking gives) keeps at least that much teamwork, whoever the bot is
 // A mode with teams and objectives (not a deathmatch-type one, whatever bot_ls_solo says)
 bool CCSBot::LsTeamGame() const
 {
@@ -100,7 +96,8 @@ bool CCSBot::LsTeamGame() const
 // (the bomb, hostages, guarding the plant), not saving its gun, not under a plugin's control
 bool CCSBot::LsFree() const
 {
-	return !IsAttacking() && !IsBusy() && !LsBusy() && !IsCarryingBomb() && !m_lsSaving && !LsPuppetActive()
+	return !IsAttacking() && !IsBusy() && !IsCarryingBomb() && !m_lsSaving && !LsPuppetActive() && !IsDefusingBomb()
+		&& !IsEscapingFromBomb() && GetHostageEscortCount() == 0 && !m_isWaitingToTossGrenade
 		&& GetTask() != GUARD_TICKING_BOMB && !IsUsingLadder() && m_state != &m_plantBombState && m_state != &m_defuseBombState;
 }
 
@@ -109,21 +106,34 @@ int CCSBot::LsStyle() const
 	return LsPersonWeight() > 0.0f ? m_lsStyle : -1;
 }
 
+// How aggressive, how much of a team player and how good this bot is: the bot style's
+// profile (its range: a Newbie lobby's, Gods', Matchmaking's teamwork), moved by who the bot
+// is (its playstyle, temper, skill...) within it, so a rusher in a Newbie lobby and one in
+// Gods both rush but still differ. A team style (profile teamwork of 45 and up) never drops
+// below that. Stock bots (bot_ls_fight 0) and bots nobody described: the profile alone
 float CCSBot::LsAggro() const
 {
 	float profile = GetProfile()->GetAggression();
-	float w = LsPersonWeight();
-	return m_lsAggro >= 0.0f ? w * m_lsAggro + (1.0f - w) * profile : profile;
+	if (!LsFight() || m_lsAggro < 0.0f)
+		return profile;
+	return Q_max(0.0f, Q_min(1.0f, profile + 0.9f * LsPersonWeight() * (m_lsAggro - 0.5f)));
 }
 
 float CCSBot::LsTeamwork() const
 {
 	float profile = GetProfile()->GetTeamwork();
-	if (m_lsTeam < 0.0f)
+	if (!LsFight() || m_lsTeam < 0.0f)
 		return profile;
-	float w = LsPersonWeight();
-	float mixed = w * m_lsTeam + (1.0f - w) * profile;
-	return profile >= 0.45f ? Q_max(profile, mixed) : mixed;
+	float v = Q_max(0.0f, Q_min(1.0f, profile + 0.9f * LsPersonWeight() * (m_lsTeam - 0.3f)));
+	return profile >= 0.45f ? Q_max(0.45f, v) : v;
+}
+
+float CCSBot::LsSkill() const
+{
+	float profile = GetProfile()->GetSkill();
+	if (!LsFight() || m_lsSkillTrait < 0)
+		return profile;
+	return Q_max(0.0f, Q_min(1.0f, profile + 0.5f * LsPersonWeight() * (float(m_lsSkillTrait) / 3.0f - 0.5f)));
 }
 
 // Every bot for itself (deathmatch-type modes, bot_ls_solo)
@@ -415,7 +425,8 @@ void CCSBot::LsShiftPortalPoint(const CNavArea *from, const CNavArea *to, NavDir
 // True while the bot is standing still for a moment on its way somewhere quiet
 bool CCSBot::LsUpdatePause()
 {
-	float strength = cv_bot_ls_pauses.value;
+	// (the personality slider scales them: at 0 nobody stops; deathmatch keeps few)
+	float strength = cv_bot_ls_pauses.value * (LsPersonWeight() / 0.6f) * (LsSolo() ? 0.3f : 1.0f);
 	if (strength <= 0.0f)
 		return false;
 
@@ -601,7 +612,7 @@ void Bot_LsServerCommand()
 			// (a missing value stays "not told": -1, so the profile's is used)
 			float aggro = LsArg(3, -1.0f), team = LsArg(4, -1.0f);
 			static_cast<CCSBot *>(pPlayer)->LsSetPersona(aggro < 0.0f ? -1.0f : Q_min(1.0f, aggro), team < 0.0f ? -1.0f : Q_min(1.0f, team),
-				int(LsArg(5, -1.0f)), int(LsArg(6, 1.0f)), int(LsArg(7, 1.0f)));
+				int(LsArg(5, -1.0f)), int(LsArg(6, 1.0f)), int(LsArg(7, 1.0f)), int(LsArg(8, -1.0f)));
 		}
 		return;
 	}
@@ -681,18 +692,6 @@ void CCSBot::LsPuppetCommand(const char *what, float now)
 
 // ---- every bot for itself (deathmatch-type modes) -----------------------------------------
 
-// Living teammates, other than this bot
-template <typename F>
-static void LsForTeammates(CCSBot *me, F f)
-{
-	for (int i = 1; i <= gpGlobals->maxClients; i++)
-	{
-		CBasePlayer *pPlayer = UTIL_PlayerByIndex(i);
-		if (!pPlayer || pPlayer == me || !pPlayer->IsAlive() || me->BotRelationship(pPlayer) != CCSBot::BOT_TEAMMATE)
-			continue;
-		f(pPlayer);
-	}
-}
 
 // Where to hunt: of a handful of random parts of the map, the one furthest from where its
 // teammates are and where they're heading (with some chance in it, and not right here)
@@ -849,7 +848,7 @@ bool CCSBot::LsShouldSpread()
 // Chance (0-100) this bot keeps moving in a fight: skill helps, but nobody stands like a post
 float CCSBot::LsDodgeChance()
 {
-	return 35.0f + 45.0f * GetProfile()->GetSkill() + 20.0f * LsTrait(10);
+	return 35.0f + 45.0f * LsSkill() + 20.0f * LsTrait(10);
 }
 
 // How long it keeps one strafe or stop: some tap, some hold a direction
@@ -897,7 +896,7 @@ bool CCSBot::LsMayBackOff(const Vector &toEnemy)
 // players do. Newer ones (skill under a half) run and gun like pub players did
 bool CCSBot::LsHoldFireToStop(float range)
 {
-	if (GetProfile()->GetSkill() < 0.5f || range < 500.0f)
+	if (LsSkill() < 0.5f || range < 500.0f)
 		return false;
 
 	CBasePlayerWeapon *pWeapon = GetActiveWeapon();
@@ -920,7 +919,7 @@ bool CCSBot::LsHoldFireToStop(float range)
 float CCSBot::LsCrouchFactor()
 {
 	// (newer players crouch in every fight, better ones only now and then)
-	float t = LsTrait(15) + 0.3f * (0.5f - GetProfile()->GetSkill());
+	float t = LsTrait(15) + 0.3f * (0.5f - LsSkill());
 	return t < 0.5f ? 0.3f : t < 0.9f ? 1.0f : 2.0f;
 }
 
@@ -992,7 +991,7 @@ bool CCSBot::LsCornerPeek()
 	if (!LsFight() || IsSafe() || IsUsingLadder() || IsAttacking())
 		return false;
 
-	float skill = GetProfile()->GetSkill();
+	float skill = LsSkill();
 	float chance = Q_min(0.95f, 0.25f + 0.7f * skill + 0.25f * (LsTrait(20) - 0.5f));
 	// deathmatch: mostly running round corners; a match: careful
 	if (LsSolo())
@@ -1039,15 +1038,22 @@ void CCSBot::LsSneak()
 	float sneaky = 0.6f * (1.0f - LsAggro()) + 0.4f * LsTrait(21);
 	if (LsMatch())
 		sneaky += 0.25f;
+	bool sneakyCarrier = IsCarryingBomb() && (LsStyle() == LS_STYLE_LURKER || LsStyle() == LS_STYLE_NINJA || LsStyle() == LS_STYLE_CAREFUL);
 	bool loud = IsHurrying() || GetTimeSinceAttacked() < 5.0f || GetTimeSinceLastSawEnemy() < 6.0f || IsSafe()
-		|| (TheCSBots() && TheCSBots()->IsBombPlanted()) || IsCarryingBomb() || GetHostageEscortCount() > 0;
+		|| (TheCSBots() && TheCSBots()->IsBombPlanted()) || (IsCarryingBomb() && !sneakyCarrier) || GetHostageEscortCount() > 0;
 
 	bool want = false;
 	if (!loud && sneaky > 0.45f)
 	{
 		float danger = (LsOwnMemory() && GetLastKnownArea()) ? LsGetDanger(GetLastKnownArea()) : 0.0f;
 		bool lateRound = TheCSBots() && TheCSBots()->GetElapsedRoundTime() > 25.0f;
-		want = danger > 0.1f || (lateRound && RANDOM_FLOAT(0.0f, 1.0f) < sneaky) || IsNoiseHeard();
+		int round = CSGameRules() ? CSGameRules()->m_iTotalRoundsPlayed : 0;
+		if (m_lsSneakRound != round)
+		{
+			m_lsSneakRound = round;
+			m_lsSneakLate = RANDOM_FLOAT(0.0f, 1.0f) < sneaky;
+		}
+		want = danger > 0.1f || (lateRound && m_lsSneakLate) || IsNoiseHeard();
 	}
 
 	// (only its own walk is undone: a state may want walking for its own reasons)
@@ -1070,7 +1076,7 @@ bool CCSBot::LsCounterStrafe(int fromState)
 {
 	if (!LsFight())
 		return false;
-	float skill = GetProfile()->GetSkill();
+	float skill = LsSkill();
 	if (RANDOM_FLOAT(0.0f, 1.0f) > 0.2f + 0.8f * skill)
 		return false;
 
@@ -1112,7 +1118,7 @@ void CCSBot::LsStopDead()
 // Sloppy: reloads after every kill, whatever's around; good players reload when it's low
 float CCSBot::LsReloadRatio()
 {
-	float skill = GetProfile()->GetSkill();
+	float skill = LsSkill();
 	if (skill < 0.5f && LsTrait(24) < 0.65f && !LsMatch())
 		return 0.97f;
 	if (skill > 0.65f || LsMatch())
@@ -1122,14 +1128,14 @@ float CCSBot::LsReloadRatio()
 
 float CCSBot::LsReloadWait()
 {
-	float skill = GetProfile()->GetSkill();
+	float skill = LsSkill();
 	return (skill < 0.5f && LsTrait(24) < 0.65f && !LsMatch()) ? 1.0f : 3.0f;
 }
 
 // Aim settles with a small overshoot like a flick; newer players are twitchier
 float CCSBot::LsAimDamping()
 {
-	float skill = GetProfile()->GetSkill();
+	float skill = LsSkill();
 	return 0.6f + 0.25f * skill + 0.1f * (LsTrait(25) - 0.5f);
 }
 
@@ -1137,7 +1143,7 @@ float CCSBot::LsAimDamping()
 // the floor) for newer ones
 float CCSBot::LsLookHeight()
 {
-	float skill = GetProfile()->GetSkill();
+	float skill = LsSkill();
 	return -14.0f + 42.0f * skill + 8.0f * (LsTrait(26) - 0.5f);
 }
 
@@ -1161,14 +1167,14 @@ bool CCSBot::LsPushes(float range)
 {
 	if (range < 250.0f || IsUsingSniperRifle())
 		return false;
-	float skill = GetProfile()->GetSkill();
+	float skill = LsSkill();
 	float aggro = LsAggro();
 	CBasePlayerWeapon *pWeapon = GetActiveWeapon();
 	bool closeGun = IsUsingShotgun() || (pWeapon && (pWeapon->m_iId == WEAPON_MAC10 || pWeapon->m_iId == WEAPON_TMP
 		|| pWeapon->m_iId == WEAPON_P90 || pWeapon->m_iId == WEAPON_UMP45 || pWeapon->m_iId == WEAPON_MP5N));
 	if (closeGun && aggro > 0.55f && range < 900.0f)
 		return RANDOM_FLOAT(0.0f, 1.0f) < 0.6f;
-	if (!LsMatch() && skill < 0.45f && LsTrait(28) < 0.6f)
+	if (!LsMatch() && skill < 0.45f && aggro > 0.4f && LsTrait(28) < 0.6f)
 		return RANDOM_FLOAT(0.0f, 1.0f) < 0.4f;
 	return false;
 }
@@ -1179,7 +1185,7 @@ float CCSBot::LsChaseExtra()
 	float aggro = LsAggro();
 	if (LsMatch())
 		return 0.0f;
-	return (aggro > 0.65f && LsTrait(29) < 0.6f) ? RANDOM_FLOAT(2.0f, 5.0f) : 0.0f;
+	return (aggro > 0.65f && LsTrait(29) < 0.6f && LsSkill() < 0.7f) ? RANDOM_FLOAT(1.0f, 2.0f) : 0.0f;
 }
 
 // Testing (bot_ls_trace): twice a second, what each bot is doing and why, so a recording
@@ -1197,6 +1203,13 @@ void CCSBot::LsTrace()
 		s_file = fopen("lstrace.csv", "a");
 		if (!s_file)
 			return;
+	}
+	// (a line naming the map whenever it changes: the clock restarts with each map)
+	static char s_map[64] = "";
+	if (Q_strcmp(s_map, STRING(gpGlobals->mapname)) != 0)
+	{
+		Q_strlcpy(s_map, STRING(gpGlobals->mapname));
+		fprintf(s_file, "#map,%s\n", s_map);
 	}
 	CBasePlayer *pEnemy = GetEnemy();
 	CBasePlayer *pLeader = IsFollowing() ? GetFollowLeader() : nullptr;
@@ -1236,27 +1249,34 @@ void CCSBot::LsShotAt(CBasePlayer *pShooter, const Vector &impact)
 	if (gpGlobals->time - m_lsShotAtAt < 0.8f)
 		return;
 	m_lsShotAtAt = gpGlobals->time;
-	m_lsShotFrom = pShooter->pev->origin;
+	m_lsShotBy = pShooter;
+	{
+		float far = float((pShooter->pev->origin - pev->origin).Length());
+		float err = far * (0.12f - 0.08f * LsSkill());
+		m_lsShotFrom = pShooter->pev->origin + Vector(RANDOM_FLOAT(-err, err), RANDOM_FLOAT(-err, err), 0.0f);
+	}
 
-	// planting or defusing: whether to stop for it is weighed there (LsObjectiveThreat)
+	// planting or defusing: whether to stop for it is weighed there (LsObjectiveThreat); on
+	// a ladder: it notes where (no fighting from a ladder)
 	if (m_state == &m_plantBombState || m_state == &m_defuseBombState)
 		return;
+	from = m_lsShotFrom + Vector(0, 0, HalfHumanHeight);
 
 	// running for cover or saving its gun: it notices (looks), but keeps going; and it only
 	// takes the fight to a shooter in front of it (not with eyes in the back of its head)
-	bool keepsGoing = GetDisposition() == IGNORE_ENEMIES || m_lsSaving;
+	bool keepsGoing = GetDisposition() == IGNORE_ENEMIES || m_lsSaving || IsUsingLadder();
 	if (!keepsGoing && IsVisible(pShooter, true))
 	{
 		Attack(pShooter);
 		return;
 	}
 	SetLookAt("Loner-Strike: shot at", &from, PRIORITY_HIGH, RANDOM_FLOAT(1.0f, 2.0f));
-	CNavArea *area = TheNavAreaGrid.GetNavArea(&pShooter->pev->origin);
+	CNavArea *area = TheNavAreaGrid.GetNavArea(&m_lsShotFrom);
 	if (!area)
-		area = TheNavAreaGrid.GetNearestNavArea(&pShooter->pev->origin);
+		area = TheNavAreaGrid.GetNearestNavArea(&m_lsShotFrom);
 	if (area)
 	{
-		m_noisePosition = pShooter->pev->origin;
+		m_noisePosition = m_lsShotFrom;
 		m_noiseArea = area;
 		m_noisePriority = PRIORITY_HIGH;
 		m_noiseTimestamp = gpGlobals->time;
@@ -1295,6 +1315,9 @@ bool CCSBot::LsObjectiveThreat(bool defusing)
 	{
 		threat = 0.6f;
 		where = &m_lsShotFrom;
+		CBasePlayer *pShooter = m_lsShotBy;
+		if (pShooter && pShooter->IsAlive())
+			pEnemy = pShooter;
 	}
 	else if (IsNoiseHeard() && GetNoisePriority() >= PRIORITY_MEDIUM && (m_noisePosition - pev->origin).IsLengthLessThan(700.0f))
 	{
@@ -1380,7 +1403,7 @@ bool CCSBot::LsBangTick()
 	if (now >= m_lsBangUntil)
 		return false;
 	CBasePlayerWeapon *pWeapon = GetActiveWeapon();
-	if (!IsAlive() || !pWeapon || IsActiveWeaponClipEmpty() || !LsBangGun(pWeapon) || IsFriendInLineOfFire())
+	if (!IsAlive() || IsBlind() || !pWeapon || IsActiveWeaponClipEmpty() || !LsBangGun(pWeapon) || IsFriendInLineOfFire())
 	{
 		m_lsBangUntil = 0.0f;
 		return false;
@@ -1453,7 +1476,7 @@ bool CCSBot::LsWallbang(float notSeenEnemyTime)
 	if (notSeenEnemyTime > 1.2f || GetLastSawEnemyTimestamp() == m_lsBangRolledAt)
 		return false;
 	m_lsBangRolledAt = GetLastSawEnemyTimestamp();
-	float skill = GetProfile()->GetSkill();
+	float skill = LsSkill();
 	if (LsTrait(32) > 0.2f + 0.4f * skill || RANDOM_FLOAT(0.0f, 1.0f) > 0.6f)
 		return false;
 	return LsBangThrough(GetLastKnownEnemyPosition() + Vector(0, 0, 10.0f));
@@ -1471,8 +1494,8 @@ void CCSBot::LsHeard(GameEventType event, CBasePlayer *pPlayer, float dist)
 		return;
 	float now = gpGlobals->time;
 	float aggro = LsAggro();
-	float skill = GetProfile()->GetSkill();
-	bool busy = m_state == &m_plantBombState || m_state == &m_defuseBombState || IsUsingLadder();
+	float skill = LsSkill();
+	bool busy = m_state == &m_plantBombState || m_state == &m_defuseBombState || IsUsingLadder() || m_lsSaving || LsPuppetActive() || IsBlind();
 
 	// in a fight with them: their reload is the moment to push
 	if (IsAttacking())
@@ -1481,18 +1504,27 @@ void CCSBot::LsHeard(GameEventType event, CBasePlayer *pPlayer, float dist)
 			m_lsPushUntil = now + RANDOM_FLOAT(1.0f, 2.0f);
 		return;
 	}
-	if (busy || !LsFree())
+	if (busy)
 		return;
 	if (event != EVENT_WEAPON_RELOADED && event != EVENT_PLAYER_FOOTSTEP && event != EVENT_WEAPON_FIRED)
 		return;
-	if (dist > 900.0f || IsVisible(pPlayer, false))
+	if (dist > 900.0f)
+		return;
+	// (once a moment: the visibility check below is a few traces)
+	if (now - m_lsHeardAt < 0.4f)
+		return;
+	m_lsHeardAt = now;
+	if (IsVisible(pPlayer, false))
 		return;
 
 	// where they are, as heard (less exact further away)
 	float err = dist * 0.15f;
 	Vector heard = pPlayer->pev->origin + Vector(RANDOM_FLOAT(-err, err), RANDOM_FLOAT(-err, err), 0.0f);
 
-	if (event == EVENT_WEAPON_RELOADED && aggro > 0.6f && !IsCarryingBomb() && RANDOM_FLOAT(0.0f, 1.0f) < 0.5f + 0.4f * (aggro - 0.6f))
+	// (only close enough to get there while they're still reloading; the very best don't
+	// rush a sound blind, they hold the door instead)
+	if (event == EVENT_WEAPON_RELOADED && aggro > 0.6f && skill < 0.85f && dist < 600.0f && LsFree()
+		&& RANDOM_FLOAT(0.0f, 1.0f) < 0.5f + 0.4f * (aggro - 0.6f))
 	{
 		Run();
 		MoveTo(&heard, FASTEST_ROUTE);
@@ -1509,7 +1541,7 @@ void CCSBot::LsHeard(GameEventType event, CBasePlayer *pPlayer, float dist)
 	}
 
 	// pre-aim where they'd come out
-	if (event == EVENT_PLAYER_FOOTSTEP && dist < 700.0f && now - m_lsPreAimAt > 1.5f && RANDOM_FLOAT(0.0f, 1.0f) < 0.4f + 0.5f * skill)
+	if ((event == EVENT_PLAYER_FOOTSTEP || event == EVENT_WEAPON_RELOADED) && dist < 700.0f && now - m_lsPreAimAt > 1.5f && RANDOM_FLOAT(0.0f, 1.0f) < 0.4f + 0.5f * skill)
 	{
 		m_lsPreAimAt = now;
 		Vector eye = pev->origin + pev->view_ofs;
@@ -1549,11 +1581,17 @@ void CCSBot::LsCheckBeforeDefuse()
 		if ((pPlayer->pev->origin - pev->origin).IsLengthLessThan(600.0f))
 			cover++;
 	});
-	float chance = (0.3f + 0.6f * GetProfile()->GetSkill()) * (cover ? 0.4f : 1.0f);
+	float chance = (0.3f + 0.6f * LsSkill()) * (cover ? 0.4f : 1.0f);
 	if (RANDOM_FLOAT(0.0f, 1.0f) > chance)
 		return;
-	float yaw = pev->v_angle.y + RANDOM_FLOAT(120.0f, 240.0f);
-	Vector look = pev->origin + Vector(BotCOS(yaw) * 400.0f, BotSIN(yaw) * 400.0f, HalfHumanHeight);
+	Vector look;
+	if (m_noiseTimestamp > 0.0f && gpGlobals->time - m_noiseTimestamp < 6.0f)
+		look = m_noisePosition + Vector(0, 0, HalfHumanHeight);
+	else
+	{
+		float yaw = pev->v_angle.y + RANDOM_FLOAT(120.0f, 240.0f);
+		look = pev->origin + Vector(BotCOS(yaw) * 400.0f, BotSIN(yaw) * 400.0f, HalfHumanHeight);
+	}
 	float secs = RANDOM_FLOAT(0.8f, 1.8f);
 	StandUp();
 	SetLookAt("Loner-Strike: checking", &look, PRIORITY_HIGH, secs);
