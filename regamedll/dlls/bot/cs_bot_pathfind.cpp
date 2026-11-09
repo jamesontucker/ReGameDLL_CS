@@ -277,6 +277,11 @@ bool CCSBot::UpdateLadderMovement()
 
 	if (giveUp)
 	{
+		// (Loner-Strike: that ladder is out for this bot for a while, so the next path
+		// doesn't send it straight back to it)
+		if (LsFight())
+			LsLadderStuck(m_pathLadder);
+
 		// jump off ladder and give up
 		Jump(MUST_JUMP);
 		Wiggle();
@@ -559,6 +564,10 @@ bool CCSBot::UpdateLadderMovement()
 	}
 	case DISMOUNT_ASCENDING_LADDER:
 	{
+		// (Loner-Strike: off the top into a vent or under a low ceiling: ducked, or it can't fit)
+		if (LsDucksOff(m_path[m_pathIndex].area, m_path[m_pathIndex].pos))
+			Crouch();
+
 		if (gpGlobals->time - m_pathLadderDismountTimestamp >= 0.4f)
 		{
 			m_pathLadderState = MOVE_TO_DESTINATION;
@@ -589,6 +598,9 @@ bool CCSBot::UpdateLadderMovement()
 	}
 	case MOVE_TO_DESTINATION:
 	{
+		if (LsDucksOff(m_path[m_pathIndex].area, m_goalPosition))
+			Crouch();
+
 		if (m_path[m_pathIndex].area->Contains(&pev->origin))
 		{
 			// successfully traversed ladder and reached destination area

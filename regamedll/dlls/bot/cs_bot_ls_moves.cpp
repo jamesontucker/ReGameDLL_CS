@@ -739,3 +739,31 @@ bool CCSBot::LsQuietDrop(float dz)
 // (where to stand, where it gets you, what to hold from up there) a bot couldn't know where to
 // boost, couldn't walk about once up there, and two bots would have to meet and time a jump
 // onto a crouched head - one more thing to get wrong and look less human than not doing it.
+
+// Getting off a ladder into a crouch-only area, or where the ceiling is too low to stand (a
+// vent at the top of a ladder, as on cs_assault): it has to duck to get in, as players do;
+// standing, it bumps against the edge and gets stuck there
+bool CCSBot::LsDucksOff(const CNavArea *area, const Vector &spot) const
+{
+	if (!LsFight() || !area)
+		return false;
+	if (area->GetAttributes() & NAV_CROUCH)
+		return true;
+	TraceResult tr;
+	Vector floor(spot.x, spot.y, area->GetZ(&spot) + 2.0f);
+	UTIL_TraceLine(floor, floor + Vector(0, 0, HumanHeight), ignore_monsters, ENT(pev), &tr);
+	return tr.flFraction < 1.0f;
+}
+
+// Nothing has startled it lately: no enemy in sight or seen in the last few seconds, not hurt
+// or shot at, no loud noise close by. Then its looks about are calm turns (LsCalm in
+// UpdateLookAngles); a startle makes them quick again
+bool CCSBot::LsCalm() const
+{
+	float now = gpGlobals->time;
+	if (IsEnemyVisible() || GetTimeSinceLastSawEnemy() < 4.0f || GetTimeSinceAttacked() < 3.0f || now - m_lsShotAtAt < 3.0f)
+		return false;
+	if (m_noiseTimestamp > 0.0f && now - m_noiseTimestamp < 2.0f && m_noisePriority >= PRIORITY_MEDIUM)
+		return false;
+	return !IsUsingLadder() && !IsBlind();
+}

@@ -1085,6 +1085,10 @@ public:
 	bool LsLadderYaw(float faceYaw, float *yaw);	// ...the view for it
 	void LsLadderClimb();							// ...the strafe for it
 	bool LsQuietDrop(float dz);						// sneaking: walk off a small drop instead of jumping
+	bool LsBadLadder(const CNavLadder *ladder) const { return ladder && ladder == m_lsBadLadder && gpGlobals->time < m_lsBadLadderUntil; }
+	void LsLadderStuck(const CNavLadder *ladder) { m_lsBadLadder = ladder; m_lsBadLadderUntil = gpGlobals->time + 25.0f; }
+	bool LsDucksOff(const CNavArea *area, const Vector &spot) const;	// getting off a ladder into a low space: crouch
+	bool LsCalm() const;							// nothing has startled it lately (calm looks turn slower)
 	// (end moves)
 	// Loner-Strike (cs_bot_ls.cpp): each bot keeps to itself and moves like a person
 	unsigned int LsSeed();
@@ -1241,6 +1245,8 @@ private:
 	int m_lsPanicKind = 0;							// 1 walk, 2 crouch
 	float m_lsLadderFor = -1.0f;					// the ladder (its start time) the climb was rolled for
 	int m_lsLadderSide = 0;
+	const CNavLadder *m_lsBadLadder = nullptr;		// a ladder it got stuck on (not used again till m_lsBadLadderUntil)
+	float m_lsBadLadderUntil = 0.0f;
 	// (end moves members)
 	float m_lsBangHeardAt = -10.0f;					// last sprayed a wall at someone heard behind it
 	float m_lsPreAimAt = -10.0f;					// last pre-aimed at footsteps
@@ -1870,6 +1876,10 @@ public:
 			float dist;
 			if (ladder)
 			{
+				// (Loner-Strike: a ladder this bot just got stuck on is out for a while)
+				if (m_bot->LsBadLadder(ladder))
+					return -1.0f;
+
 				// ladders are slow to use
 				const float ladderPenalty = 1.0f;
 				dist = ladderPenalty * ladder->m_length;

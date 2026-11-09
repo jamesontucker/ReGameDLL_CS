@@ -739,6 +739,17 @@ CNavArea *CCSBot::LsPickHuntArea()
 		}
 	}
 
+	// how many teammates are already at each of those places (spread across them, not all
+	// on one bomb site)
+	int crowd[16] = {};
+	for (int k = 0; k < kept; k++)
+	{
+		LsForTeammates(this, [&](CBasePlayer *pPlayer) {
+			if ((pPlayer->pev->origin - keep[k]).IsLengthLessThan(1400.0f))
+				crowd[k]++;
+		});
+	}
+
 	const int tries = 12;
 	int picks[tries];
 	for (int t = 0; t < tries; t++)
@@ -776,9 +787,17 @@ CNavArea *CCSBot::LsPickHuntArea()
 			if (kept)
 			{
 				float site = 99999.0f;
+				int at = 0;
 				for (int k = 0; k < kept; k++)
-					site = Q_min(site, float((*c - keep[k]).Length2D()));
-				score += site < 1400.0f ? 400.0f : -1500.0f;
+				{
+					float d = float((*c - keep[k]).Length2D());
+					if (d < site)
+					{
+						site = d;
+						at = k;
+					}
+				}
+				score += site < 1400.0f ? 400.0f - 220.0f * float(Q_min(crowd[at], 4)) : -1500.0f;
 			}
 
 			if (score > bestScore)

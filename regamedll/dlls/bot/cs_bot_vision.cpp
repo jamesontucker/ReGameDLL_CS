@@ -79,6 +79,16 @@ void CCSBot::UpdateLookAngles()
 		stiffness = 200.0f;
 		damping = 25.0f;
 		maxAccel = 3000.0f;
+
+		// Loner-Strike: nothing going on (no enemy seen, not hurt or shot at, no loud noise
+		// lately): looking about is a turn of the mouse, not a flick. Anything that startles
+		// it turns it as fast as before
+		if (LsFight() && LsCalm())
+		{
+			stiffness = 110.0f;
+			damping = 21.0f;
+			maxAccel = 1400.0f;
+		}
 	}
 
 	// these may be overridden by ladder logic
