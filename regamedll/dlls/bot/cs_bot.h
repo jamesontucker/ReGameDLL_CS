@@ -1260,7 +1260,10 @@ private:
 	int m_lsPickupRound = -1;						// the round it went for a dropped gun after
 	int m_lsTeamRound = -1;							// the round LsTeamTick last saw
 	float m_lsDefuseNoticeAt = -1.0f;				// when it takes in the defuse it hears
-	float m_lsFetchCheckAt = 0.0f;					// a T elsewhere: next look at a dropped bomb
+	float m_lsFetchCheckAt = 0.0f;
+	float m_lsCarrierCheckAt = 0.0f;				// the carrier: next look at whether to let someone go first
+	int m_lsCarrierRound = -1;
+	int m_lsCarrierWaits = 0;					// a T elsewhere: next look at a dropped bomb
 	float m_lsDefuseCheckAt = 0.0f;					// (looked at four times a second, not every frame)
 	float m_lsDefuseActedAt = -100.0f;				// went for a defuse it heard (not while hiding) then
 	float m_lsDefuseHeardLast = -10.0f;			// last time it was told of a defuse going on

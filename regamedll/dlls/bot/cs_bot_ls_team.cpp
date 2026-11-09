@@ -50,6 +50,44 @@ void CCSBot::LsTeamTick()
 		}
 	}
 
+	// the carrier, on its way to plant: people don't go through the door first with the bomb,
+	// nor chase someone they just saw; it lets a teammate go ahead (a few seconds at a time, a
+	// few times a round, while there's time) and leaves the chasing to others
+	if (m_iTeam == TERRORIST && IsCarryingBomb() && !IsAttacking() && !LsOrderActive() && !CSGameRules()->IsFreezePeriod()
+		&& IsMovingTo() && now >= m_lsCarrierCheckAt)
+	{
+		m_lsCarrierCheckAt = now + 1.0f;
+		if (m_lsCarrierRound != round)
+		{
+			m_lsCarrierRound = round;
+			m_lsCarrierWaits = 0;
+		}
+		if (GetTask() == MOVE_TO_LAST_KNOWN_ENEMY_POSITION)
+		{
+			Idle();
+			LsWhy("carrier-no-chase");
+		}
+		else if (GetTask() == PLANT_BOMB && HasPath() && !IsAtBombsite() && LsTimeLeft() > 40.0f && m_lsCarrierWaits < 3
+			&& LsStyle() != LS_STYLE_RUSHER && TheCSBots()->GetElapsedRoundTime() < 75.0f)
+		{
+			Vector goal = GetPathEndpoint();
+			float mine = float((goal - pev->origin).Length2D());
+			int mates = 0;
+			bool ahead = false;
+			LsForTeammates(this, [&](CBasePlayer *pPlayer) {
+				mates++;
+				if (float((goal - pPlayer->pev->origin).Length2D()) < mine - 150.0f)
+					ahead = true;
+			});
+			if (mine < 1500.0f && mine > 500.0f && mates > 0 && !ahead)
+			{
+				m_lsCarrierWaits++;
+				Hide(GetLastKnownArea(), RANDOM_FLOAT(2.0f, 4.5f), 250.0f);
+				LsWhy("carrier-waits");
+			}
+		}
+	}
+
 	// the bomb still on its back with the clock nearly gone: to a site, now
 	// (looked at every few seconds: after a fight, or from a hide or someone's "go" order, it
 	// still has to get there)
