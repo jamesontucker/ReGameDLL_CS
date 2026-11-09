@@ -62,7 +62,7 @@ void CCSBot::LsTeamTick()
 			if (d > 800.0f && d < 2200.0f)
 			{
 				m_lsRetakeRound = round;
-				if (RANDOM_FLOAT(0.0f, 1.0f) < (LsMatch() ? 0.85f : 0.5f) * (0.5f + 0.5f * GetProfile()->GetTeamwork()))
+				if (RANDOM_FLOAT(0.0f, 1.0f) < (LsMatch() ? 0.85f : 0.5f) * (0.5f + 0.5f * LsTeamwork()))
 				{
 					Hide(GetLastKnownArea(), RANDOM_FLOAT(3.0f, 6.0f));
 					LsWhy("retake-wait");
@@ -132,7 +132,7 @@ bool CCSBot::LsTeamHeard(GameEventType event, CBasePlayer *pPlayer)
 	if (d < 250.0f || d > 1000.0f)
 		return false;
 	m_lsTradeAt = now;
-	float chance = LsLoner() ? 0.15f : 0.35f + 0.5f * GetProfile()->GetTeamwork();
+	float chance = LsLoner() ? 0.15f : 0.35f + 0.5f * LsTeamwork();
 	if (LsMatch())
 		chance = Q_min(0.95f, chance + 0.2f);
 	if (RANDOM_FLOAT(0.0f, 1.0f) > chance)
@@ -153,7 +153,7 @@ bool CCSBot::LsPlayForTime()
 		return false;
 	if (TheCSBots()->IsBombPlanted() || GetNearbyFriendCount() > 0 || OutnumberedCount() < 2)
 		return false;
-	float bold = GetProfile()->GetAggression();
+	float bold = LsAggro();
 	return RANDOM_FLOAT(0.0f, 1.0f) < (LsMatch() ? 0.8f : 0.55f) * (1.2f - bold);
 }
 
@@ -174,7 +174,7 @@ void CCSBot::LsEarlyPick(CBasePlayer *pVictim, CBasePlayer *pKiller)
 		return;
 	if (TheCSBots()->GetScenario() != CCSBotManager::SCENARIO_DEFUSE_BOMB || TheCSBots()->IsBombPlanted() || TheCSBots()->GetElapsedRoundTime() > 40.0f)
 		return;
-	float aggro = GetProfile()->GetAggression();
+	float aggro = LsAggro();
 	if (RANDOM_FLOAT(0.0f, 1.0f) < (LsMatch() ? 0.75f : 0.4f + 0.4f * aggro))
 		Hurry(RANDOM_FLOAT(8.0f, 14.0f));
 }

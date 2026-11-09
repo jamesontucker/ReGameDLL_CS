@@ -1022,6 +1022,15 @@ private:
 #endif
 
 public:
+	// Loner-Strike: who this bot is (ls_bot persona, from gm_people) blended with the bot
+	// style's profile (its range: a Newbie lobby or Gods, Matchmaking's teamwork), else the
+	// profile alone
+	float LsAggro() const;
+	float LsTeamwork() const;
+	int LsStyle() const { return m_lsStyle; }		// LS_STYLE_*, -1 when not told
+	int LsTemper() const { return m_lsTemper; }
+	int LsHumor() const { return m_lsHumor; }
+	void LsSetPersona(float aggro, float team, int style, int temper, int humor) { m_lsAggro = aggro; m_lsTeam = team; m_lsStyle = style; m_lsTemper = temper; m_lsHumor = humor; }
 	// Loner-Strike team (cs_bot_ls_team.cpp)
 	void LsTeamTick();								// team play each frame: retakes, rotations, pickups
 	bool LsRadioAnswer();							// a teammate's radio call, answered like a person (true: handled)
@@ -1124,6 +1133,11 @@ private:
 	int m_lsCounterDir = 0;							// 1 left, -1 right
 	float m_lsNextSneakCheck = 0.0f;
 	bool m_lsSneaking = false;
+	float m_lsAggro = -1.0f;						// who this bot is, from gm_people (ls_bot persona): -1 not told
+	float m_lsTeam = -1.0f;
+	int m_lsStyle = -1;								// rusher roamer lurker careful camper awper knifer nader ninja objective weirdgun
+	int m_lsTemper = 1;								// 0 chill, 1 normal, 2 tilty
+	int m_lsHumor = 1;								// 0 none, 1 dry, 2 goofy, 3 troll
 	// Loner-Strike team (cs_bot_ls_team.cpp): members
 	float m_lsRotateAt = 0.0f;						// going to a teammate's call then (after a look)
 	Vector m_lsRotateTo;
@@ -1149,6 +1163,10 @@ private:
 	float m_lsWhyAt = 0.0f;
 	float m_lsTraceAt = 0.0f;
 };
+
+// Loner-Strike: the playstyles gm_people tells the bot brain (LsStyle)
+enum { LS_STYLE_RUSHER, LS_STYLE_ROAMER, LS_STYLE_LURKER, LS_STYLE_CAREFUL, LS_STYLE_CAMPER, LS_STYLE_AWPER,
+	LS_STYLE_KNIFER, LS_STYLE_NADER, LS_STYLE_NINJA, LS_STYLE_OBJECTIVE, LS_STYLE_WEIRDGUN };
 
 // Loner-Strike (cs_bot_ls.cpp)
 // A bot's taste in routes for one path search (worked out once, used for every area)

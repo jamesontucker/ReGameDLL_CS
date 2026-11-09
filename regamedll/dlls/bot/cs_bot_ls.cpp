@@ -76,6 +76,24 @@ bool LsFight()
 }
 
 // Every bot for itself (deathmatch-type modes, bot_ls_solo)
+// How aggressive and how much of a team player this bot is: mostly who it is (its
+// playstyle, temper...), partly the bot style's profile, so a Newbie lobby's rusher and a
+// Gods lobby's rusher still differ. A team style (profile teamwork of 45 and up, as
+// Matchmaking gives) keeps at least that much teamwork, whoever the bot is
+float CCSBot::LsAggro() const
+{
+	float profile = GetProfile()->GetAggression();
+	return m_lsAggro >= 0.0f ? 0.6f * m_lsAggro + 0.4f * profile : profile;
+}
+
+float CCSBot::LsTeamwork() const
+{
+	float profile = GetProfile()->GetTeamwork();
+	if (m_lsTeam < 0.0f)
+		return profile;
+	return profile >= 0.45f ? Q_max(profile, m_lsTeam) : 0.6f * m_lsTeam + 0.4f * profile;
+}
+
 bool LsSolo()
 {
 	return cv_bot_ls_solo.value > 0.0f && TheCSBots() && TheCSBots()->GetScenario() == CCSBotManager::SCENARIO_DEATHMATCH;
@@ -90,7 +108,7 @@ bool CCSBot::LsLoner() const
 	// (the bomb carrier plays the objective, whoever it is)
 	if (!LsSolo() && IsCarryingBomb())
 		return false;
-	return LsSolo() || (GetProfile() && GetProfile()->GetTeamwork() < 0.35f);
+	return LsSolo() || (GetProfile() && LsTeamwork() < 0.35f);
 }
 
 // ---- a bot's own numbers ----------------------------------------------------------------
@@ -533,6 +551,17 @@ static float LsArg(int i, float fallback = 0.0f)
 
 void Bot_LsServerCommand()
 {
+	// ls_bot <index> persona <aggression 0-1> <teamwork 0-1> <style> <temper> <humor>: who the
+	// bot is (gm_people), alive or not
+	if (FStrEq(CMD_ARGV(2), "persona"))
+	{
+		CBasePlayer *pPlayer = UTIL_PlayerByIndex(Q_atoi(CMD_ARGV(1)));
+		if (pPlayer && pPlayer->IsBot())
+			static_cast<CCSBot *>(pPlayer)->LsSetPersona(Q_max(0.0f, Q_min(1.0f, LsArg(3, -1.0f))), Q_max(0.0f, Q_min(1.0f, LsArg(4, -1.0f))),
+				int(LsArg(5, -1.0f)), int(LsArg(6, 1.0f)), int(LsArg(7, 1.0f)));
+		return;
+	}
+
 	CCSBot *me = LsBotByIndex(CMD_ARGV(1));
 	if (!me)
 		return;
@@ -648,7 +677,7 @@ CNavArea *CCSBot::LsPickHuntArea()
 	// bold few push anyway
 	Vector keep[16];
 	int kept = 0;
-	if (LsFight() && !LsSolo() && !(GetProfile()->GetAggression() > 0.8f && LsTrait(31) < 0.5f))
+	if (LsFight() && !LsSolo() && !(LsAggro() > 0.8f && LsTrait(31) < 0.5f))
 	{
 		if (m_iTeam == CT && TheCSBots()->GetScenario() == CCSBotManager::SCENARIO_DEFUSE_BOMB && !TheCSBots()->IsBombPlanted())
 		{
@@ -944,7 +973,7 @@ void CCSBot::LsSneak()
 	}
 	m_lsNextSneakCheck = gpGlobals->time + RANDOM_FLOAT(0.8f, 1.5f);
 
-	float sneaky = 0.6f * (1.0f - GetProfile()->GetAggression()) + 0.4f * LsTrait(21);
+	float sneaky = 0.6f * (1.0f - LsAggro()) + 0.4f * LsTrait(21);
 	if (LsMatch())
 		sneaky += 0.25f;
 	bool loud = IsHurrying() || GetTimeSinceAttacked() < 5.0f || GetTimeSinceLastSawEnemy() < 6.0f || IsSafe()
@@ -1070,7 +1099,7 @@ bool CCSBot::LsPushes(float range)
 	if (range < 250.0f || IsUsingSniperRifle())
 		return false;
 	float skill = GetProfile()->GetSkill();
-	float aggro = GetProfile()->GetAggression();
+	float aggro = LsAggro();
 	CBasePlayerWeapon *pWeapon = GetActiveWeapon();
 	bool closeGun = IsUsingShotgun() || (pWeapon && (pWeapon->m_iId == WEAPON_MAC10 || pWeapon->m_iId == WEAPON_TMP
 		|| pWeapon->m_iId == WEAPON_P90 || pWeapon->m_iId == WEAPON_UMP45 || pWeapon->m_iId == WEAPON_MP5N));
@@ -1084,7 +1113,7 @@ bool CCSBot::LsPushes(float range)
 // The eager ones chase a kill they lost sight of (the "chasing an eco" mistake)
 float CCSBot::LsChaseExtra()
 {
-	float aggro = GetProfile()->GetAggression();
+	float aggro = LsAggro();
 	if (LsMatch())
 		return 0.0f;
 	return (aggro > 0.65f && LsTrait(29) < 0.6f) ? RANDOM_FLOAT(2.0f, 5.0f) : 0.0f;
@@ -1222,7 +1251,7 @@ bool CCSBot::LsObjectiveThreat(bool defusing)
 	// the bomb about to go: nothing else matters
 	if (defusing && TheCSBots()->GetBombTimeLeft() < takes + 1.0f)
 		return false;
-	float bold = 0.5f * GetProfile()->GetAggression() + 0.5f * LsTrait(30);
+	float bold = 0.5f * LsAggro() + 0.5f * LsTrait(30);
 	float stop = threat * (1.2f - 0.6f * bold) * (LsMatch() ? 1.1f : 1.0f);
 	if (RANDOM_FLOAT(0.0f, 1.0f) > stop)
 		return false;
@@ -1371,7 +1400,7 @@ void CCSBot::LsHeard(GameEventType event, CBasePlayer *pPlayer, float dist)
 	if (!LsFight() || !pPlayer || !pPlayer->IsAlive() || !IsEnemy(pPlayer))
 		return;
 	float now = gpGlobals->time;
-	float aggro = GetProfile()->GetAggression();
+	float aggro = LsAggro();
 	float skill = GetProfile()->GetSkill();
 	bool busy = m_state == &m_plantBombState || m_state == &m_defuseBombState || IsUsingLadder();
 
