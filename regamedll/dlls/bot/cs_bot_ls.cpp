@@ -108,7 +108,14 @@ bool CCSBot::LsLoner() const
 	// (the bomb carrier plays the objective, whoever it is)
 	if (!LsSolo() && IsCarryingBomb())
 		return false;
-	return LsSolo() || (GetProfile() && LsTeamwork() < 0.35f);
+	if (LsSolo())
+		return true;
+	// lurkers and ninjas go their own way, objective players stay with it
+	if (m_lsStyle == LS_STYLE_LURKER || m_lsStyle == LS_STYLE_NINJA)
+		return true;
+	if (m_lsStyle == LS_STYLE_OBJECTIVE)
+		return false;
+	return GetProfile() && LsTeamwork() < 0.35f;
 }
 
 // ---- a bot's own numbers ----------------------------------------------------------------
@@ -912,7 +919,7 @@ void CCSBot::LsFightHabits(float range, bool crouchAndHold)
 // teammate defusing, hold the site they're at and answer a hostage; a few never do
 bool CCSBot::LsShirksObjective()
 {
-	if (IsCarryingBomb() || !IsRogue())
+	if (IsCarryingBomb() || m_lsStyle == LS_STYLE_OBJECTIVE || !IsRogue())
 		return false;
 	if (cv_bot_ls_solo.value <= 0.0f || LsSolo())
 		return true;

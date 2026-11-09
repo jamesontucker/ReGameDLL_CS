@@ -154,7 +154,9 @@ bool CCSBot::LsPlayForTime()
 	if (TheCSBots()->IsBombPlanted() || GetNearbyFriendCount() > 0 || OutnumberedCount() < 2)
 		return false;
 	float bold = LsAggro();
-	return RANDOM_FLOAT(0.0f, 1.0f) < (LsMatch() ? 0.8f : 0.55f) * (1.2f - bold);
+	// (campers and careful players hold back; rushers and knifers go in)
+	float lean = (m_lsStyle == LS_STYLE_CAMPER || m_lsStyle == LS_STYLE_CAREFUL) ? 1.3f : (m_lsStyle == LS_STYLE_RUSHER || m_lsStyle == LS_STYLE_KNIFER) ? 0.5f : 1.0f;
+	return RANDOM_FLOAT(0.0f, 1.0f) < Q_min(0.95f, (LsMatch() ? 0.8f : 0.55f) * (1.2f - bold) * lean);
 }
 
 // Guarding the planted bomb: an enemy who ducked out of sight is let come to it (the clock is
@@ -163,7 +165,9 @@ bool CCSBot::LsHoldsPlant()
 {
 	if (!LsFight() || LsSolo() || m_iTeam != TERRORIST || !TheCSBots()->IsBombPlanted() || GetTask() != GUARD_TICKING_BOMB)
 		return false;
-	return RANDOM_FLOAT(0.0f, 1.0f) < (LsMatch() ? 0.9f : 0.65f);
+	// (a rusher can't sit still; a camper loves it)
+	float lean = m_lsStyle == LS_STYLE_CAMPER ? 1.3f : m_lsStyle == LS_STYLE_RUSHER ? 0.6f : 1.0f;
+	return RANDOM_FLOAT(0.0f, 1.0f) < Q_min(0.97f, (LsMatch() ? 0.9f : 0.65f) * lean);
 }
 
 // A teammate got a kill early in the round (a CT down in the first 40 s, Ts on a bomb map):
