@@ -1140,7 +1140,9 @@ void CCSBot::LsHandUpdate(float goalYaw, float goalPitch, float dt)
 		float k = LsMinJerk(s);
 		pev->v_angle.y = h.y0 + NormalizeAngle(h.y1 - h.y0) * k;
 		pev->v_angle.x = h.p0 + (h.p1 - h.p0) * k;
-		if (s >= 0.6f && s < 1.0f && sqrtf(driftY * driftY + driftP * driftP) > Q_max(2.0f, 0.5f * width))
+		// (and shot just now with the goal swung well away: a jolt, the stroke dropped at once)
+		bool jolt = GetTimeSinceAttacked() < 0.15f && sqrtf(driftY * driftY + driftP * driftP) > 20.0f;
+		if (jolt || (s >= 0.6f && s < 1.0f && sqrtf(driftY * driftY + driftP * driftP) > Q_max(2.0f, 0.5f * width)))
 		{
 			h.moving = false;
 			h.corrections = 0;
