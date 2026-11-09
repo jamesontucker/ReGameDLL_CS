@@ -223,6 +223,7 @@ bool CCSBot::LsCornerMoves(Vector *goal)
 		m_lsCornerAt = corner;
 		m_lsCornerPlan = LsPickCornerPlan();
 		m_lsCornerShift = Vector2D(0, 0);
+		m_lsCornerBlind = false;
 		if (m_lsCornerPlan == LS_CORNER_WIDE || m_lsCornerPlan == LS_CORNER_OUTSIDE)
 		{
 			// the outside of the turn: away from the corner's edge
@@ -243,15 +244,20 @@ bool CCSBot::LsCornerMoves(Vector *goal)
 	if (m_lsCornerPlan == LS_CORNER_PLAIN || m_lsCornerPlan == LS_CORNER_DONE)
 		return false;
 
-	// nothing to hide from once it can already see past the corner
+	// nothing to jiggle for once it can already see past the corner (a swing or a line,
+	// once started, carries on round it)
 	Vector eye = pev->origin + pev->view_ofs;
 	Vector head = past + Vector(0, 0, HalfHumanHeight + 24.0f);
 	TraceResult tr;
-	UTIL_TraceLine(eye, head, ignore_monsters, ENT(pev), &tr);
-	if (tr.flFraction >= 1.0f)
+	if (m_lsCornerPlan == LS_CORNER_JIGGLE || !m_lsCornerBlind)
 	{
-		m_lsCornerPlan = LS_CORNER_DONE;
-		return false;
+		UTIL_TraceLine(eye, head, ignore_monsters, ENT(pev), &tr);
+		if (tr.flFraction >= 1.0f)
+		{
+			m_lsCornerPlan = LS_CORNER_DONE;
+			return false;
+		}
+		m_lsCornerBlind = true;
 	}
 
 	if (m_lsCornerPlan == LS_CORNER_JIGGLE)
@@ -712,9 +718,17 @@ bool CCSBot::LsQuietDrop(float dz)
 		return false;
 	if (m_lastKnownArea && (m_lastKnownArea->GetAttributes() & NAV_JUMP))
 		return false;
-	if (!HasPath() || m_goalPosition.z > GetFeetZ() - 20.0f)
+	if (!HasPath())
 		return false;
-	return true;
+	// (the path's next few points: one of them close by and lower)
+	float feet = GetFeetZ();
+	for (int i = m_pathIndex; i < m_pathLength && i < m_pathIndex + 3; i++)
+	{
+		const Vector &p = m_path[i].pos;
+		if (p.z < feet - 20.0f && (p - pev->origin).Make2D().IsLengthLessThan(150.0f))
+			return true;
+	}
+	return m_goalPosition.z < feet - 20.0f;
 }
 
 // ---- boosting -------------------------------------------------------------------------------

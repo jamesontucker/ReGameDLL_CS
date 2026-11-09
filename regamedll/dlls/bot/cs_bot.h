@@ -1142,6 +1142,7 @@ private:
 	Vector m_lsCornerAt;							// the corner the plan is for
 	int m_lsCornerPlan = 0;							// what it does there
 	Vector2D m_lsCornerShift;						// a wide swing or the outside line: off the path by this much
+	bool m_lsCornerBlind = false;					// it couldn't see past the corner when the plan started
 	float m_lsJiggleUntil = 0.0f;					// a jiggle peek under way until
 	float m_lsJigglePhaseEnd = 0.0f;
 	int m_lsJigglePhase = 0;						// 0 out, 1 back
