@@ -780,6 +780,7 @@ void CCSBot::LsStartOver()
 	m_lsPrefireUntil = 0.0f;
 	m_lsBackUntil = 0.0f;
 	m_lsFloorGun = nullptr;
+	m_lsHeBlockedSince = -1.0f;
 	m_lsLastPos = pev->origin;
 	m_lsLastPosAt = gpGlobals->time;
 }

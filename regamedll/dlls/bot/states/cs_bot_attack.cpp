@@ -181,9 +181,15 @@ void AttackState::OnUpdate(CCSBot *me)
 			// (Loner-Strike: not Gun Game's grenade out on its grenade level, beyond arm's
 			// length: it's what scores there, and it's thrown from the update)
 			CBasePlayer *pFoe = me->GetEnemy();
-			bool keep = LsFight() && pWeapon->m_iId == WEAPON_HEGRENADE && me->LsNadeOnly() && pFoe && (pFoe->pev->origin - me->pev->origin).IsLengthGreaterThan(250.0f);
+			// (nor while a throw is on its way out)
+			bool keep = LsFight() && pWeapon->m_iId == WEAPON_HEGRENADE && me->LsNadeOnly()
+				&& ((pFoe && (pFoe->pev->origin - me->pev->origin).IsLengthGreaterThan(250.0f)) || me->LsTossing());
 			if (!keep)
+			{
+				if (LsFight() && me->LsNadeOnly())
+					me->LsHeAway(2.0f);
 				me->EquipBestWeapon();
+			}
 		}
 	}
 

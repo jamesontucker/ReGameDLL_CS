@@ -96,7 +96,7 @@ bool CCSBot::LsTeamGame() const
 // (the bomb, hostages, guarding the plant), not saving its gun, not under a plugin's control
 bool CCSBot::LsFree() const
 {
-	return !IsAttacking() && !IsBusy() && !IsCarryingBomb() && !m_lsSaving && !LsPuppetActive() && !IsDefusingBomb()
+	return !IsAttacking() && !IsBusy() && !IsCarryingBomb() && !m_lsSaving && !LsPuppetActive() && !LsOrderActive() && !IsDefusingBomb()
 		&& !IsEscapingFromBomb() && GetHostageEscortCount() == 0 && !m_isWaitingToTossGrenade
 		&& GetTask() != GUARD_TICKING_BOMB && !IsUsingLadder() && m_state != &m_plantBombState && m_state != &m_defuseBombState;
 }
@@ -248,10 +248,17 @@ unsigned int CCSBot::LsSeed()
 	{
 		m_lsSeedName = pev->netname;
 		char bare[64];
-		LsBareName(STRING(pev->netname), bare, sizeof(bare));
+		const char *name = STRING(pev->netname);
+		LsBareName(name, bare, sizeof(bare));
 		unsigned int h = 2166136261U;
 		for (const char *c = bare; *c; c++)
 			h = (h ^ (unsigned char)*c) * 16777619U;
+		// (a second bot with the same name, "(1)Dave": a person of its own, not Dave's twin)
+		if (name[0] == '(' && isdigit((unsigned char)name[1]))
+		{
+			for (const char *c = name; *c && *c != ')'; c++)
+				h = (h ^ (unsigned char)*c) * 16777619U;
+		}
 		m_lsSeed = LsMix(h);
 	}
 	return m_lsSeed;
@@ -382,6 +389,9 @@ float LsTimeLeft()
 	if (!CSGameRules())
 		return 999.0f;
 	if (HasRoundInfinite(SCENARIO_BLOCK_TIME_EXPRIRED))
+		return 999.0f;
+	// (mp_roundtime 0: no limit at all; freeze time's own count aside)
+	if (CSGameRules()->m_iRoundTime <= 0 && !CSGameRules()->IsFreezePeriod())
 		return 999.0f;
 	return CSGameRules()->GetRoundRemainingTime();
 }
@@ -626,6 +636,12 @@ void CCSBot::LsPuppetUpdate()
 	// (a person's order: following them, or a chat hold, only gives way to what an order does)
 	bool order = gpGlobals->time < p.followUntil || FStrEq(p.holdTag, "bc");
 	bool urgent = p.urgent && gpGlobals->time < p.lookUntil;
+	// (a person's "wait" doesn't keep it standing while it's being hit)
+	if (FStrEq(p.holdTag, "bc") && gpGlobals->time < p.holdUntil && (GetTimeSinceAttacked() < 1.0f || IsSurprised()))
+	{
+		LsPuppetRelease();
+		return;
+	}
 	if (m_isEnemyVisible || IsOnLadder() || !LsPuppetActive() || (!urgent && (IsAttacking() || (order ? LsOrderBusy() : LsBusy()) || IsBlind())))
 	{
 		LsPuppetRelease();
@@ -685,6 +701,54 @@ void CCSBot::LsPuppetUpdate()
 		Walk();
 }
 
+// A person's order, kept up: a go reached (and held a while, if asked), a follow picked back
+// up after a fight; it ends when it's done, runs out, the leader's gone, or "nvm"
+void CCSBot::LsOrderTick()
+{
+	LsOrder &o = m_lsOrder;
+	if (o.kind == 0)
+		return;
+	float now = gpGlobals->time;
+	if (now >= o.until || !IsAlive())
+	{
+		o = LsOrder();
+		return;
+	}
+	if (IsAttacking() || m_isEnemyVisible || LsOrderBusy() || IsOnLadder())
+		return;
+	if (o.kind == 1)
+	{
+		if ((o.at - pev->origin).Make2D().IsLengthLessThan(120.0f))
+		{
+			// there: holds it, if asked, else back to its own business
+			if (o.holdSecs > 0.0f)
+				Hide(&o.at, o.holdSecs, true);
+			o = LsOrder();
+			return;
+		}
+		// (sent off it by something: a fight that's over, a state change; on its way again)
+		if (!IsMovingTo() && now >= o.nextTry)
+		{
+			o.nextTry = now + 2.0f;
+			MoveTo(&o.at, SAFEST_ROUTE);
+		}
+		return;
+	}
+	CBasePlayer *pLeader = o.leader;
+	if (!pLeader || !pLeader->IsAlive() || BotRelationship(pLeader) != BOT_TEAMMATE)
+	{
+		o = LsOrder();
+		return;
+	}
+	if (!IsFollowing() && now >= o.nextTry && (pLeader->pev->origin - pev->origin).IsLengthLessThan(1500.0f))
+	{
+		o.nextTry = now + 2.0f;
+		Follow(pLeader);
+		m_lsPuppet.followUntil = o.until;
+		m_lsPuppet.any = true;
+	}
+}
+
 static CCSBot *LsBotByIndex(const char *arg)
 {
 	int index = Q_atoi(arg);
@@ -709,7 +773,8 @@ void Bot_LsServerCommand()
 	// bot is (gm_people), alive or not
 	if (FStrEq(CMD_ARGV(2), "persona"))
 	{
-		CBasePlayer *pPlayer = UTIL_PlayerByIndex(Q_atoi(CMD_ARGV(1)));
+		int index = Q_atoi(CMD_ARGV(1));
+		CBasePlayer *pPlayer = (index >= 1 && index <= gpGlobals->maxClients) ? UTIL_PlayerByIndex(index) : nullptr;
 		if (pPlayer && pPlayer->IsBot())
 		{
 			// (a missing value stays "not told": -1, so the profile's is used)
@@ -757,27 +822,53 @@ void CCSBot::LsPuppetCommand(const char *what, float now)
 
 	// release [tag]: with a tag, only that plugin's hold goes (one plugin's habit doesn't
 	// cancel another's)
+	// (a person's order: chat's, tagged bc)
+	bool ordered = LsOrderActive() || FStrEq(p.holdTag, "bc");
 	if (FStrEq(what, "release"))
 	{
+		// with a tag, only that plugin's own hold goes; only chat's (bc: "nvm", "ok go") ends a
+		// person's order, and nothing else ends a follow or a go
 		const char *tag = CMD_ARGC() > 3 ? CMD_ARGV(3) : "";
-		if (tag[0] && p.holdTag[0] && !FStrEq(tag, p.holdTag))
+		if (!tag[0])
+		{
+			LsPuppetRelease();
 			return;
-		LsPuppetRelease();
+		}
+		if (FStrEq(tag, "bc"))
+		{
+			m_lsOrder = LsOrder();
+			LsPuppetRelease();
+			return;
+		}
+		if (FStrEq(tag, p.holdTag))
+		{
+			p.holdUntil = p.crouchUntil = 0.0f;
+			p.holdTag[0] = '\0';
+		}
 		return;
 	}
 
-	// hold <secs> [tag]: the longest hold asked for stands
+	// hold <secs> [tag]: the longest hold asked for stands; a person's (bc) always takes it
+	// over, and while a person's order is on no plugin's hold gets in its way
 	if (FStrEq(what, "hold"))
 	{
+		const char *tag = CMD_ARGC() > 4 ? CMD_ARGV(4) : "";
+		bool chat = FStrEq(tag, "bc");
+		if (ordered && !chat)
+			return;
 		float until = now + Q_min(LsArg(3, 1.0f), most);
-		if (until > p.holdUntil)
+		if (chat || until > p.holdUntil)
 		{
-			p.holdUntil = until;
-			Q_strlcpy(p.holdTag, CMD_ARGC() > 4 ? CMD_ARGV(4) : "");
+			p.holdUntil = chat ? Q_max(until, p.holdUntil) : until;
+			Q_strlcpy(p.holdTag, tag);
 		}
+		if (chat)
+			pev->fuser4 = now;	// (taken: gm_botchat reads it)
 	}
 	else if (FStrEq(what, "crouch"))
 	{
+		if (ordered)
+			return;
 		p.crouchStart = now;
 		p.crouchUntil = now + Q_min(LsArg(3, 1.0f), most);
 		p.crouchEvery = Q_max(0.0f, LsArg(4));
@@ -794,31 +885,49 @@ void CCSBot::LsPuppetCommand(const char *what, float now)
 	{
 		p.lookAt = Vector(LsArg(3), LsArg(4), LsArg(5));
 		p.lookStart = now;
-		p.lookUntil = now + Q_min(LsArg(6, 1.0f), most);
+		p.lookUntil = now + Q_min(LsArg(6, 1.0f), LsArg(7) >= 2.0f ? 1.0f : most);
 		p.nodEvery = FStrEq(what, "nod") ? Q_max(0.08f, LsArg(7, 0.35f)) : 0.0f;
 		// (look ... 1: a quick look, a flick or a spin; a nod is always quick; 2: urgent)
 		p.fast = FStrEq(what, "nod") || LsArg(7) > 0.0f;
 		p.urgent = FStrEq(what, "look") && LsArg(7) >= 2.0f;
+		// (an urgent turn: someone's behind it; standing still for a plugin's habit ends)
+		if (p.urgent && !FStrEq(p.holdTag, "bc"))
+			p.holdUntil = p.crouchUntil = 0.0f;
 	}
 	else if (FStrEq(what, "goto"))
 	{
-		// (the latest order wins: a hold or crouch from before ends)
+		// goto x y z [walk] [hold secs]: the latest order wins (a hold or crouch from before ends);
+		// with hold secs it holds the spot once there (a "go b" stays at b a while)
 		p.holdUntil = p.crouchUntil = 0.0f;
 		p.holdTag[0] = '\0';
 		Vector to(LsArg(3), LsArg(4), LsArg(5));
 		MoveTo(&to, SAFEST_ROUTE);
 		if (LsArg(6) > 0.0f)
 			p.walkUntil = now + most;
+		m_lsOrder = LsOrder();
+		m_lsOrder.kind = 1;
+		m_lsOrder.at = to;
+		m_lsOrder.until = now + 45.0f;
+		m_lsOrder.holdSecs = Q_min(LsArg(7), most);
+		m_lsOrder.nextTry = now + 2.0f;
+		pev->fuser4 = now;	// (taken: gm_botchat reads it)
 	}
 	else if (FStrEq(what, "follow"))
 	{
-		CBasePlayer *pLeader = UTIL_PlayerByIndex(Q_atoi(CMD_ARGV(3)));
+		int index = Q_atoi(CMD_ARGV(3));
+		CBasePlayer *pLeader = (index >= 1 && index <= gpGlobals->maxClients) ? UTIL_PlayerByIndex(index) : nullptr;
 		if (!pLeader || !pLeader->IsAlive() || pLeader == this || BotRelationship(pLeader) != BOT_TEAMMATE)
 			return;
 		p.holdUntil = p.crouchUntil = 0.0f;
 		p.holdTag[0] = '\0';
 		Follow(pLeader);
 		p.followUntil = now + Q_min(LsArg(4, 20.0f), 60.0f);
+		m_lsOrder = LsOrder();
+		m_lsOrder.kind = 2;
+		m_lsOrder.leader = pLeader;
+		m_lsOrder.until = p.followUntil;
+		m_lsOrder.nextTry = now + 2.0f;
+		pev->fuser4 = now;	// (taken: gm_botchat reads it)
 	}
 	else
 	{
@@ -937,6 +1046,9 @@ CNavArea *CCSBot::LsPickHuntArea()
 		});
 	}
 
+	// (half the picks, when there's been gunfire in the last 10 s)
+	bool pullFight = m_lsFightHeardAt > 0.0f && gpGlobals->time - m_lsFightHeardAt < 10.0f && RANDOM_FLOAT(0.0f, 1.0f) < 0.5f;
+
 	const int tries = 12;
 	int picks[tries];
 	for (int t = 0; t < tries; t++)
@@ -970,13 +1082,14 @@ CNavArea *CCSBot::LsPickHuntArea()
 				nearest = Q_min(nearest, float((*c - avoid[k]).Length2D()));
 			score += nearest;
 
-			// a deathmatch: toward fighting it heard lately (that's where people are)
-			if (LsSolo() && m_noiseTimestamp > 0.0f && gpGlobals->time - m_noiseTimestamp < 10.0f)
-				score -= 0.4f * float((*c - m_noisePosition).Length2D());
+			// a deathmatch: now and then toward fighting it heard lately (that's where people are;
+			// gently, so a crowd doesn't all pour into one fight)
+			if (LsSolo() && pullFight)
+				score -= 0.15f * float((*c - m_lsFightHeard).Length2D());
 
 			// and toward where an enemy was last seen, more so the fewer are left (with a crowd
 			// there's someone everywhere; and not one who's since died)
-			if (LsSolo() && GetTimeSinceLastSawEnemy() < 30.0f && m_enemy.IsValid() && m_enemy->IsAlive())
+			if (LsSolo() && GetTimeSinceLastSawEnemy() < 30.0f && m_enemy.IsValid() && m_enemy->IsAlive() && m_enemy->m_iDeaths == m_lsEnemyDeaths)
 			{
 				int left = GetEnemiesRemaining();
 				if (left <= 6)
@@ -1754,6 +1867,13 @@ void CCSBot::LsHeard(GameEventType event, CBasePlayer *pPlayer, float dist)
 	float now = gpGlobals->time;
 	float aggro = LsAggro();
 	float skill = LsSkill();
+	// (gunfire: where the fighting is, for deathmatch hunting; kept apart from the noise the
+	// stock code forgets as soon as it looks into it)
+	if (event == EVENT_WEAPON_FIRED && dist < 2000.0f)
+	{
+		m_lsFightHeard = pPlayer->pev->origin;
+		m_lsFightHeardAt = now;
+	}
 	// (a plugin's hold or look gives way to an enemy heard close by)
 	if (LsPuppetActive() && dist < 700.0f)
 		LsPuppetRelease();

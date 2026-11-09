@@ -23,10 +23,19 @@ void CCSBot::LsTeamTick()
 		m_lsForTimeRoll = -1;
 	}
 
+	// a T not hiding (on its way somewhere, hunting) near a defuse it can hear: the same as one
+	// hiding would (LsDefuseHeard), once per defuse
+	if (m_iTeam == TERRORIST && TheCSBots()->GetBombDefuser() && !IsHiding() && !IsAttacking() && !LsOrderActive()
+		&& now - m_lsDefuseActedAt > 12.0f)
+	{
+		if (LsDefuseHeard(TheCSBots()->GetBombDefuser()) == 1)
+			m_lsDefuseActedAt = now;
+	}
+
 	// the bomb still on its back with the clock nearly gone: to a site, now
 	// (looked at every few seconds: after a fight, or from a hide or someone's "go" order, it
 	// still has to get there)
-	if (IsCarryingBomb() && now >= m_lsLateBombAt && !IsAttacking() && !IsAtBombsite() && TheCSBots()->GetScenario() == CCSBotManager::SCENARIO_DEFUSE_BOMB
+	if (IsCarryingBomb() && now >= m_lsLateBombAt && !IsAttacking() && !m_lsSaving && !IsAtBombsite() && TheCSBots()->GetScenario() == CCSBotManager::SCENARIO_DEFUSE_BOMB
 		&& !CSGameRules()->IsFreezePeriod() && LsTimeLeft() < 25.0f)
 	{
 		m_lsLateBombAt = now + 5.0f;
@@ -310,22 +319,13 @@ bool CCSBot::LsYieldsDefuse()
 	float left = TheCSBots()->GetBombTimeLeft();
 	if (left < (m_bHasDefuser ? 5.0f : 10.0f) + 0.2f)
 	{
-		// (away from it, well out of the blast: not a hiding spot next to it and back again)
+		// (out of the blast, as stock bots do when it's about to go: not to a hiding spot next
+		// to it and back again)
 		if (LsTrait(83) < 0.25f + 0.6f * LsSkill())
 		{
-			Vector away = pev->origin - *bomb;
-			away.z = 0.0f;
-			away = away.IsZero() ? Vector(1, 0, 0) : away.Normalize();
-			Vector run = pev->origin + away * 1600.0f;
-			CNavArea *pArea = TheNavAreaGrid.GetNearestNavArea(&run);
-			if (pArea)
-			{
-				Vector to = *pArea->GetCenter();
-				MoveTo(&to, FASTEST_ROUTE);
-				Hurry(10.0f);
-				LsWhy("no-time-to-defuse");
-				return true;
-			}
+			EscapeFromBomb();
+			LsWhy("no-time-to-defuse");
+			return true;
 		}
 		return false;
 	}
@@ -429,7 +429,7 @@ void CCSBot::LsFloorGunTick()
 			// (beaten to it: another close by, else on with the round)
 			if (taken && TheCSBots()->GetElapsedRoundTime() < 15.0f)
 				m_lsFloorRound = -1;
-			else if (taken)
+			else if (taken && IsMovingTo() && !IsAttacking() && !LsOrderActive())
 				Idle();
 		}
 		return;
@@ -496,10 +496,13 @@ void CCSBot::LsStalemateTick()
 	// (only a bot standing about or holding a spot: not one following someone, on its way
 	// somewhere or looking into a noise; and once a round)
 	int round = CSGameRules()->m_iTotalRoundsPlayed;
-	if (m_lsStaleRound == round || IsFollowing() || IsMovingTo() || IsNoiseHeard() || !(IsHiding() || m_state == &m_idleState))
-		return;
 	int mates = 0;
 	LsForTeammates(this, [&](CBasePlayer *) { mates++; });
+	// (once a round, or once more as the last one alive; never over a person's order)
+	bool again = mates == 0 && m_lsStaleLast != round;
+	if ((m_lsStaleRound == round && !again) || LsOrderActive() || FStrEq(m_lsPuppet.holdTag, "bc") || IsFollowing() || IsMovingTo() || IsNoiseHeard()
+		|| !(IsHiding() || m_state == &m_idleState))
+		return;
 	float aggro = LsAggro();
 	float wait = mates == 0 ? 20.0f : 35.0f + 45.0f * (1.0f - aggro) + 20.0f * LsTrait(85);
 	if (TheCSBots()->GetElapsedRoundTime() < wait || GetTimeSinceLastSawEnemy() < 12.0f || GetTimeSinceAttacked() < 8.0f)
@@ -508,6 +511,8 @@ void CCSBot::LsStalemateTick()
 	if (mates > 0 && aggro < 0.3f && LsTrait(86) < 0.6f)
 		return;
 	m_lsStaleRound = round;
+	if (mates == 0)
+		m_lsStaleLast = round;
 	if (m_lsPuppet.any)
 		LsPuppetRelease();
 	Hunt();

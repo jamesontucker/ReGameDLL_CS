@@ -213,6 +213,9 @@ void CCSBot::Update()
 	LsTeleportCheck();	// Loner-Strike
 
 	LsTeamTick();	// Loner-Strike: team play
+	LsOrderTick();	// Loner-Strike: a person's order
+	if (m_isEnemyVisible && m_enemy.IsValid())
+		m_lsEnemyDeaths = m_enemy->m_iDeaths;	// Loner-Strike
 	LsFloorGunTick();	// Loner-Strike: fy_ maps
 	LsStalemateTick();	// Loner-Strike: awp_ / aim_ / fy_ rounds
 
@@ -365,8 +368,9 @@ void CCSBot::Update()
 		AdjustSafeTime();
 
 		// (Loner-Strike: Gun Game's grenade level with them back at range: the grenade out again)
+		// (beyond 400, and not straight after putting it away: no grenade-Glock flicking at the edge)
 		if (LsFight() && LsNadeOnly() && !IsUsingGrenade() && gpGlobals->time >= m_lsHeBackAt
-			&& (threat->pev->origin - pev->origin).IsLengthGreaterThan(300.0f))
+			&& (threat->pev->origin - pev->origin).IsLengthGreaterThan(400.0f))
 			EquipGrenade();
 
 		// (Loner-Strike: not a flash or smoke it was getting out for something else: the gun)
@@ -384,26 +388,37 @@ void CCSBot::Update()
 					m_lsHeBlockedSince = -1.0f;
 					ThrowGrenade(&aim);
 				}
-				// (a teammate where it would land for a while: the Glock or the knife instead)
+				// (a teammate where it would land for a while: the Glock or the knife instead,
+				// straight away, not through the equip timer)
 				else if (m_lsHeBlockedSince < 0.0f)
 					m_lsHeBlockedSince = gpGlobals->time;
 				else if (gpGlobals->time - m_lsHeBlockedSince > 1.5f)
 				{
 					m_lsHeBlockedSince = -1.0f;
 					m_lsHeBackAt = gpGlobals->time + 3.0f;
-					if (m_rgpPlayerItems[PISTOL_SLOT])
-						EquipPistol();
-					else
-						EquipKnife();
+					CBasePlayerItem *pSide = m_rgpPlayerItems[PISTOL_SLOT] ? m_rgpPlayerItems[PISTOL_SLOT] : m_rgpPlayerItems[KNIFE_SLOT];
+					if (pSide)
+						SelectItem(STRING(pSide->pev->classname));
 				}
+			}
+			else if (LsFight() && LsNadeOnly() && range >= 1100.0f)
+			{
+				// (too far for an arc: keep it out and close in, no flat throw that falls short)
+				m_lsHeBlockedSince = -1.0f;
 			}
 			else if (!(LsFight() && LsNadeOnly() && range <= 250.0f))
 			{
+				m_lsHeBlockedSince = -1.0f;
 				if (!(LsFight() && LsNadeOnly()) || LsHeSafe(this, threat->pev->origin))
 					ThrowGrenade(&threat->pev->origin);
 			}
 			else
-				EquipPistol();	// (too close for it: the Glock)
+			{
+				// (too close for it: the Glock, and not back out for a moment)
+				m_lsHeBlockedSince = -1.0f;
+				m_lsHeBackAt = gpGlobals->time + 2.0f;
+				EquipPistol();
+			}
 		}
 		else
 		{

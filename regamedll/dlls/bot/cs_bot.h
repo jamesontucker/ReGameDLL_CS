@@ -1060,7 +1060,10 @@ public:
 	bool LsNadeGunUp();								// an enemy turned up with a flash or smoke in hand: the gun instead
 	void LsNadeStart(int id, const Vector &aim, float pause);
 	void LsNadeStop();
-	void LsStartOver();							// respawned or teleported: what it was in the middle of ends
+	void LsStartOver();
+	bool LsKnifeOnly() const { return !m_rgpPlayerItems[PRIMARY_WEAPON_SLOT] && !m_rgpPlayerItems[PISTOL_SLOT]; }	// a knife and nothing else to shoot with
+	bool LsTossing() const { return m_isWaitingToTossGrenade; }
+	void LsHeAway(float secs) { m_lsHeBackAt = gpGlobals->time + secs; m_lsHeBlockedSince = -1.0f; }							// respawned or teleported: what it was in the middle of ends
 	void LsTeleportCheck();						// moved further in a moment than anyone can run: LsStartOver
 	bool LsPlanThrow(int id, const Vector &target, float within, Vector *aim, Vector *burst);
 	bool LsPlanFlash(const Vector &corner, const Vector &beyond, Vector *aim, Vector *burst, bool *inMySight);
@@ -1186,6 +1189,20 @@ private:
 		bool urgent = false;						// an urgent turn (look ... 2): goes on through a fight, till an enemy is in sight
 	};
 	LsPuppet m_lsPuppet;
+	// a person's order (go somewhere, follow me): kept apart from a plugin's habits, so a fight
+	// or another plugin's release doesn't end it; picked back up after a fight
+	struct LsOrder
+	{
+		int kind = 0;								// 0 none, 1 go to a spot, 2 follow someone
+		Vector at;
+		EntityHandle<CBasePlayer> leader;
+		float until = 0.0f;
+		float holdSecs = 0.0f;						// a go: then hold the spot that long
+		float nextTry = 0.0f;
+	};
+	LsOrder m_lsOrder;
+	void LsOrderTick();
+	bool LsOrderActive() const { return m_lsOrder.kind != 0 && gpGlobals->time < m_lsOrder.until; }
 	void LsCheckMap();
 	void LsAddDangerToArea(const CNavArea *area, float amount);
 	LsDanger m_lsDanger[96];						// this bot's own danger memory, by area id (a fixed table:
@@ -1193,6 +1210,9 @@ private:
 	char m_lsMap[64] = "";									// the map that memory is for
 	float m_lsMapCheckedAt = -1.0f;						// the frame the map was last checked (once a frame is enough)
 	float m_lsDiedAt = -100.0f;
+	Vector m_lsFightHeard;							// gunfire it heard last (deathmatch hunting)
+	float m_lsFightHeardAt = -100.0f;
+	int m_lsEnemyDeaths = -1;						// its enemy's deaths when last seen (a respawned one isn't still there)
 	float m_lsHeBlockedSince = -1.0f;
 	float m_lsHeBackAt = 0.0f;						// ...and not back out before then				// Gun Game's grenade level: no safe throw since then						// when it was last killed
 	float m_lsDangerUntil = -1.0f;						// when all of that memory will have faded (nothing to look up after)
@@ -1227,7 +1247,8 @@ private:
 	int m_lsRetakeRound = -1;						// the round it waited for teammates before a retake
 	int m_lsPickupRound = -1;						// the round it went for a dropped gun after
 	int m_lsTeamRound = -1;							// the round LsTeamTick last saw
-	float m_lsDefuseNoticeAt = -1.0f;				// when it takes in the defuse it hears
+	float m_lsDefuseNoticeAt = -1.0f;
+	float m_lsDefuseActedAt = -100.0f;				// went for a defuse it heard (not while hiding) then				// when it takes in the defuse it hears
 	float m_lsDefuseHeardLast = -10.0f;			// last time it was told of a defuse going on
 	int m_lsForTimeRoll = -1;
 	float m_lsLateBombAt = 0.0f;					// a late carrier: next look at whether it's off to a site
@@ -1235,7 +1256,8 @@ private:
 	int m_lsYieldRound = -1;						// the round its kit yields were counted for
 	int m_lsYields = 0;							// times it left the bomb to a kit this round (twice at most)
 	float m_lsStaleCheckAt = 0.0f;
-	int m_lsStaleRound = -1;						// the round it went looking to end a stalemate						// the round it went for a floor gun
+	int m_lsStaleRound = -1;
+	int m_lsStaleLast = -1;						// ...and as the last one alive						// the round it went looking to end a stalemate						// the round it went for a floor gun
 	CBaseEntity *m_lsFloorGun = nullptr;			// the one it's going for (others leave it to it)					// the round its carrier hurried to a site for the clock						// this fight: does it play for time (-1 not rolled)
 	// (end team members)
 	// Loner-Strike nades (cs_bot_ls_nades.cpp): members

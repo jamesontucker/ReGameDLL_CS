@@ -363,6 +363,7 @@ void CCSBot::RoundRespawn()
 	LsPuppetRelease();
 	LsNadeReset();
 	LsStartOver();
+	m_lsOrder = LsOrder();
 }
 
 void CCSBot::Disconnect()

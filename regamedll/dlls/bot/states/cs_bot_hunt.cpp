@@ -32,8 +32,9 @@
 void HuntState::OnEnter(CCSBot *me)
 {
 	// lurking death
-	// (Loner-Strike: not in deathmatch-type modes, where nobody creeps about with a knife)
-	if (me->IsUsingKnife() && me->IsWellPastSafe() && !me->IsHurrying() && !(LsFight() && LsSolo()))
+	// (Loner-Strike: not in deathmatch-type modes, where nobody creeps about with a knife, nor
+	// when the knife is all it has: knife arenas)
+	if (me->IsUsingKnife() && me->IsWellPastSafe() && !me->IsHurrying() && !(LsFight() && (LsSolo() || me->LsKnifeOnly())))
 		me->Walk();
 	else
 		me->Run();

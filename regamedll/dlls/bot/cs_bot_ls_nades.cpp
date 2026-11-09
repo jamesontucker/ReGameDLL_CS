@@ -772,6 +772,9 @@ static int LsDecentBuy(int team)
 	return (team == CT) ? 3750 : 3150;
 }
 
+// the round the last pistol round was (LsTeamPlan: the one after is a force)
+static int s_lastPistol = -100;
+
 // The team's call for this round: buy, save or force (worked out once, by the first of
 // them to buy, so the team agrees)
 static int LsTeamPlan(int team)
@@ -804,7 +807,8 @@ static int LsTeamPlan(int team)
 	{
 		int losses = (team == CT) ? CSGameRules()->m_iNumConsecutiveCTLoses : CSGameRules()->m_iNumConsecutiveTerroristLoses;
 		int avg = money / n;
-		bool pistolLoss = (round == 1 && losses >= 1);
+		// (the round after a pistol round: the first half's or, after the swap, the second's)
+		bool pistolLoss = (round == s_lastPistol + 1 && losses >= 1);
 		float force = 0.0f;
 		if (pistolLoss)
 			force = LsMatch() ? 0.3f : 0.6f;				// the round after losing the pistols
@@ -853,15 +857,17 @@ static bool LsScrimEconomy()
 static bool LsPistolRound()
 {
 	// (nobody with much more than the server's start money: $800 as standard, up to $1600 or so)
-	float most = Q_max(1000.0f, startmoney.value + 200.0f);
-	if (most > 3000.0f)
+	if (startmoney.value >= 1600.0f)
 		return false;
+	float most = Q_max(1000.0f, startmoney.value + 200.0f);
 	for (int i = 1; i <= gpGlobals->maxClients; i++)
 	{
 		CBasePlayer *pPlayer = UTIL_PlayerByIndex(i);
 		if (pPlayer && (pPlayer->m_iTeam == CT || pPlayer->m_iTeam == TERRORIST) && float(pPlayer->m_iAccount) > most)
 			return false;
 	}
+	if (CSGameRules())
+		s_lastPistol = CSGameRules()->m_iTotalRoundsPlayed;
 	return true;
 }
 
