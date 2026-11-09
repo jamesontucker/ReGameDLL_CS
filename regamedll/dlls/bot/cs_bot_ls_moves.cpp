@@ -1121,7 +1121,9 @@ void CCSBot::LsHandUpdate(float goalYaw, float goalPitch, float dt)
 	LsHand &h = m_lsHandM;
 	float now = gpGlobals->time;
 	float skill = LsSkill();
-	bool fight = IsAttacking();
+	// (an enemy in view counts as a fight for the hand, shooting yet or not: people turn to a
+	// threat as fast as they can, not at looking-around speed)
+	bool fight = IsAttacking() || IsEnemyVisible();
 	bool calm = !fight && LsCalm();
 	float oldY = pev->v_angle.y, oldP = pev->v_angle.x;
 
@@ -1209,7 +1211,9 @@ void CCSBot::LsHandUpdate(float goalYaw, float goalPitch, float dt)
 			// (and a hand has a top speed: a minimum-jerk stroke peaks at 1.875 times its average,
 			// so a long turn takes long enough to stay under it; quicker for the skilled and in a
 			// fight. Keeps the faster flicks from becoming inhuman snaps)
-			float vmax = fight ? 500.0f + 250.0f * skill : 420.0f + 150.0f * skill;
+			// (batch 23: a person flicks past 90 deg per 0.1 s once or twice a minute; the bots
+			// almost never did)
+			float vmax = fight ? 700.0f + 450.0f * skill : 520.0f + 260.0f * skill;
 			dur = Q_max(dur, 1.875f * off / vmax);
 			if (m_lsPuppet.fast && now < m_lsPuppet.lookUntil)
 				dur *= 0.6f;

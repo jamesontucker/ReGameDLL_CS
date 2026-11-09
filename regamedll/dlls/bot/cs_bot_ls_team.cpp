@@ -23,6 +23,35 @@ void CCSBot::LsTeamTick()
 		m_lsForTimeRoll = -1;
 	}
 
+	// the bomb down somewhere it hasn't seen: a teammate on that site, or one who just died
+	// there, calls it ("bomb's at A"), as people do, so the retake goes to the right site
+	// instead of guessing one
+	if (m_iTeam == CT && TheCSBots()->IsBombPlanted() && !GetGameState()->IsPlantedBombLocationKnown() && now >= m_lsBombCallAt)
+	{
+		m_lsBombCallAt = now + 1.0f;
+		CBaseEntity *pEnt = nullptr;
+		while ((pEnt = UTIL_FindEntityByClassname(pEnt, "grenade")) != nullptr)
+		{
+			if (!static_cast<CGrenade *>(pEnt)->m_bIsC4)
+				continue;
+			Vector bomb = pEnt->pev->origin;
+			bool called = false;
+			for (int i = 1; i <= gpGlobals->maxClients && !called; i++)
+			{
+				CBasePlayer *pMate = UTIL_PlayerByIndex(i);
+				if (!pMate || pMate == this || FNullEnt(pMate->pev) || pMate->m_iTeam != CT)
+					continue;
+				bool atBomb = (pMate->pev->origin - bomb).IsLengthLessThan(1200.0f);
+				// (alive there, or a body there from the last 20 s: a person's last words)
+				bool fresh = pMate->IsAlive() || !pMate->IsBot() || static_cast<CCSBot *>(pMate)->LsSinceDied() < 20.0f;
+				called = atBomb && fresh;
+			}
+			if (called)
+				GetGameState()->UpdatePlantedBomb(&bomb);
+			break;
+		}
+	}
+
 	// a T not hiding (on its way somewhere, hunting) near a defuse it can hear: the same as one
 	// hiding would (LsDefuseHeard), once per defuse
 	// (not one running from the blast, nor for a defuse that can't finish in time)
