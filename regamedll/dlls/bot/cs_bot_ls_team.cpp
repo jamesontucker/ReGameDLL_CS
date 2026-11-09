@@ -440,11 +440,27 @@ bool CCSBot::LsRadioAnswer()
 
 // A teammate's gunfire close by (team modes): a team player not busy with its own fight goes
 // to back them up, to trade if they go down. Loners mostly don't; once every few seconds
+// A CT once the bomb is down, not defusing yet, who can still get there and defuse in time
+// (running, with the kit or without): people on a retake against the clock run and skip the
+// careful habits (corner jiggles, off-angles, going over to trade); one who can't make it
+// isn't hurried (saving, or making the most of it, is up to the rest of the brain).
+bool CCSBot::LsRetakeRush()
+{
+	if (!LsFight() || m_iTeam != CT || !TheCSBots()->IsBombPlanted() || IsDefusingBomb() || !IsAlive() || LsOrderActive())
+		return false;
+	float left = TheCSBots()->GetBombTimeLeft();
+	const Vector *bomb = GetGameState()->GetBombPosition();
+	// (where it is not known yet: the sites are checked in a hurry too)
+	float dist = bomb ? float((*bomb - pev->origin).Length2D()) : 1500.0f;
+	float defuse = m_bHasDefuser ? 5.0f : 10.0f;
+	return dist / 230.0f + defuse + 1.0f < left;
+}
+
 bool CCSBot::LsTeamHeard(GameEventType event, CBasePlayer *pPlayer)
 {
 	if (!LsFight() || !LsTeamGame() || event != EVENT_WEAPON_FIRED || !pPlayer || pPlayer == this || !pPlayer->IsAlive())
 		return false;
-	if (!LsFree() || TheCSBots()->IsRoundOver())
+	if (!LsFree() || TheCSBots()->IsRoundOver() || LsRetakeRush())
 		return false;
 	// (a bot shooting glass, the sky or a wall isn't in a fight)
 	if (pPlayer->IsBot() && !static_cast<CCSBot *>(pPlayer)->IsAttacking())

@@ -145,7 +145,7 @@ static float LsCornerRoom(CCSBot *me, const Vector &corner, const Vector2D &dir,
 // swing or a line; true while a jiggle is moving the bot itself
 bool CCSBot::LsCornerMoves(Vector *goal)
 {
-	if (!LsFight() || !HasPath())
+	if (!LsFight() || !HasPath() || LsRetakeRush())
 		return false;
 	float now = gpGlobals->time;
 
@@ -344,7 +344,7 @@ public:
 // from the ways into the area (its approach areas); the stock pick if none is off-angle
 const Vector *CCSBot::LsOffAngle(const Vector *stockPick, const Vector *pos, CNavArea *source, float range)
 {
-	if (!LsFight() || LsSolo() || !stockPick || !source || !pos || IsSniper())
+	if (!LsFight() || LsSolo() || !stockPick || !source || !pos || IsSniper() || LsRetakeRush())
 		return stockPick;
 
 	float skill = LsSkill();
@@ -1081,6 +1081,13 @@ void CCSBot::LsTremorTick()
 	// (shakier under stress: hurt, hit just now, or a spray that hit nothing)
 	float stress = (LsHealth() < 40.0f ? 0.6f : 0.0f) + (GetTimeSinceAttacked() < 1.5f ? 0.5f : 0.0f) + (gpGlobals->time < m_lsWhiffUntil ? 0.6f : 0.0f);
 	float sigma = (0.25f + 0.9f * (1.0f - LsSkill())) * (1.0f + stress);
+	// (a far target: people steady the hand for it, the better ones much more; a head across
+	// a long room is smaller than a shaky hand's wander)
+	if (IsAttacking() && m_enemy.IsValid())
+	{
+		float far = Q_max(0.0f, Q_min(1.0f, (float((m_enemy->pev->origin - pev->origin).Length()) - 500.0f) / 1000.0f));
+		sigma *= 1.0f - (0.25f + 0.35f * LsSkill()) * far;
+	}
 	const float theta = 6.0f;
 	auto gauss = []() { return (RANDOM_FLOAT(-1.0f, 1.0f) + RANDOM_FLOAT(-1.0f, 1.0f) + RANDOM_FLOAT(-1.0f, 1.0f)) * 0.577f; };
 	m_lsTremorYaw += -theta * m_lsTremorYaw * dt + sigma * 2.4f * sqrtf(dt) * gauss();
@@ -1156,7 +1163,7 @@ void CCSBot::LsHandUpdate(float goalYaw, float goalPitch, float dt)
 			off = sqrtf(offY * offY + 1.56f * offP * offP);
 			// (still off the target: a correction, slower and smaller, at most two, after the
 			// moment it takes to see the miss)
-			if (off > Q_max(0.5f, 0.35f * width) && h.corrections < 2 && (fight || !calm || off > 2.5f))
+			if (off > Q_max(fight ? 0.25f : 0.5f, 0.35f * width) && h.corrections < 2 && (fight || !calm || off > 2.5f))
 			{
 				h.corrections++;
 				h.restUntil = now + RANDOM_FLOAT(0.01f, 0.03f);
@@ -1164,7 +1171,9 @@ void CCSBot::LsHandUpdate(float goalYaw, float goalPitch, float dt)
 			else
 			{
 				h.corrections = 0;
-				h.restUntil = calm ? now + RANDOM_FLOAT(0.12f, 0.45f) + 0.5f * LsTrait(90) : now + RANDOM_FLOAT(0.02f, 0.08f);
+				// (alert but not fighting, which a deathmatch mostly is: a look is held a moment too,
+				// though shorter than a calm one)
+				h.restUntil = calm ? now + RANDOM_FLOAT(0.12f, 0.45f) + 0.5f * LsTrait(90) : fight ? now + RANDOM_FLOAT(0.02f, 0.08f) : now + RANDOM_FLOAT(0.12f, 0.35f) + 0.2f * LsTrait(90);
 			}
 		}
 	}
@@ -1172,7 +1181,7 @@ void CCSBot::LsHandUpdate(float goalYaw, float goalPitch, float dt)
 	if (!h.moving)
 	{
 		// when to move: a big change at once; a small one only past the dead zone, after a rest
-		float deadZone = fight ? Q_max(0.4f, 0.5f * width) * (1.6f - 0.8f * skill) : calm ? 3.0f + 3.5f * LsTrait(91) : 1.5f;
+		float deadZone = fight ? Q_max(0.2f, 0.5f * width) * (1.6f - 0.8f * skill) : calm ? 3.0f + 3.5f * LsTrait(91) : 2.5f + 1.5f * LsTrait(91);
 		// (a new thing to look at, calmly: a reaction first, mostly quick, now and then slow: a
 		// log-normal delay, shorter for the skilled. In a fight the stock reaction already applies)
 		float jump = sqrtf(NormalizeAngle(goalYaw - h.lastY) * NormalizeAngle(goalYaw - h.lastY) + NormalizeAngle(goalPitch - h.lastP) * NormalizeAngle(goalPitch - h.lastP));
@@ -1192,9 +1201,16 @@ void CCSBot::LsHandUpdate(float goalYaw, float goalPitch, float dt)
 			// against a looser target than the one aimed at: about 10 degrees calm, three times the
 			// enemy's size in a fight. Measured against a person: about 45 deg per 0.1 s at the peak
 			// of a big turn, about 5 on a small adjustment)
-			float b = (0.08f + 0.07f * (1.0f - skill)) * (fight ? 0.9f : calm ? 1.05f : 0.95f);
-			float flickWidth = h.corrections > 0 ? width : fight ? Q_max(6.0f, 3.0f * width) : 10.0f;
+			// (fight 0.62, calm 0.8: batch 22 peaked at about 30 deg per 0.1 s on big fight turns and
+			// 38 calm, against a person's 45)
+			float b = (0.08f + 0.07f * (1.0f - skill)) * (fight ? 0.62f : calm ? 0.8f : 0.72f);
+			float flickWidth = h.corrections > 0 ? width : fight ? Q_max(8.0f, 3.0f * width) : 10.0f;
 			float dur = 0.1f + b * log2f(1.0f + off / flickWidth);
+			// (and a hand has a top speed: a minimum-jerk stroke peaks at 1.875 times its average,
+			// so a long turn takes long enough to stay under it; quicker for the skilled and in a
+			// fight. Keeps the faster flicks from becoming inhuman snaps)
+			float vmax = fight ? 500.0f + 250.0f * skill : 420.0f + 150.0f * skill;
+			dur = Q_max(dur, 1.875f * off / vmax);
 			if (m_lsPuppet.fast && now < m_lsPuppet.lookUntil)
 				dur *= 0.6f;
 			if (h.corrections > 0)

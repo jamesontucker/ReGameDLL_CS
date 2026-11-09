@@ -1050,6 +1050,7 @@ public:
 	const CCSBotManager::Zone *LsQuietZone();		// the bomb site with the fewest teammates at it (ties at random)
 	bool LsPlantHere();
 	const CCSBotManager::Zone *LsPlantOrder() const;	// where a person told it to plant, this round
+	bool LsRetakeRush();							// a CT after the plant who can still make it to the bomb: no dawdling
 	void LsHideNearBomb(const Vector &bomb);		// guarding the planted bomb: a spot near it no teammate has (stock: the same best spot for all)								// at the site with the bomb: plant now, or walk in to a better spot first
 	bool LsFetchesBomb();							// one of the nearest two Ts to a dropped bomb
 	// (end team)

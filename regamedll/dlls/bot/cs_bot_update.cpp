@@ -228,6 +228,9 @@ void CCSBot::Update()
 	LsTeamTick();	// Loner-Strike: team play
 	LsOrderTick();	// Loner-Strike: a person's order
 	LsFlankCheck();	// Loner-Strike: shot from the side
+	// (Loner-Strike: a retake against the clock is run, not walked)
+	if (LsRetakeRush() && !IsAttacking())
+		ForceRun(0.5f);
 	if (m_isEnemyVisible && m_enemy.IsValid())
 		m_lsEnemyDeaths = m_enemy->m_iDeaths;	// Loner-Strike
 	LsFloorGunTick();	// Loner-Strike: fy_ maps
