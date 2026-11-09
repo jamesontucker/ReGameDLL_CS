@@ -489,9 +489,9 @@ bool CCSBot::LsRetakeRush()
 //
 // A pub team that wins a site gets there together: they gather a short way out (each on its
 // own way in: long and catwalk, say), wait for the others, and go in at once, so the CTs
-// holding it face several at a time instead of one after another. Ts within reach of the
-// round's site stop out of sight and wait; three waiting (fewer if fewer are left), the first
-// waiting ten seconds or so, or the clock getting short, and they all go. Lurkers on the
+// holding it face several at a time instead of one after another. Ts 400-900 units' walk from
+// the round's site, where the site can't see them, stop and wait; three waiting (fewer if fewer
+// are left), the first waiting five to eight seconds, or the clock getting short, and they all go. Lurkers on the
 // other site, and a team down to one or two, don't wait.
 
 static int s_execRound = -1;
@@ -533,7 +533,20 @@ void CCSBot::LsExecuteTick()
 
 	// gone already: one who comes up after it goes straight in
 	float dist = float((site->m_center - pev->origin).Length2D());
-	bool closeBy = dist < 1100.0f;
+	// (close by the way it's walking, not as the crow flies: a site across a wall or water
+	// is far; and out of the site's sight, so it waits where it can't be seen. A straight
+	// 1,100 units stopped Ts in the open on inferno and aztec)
+	bool closeBy = false;
+	if (HasPath() && (GetPathEndpoint() - site->m_center).IsLengthLessThan(900.0f))
+	{
+		float walk = GetPathDistanceRemaining();
+		if (walk > 400.0f && walk < 900.0f)
+		{
+			TraceResult tr;
+			UTIL_TraceLine(GetEyePosition(), site->m_center + Vector(0, 0, 48.0f), ignore_monsters, ENT(pev), &tr);
+			closeBy = tr.flFraction < 1.0f;
+		}
+	}
 	if (s_execGoAt > 0.0f)
 	{
 		if (dist < 1700.0f)
@@ -564,7 +577,7 @@ void CCSBot::LsExecuteTick()
 	}
 	float left = LsTimeLeft();
 	bool go = alive <= 2 || left < 45.0f || staged >= Q_min(3, alive)
-		|| (s_execFirstAt > 0.0f && now - s_execFirstAt > 9.0f + 4.0f * LsTrait(90));
+		|| (s_execFirstAt > 0.0f && now - s_execFirstAt > 5.0f + 3.0f * LsTrait(90));
 	if (go && (staged > 0 || alive <= 2 || left < 45.0f))
 	{
 		s_execGoAt = now;
@@ -577,7 +590,8 @@ void CCSBot::LsExecuteTick()
 		m_lsStagedRound = round;
 		if (s_execFirstAt <= 0.0f)
 			s_execFirstAt = now;
-		Hide(GetLastKnownArea(), 25.0f, 300.0f);
+		// (where it stands, out of the way of the path: a few seconds at most)
+		Hide(GetLastKnownArea(), 10.0f, 150.0f);
 		LsWhy("stage");
 	}
 }
