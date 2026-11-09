@@ -1051,6 +1051,10 @@ public:
 	bool LsPlantHere();
 	const CCSBotManager::Zone *LsPlantOrder() const;	// where a person told it to plant, this round
 	bool LsRetakeRush();							// a CT after the plant who can still make it to the bomb: no dawdling
+	bool LsExecuting();								// a T in the round's site push: no dawdling
+	bool LsRushing() { return LsRetakeRush() || LsExecuting(); }
+	bool LsLurksOtherSite() { return LsStyle() == LS_STYLE_LURKER ? LsTrait(89) < 0.6f : LsTrait(89) < 0.12f; }
+	void LsExecuteTick();							// Ts staging near the site, then going in together
 	void LsHideNearBomb(const Vector &bomb);		// guarding the planted bomb: a spot near it no teammate has (stock: the same best spot for all)								// at the site with the bomb: plant now, or walk in to a better spot first
 	bool LsFetchesBomb();							// one of the nearest two Ts to a dropped bomb
 	// (end team)
@@ -1299,6 +1303,8 @@ private:
 	int m_lsRetakeRound = -1;						// the round it waited for teammates before a retake
 	int m_lsPickupRound = -1;						// the round it went for a dropped gun after
 	int m_lsTeamRound = -1;							// the round LsTeamTick last saw
+	int m_lsStagedRound = -1;						// the round it waited near the site for the push
+	int m_lsPushRound = -1;							// the round it went in with the push
 	float m_lsDefuseNoticeAt = -1.0f;				// when it takes in the defuse it hears
 	int m_lsWinReloadRound = -1;
 	int m_lsMoraleHideRound = -1;					// the round it hid on low morale (once is enough)

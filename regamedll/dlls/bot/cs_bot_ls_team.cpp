@@ -485,11 +485,103 @@ bool CCSBot::LsRetakeRush()
 	return dist / 230.0f + defuse + 1.0f < left;
 }
 
+// ---- the Ts' site execute ------------------------------------------------------------
+//
+// A pub team that wins a site gets there together: they gather a short way out (each on its
+// own way in: long and catwalk, say), wait for the others, and go in at once, so the CTs
+// holding it face several at a time instead of one after another. Ts within reach of the
+// round's site stop out of sight and wait; three waiting (fewer if fewer are left), the first
+// waiting ten seconds or so, or the clock getting short, and they all go. Lurkers on the
+// other site, and a team down to one or two, don't wait.
+
+static int s_execRound = -1;
+static float s_execFirstAt = 0.0f;
+static float s_execGoAt = 0.0f;
+
+/// The round's push: (re)set for a new round.
+static void LsExecuteRound()
+{
+	if (s_execRound != LsRoundSerial())
+	{
+		s_execRound = LsRoundSerial();
+		s_execFirstAt = 0.0f;
+		s_execGoAt = 0.0f;
+	}
+}
+
+bool CCSBot::LsExecuting()
+{
+	return m_iTeam == TERRORIST && m_lsPushRound == LsRoundSerial() && !TheCSBots()->IsBombPlanted() && IsAlive();
+}
+
+void CCSBot::LsExecuteTick()
+{
+	if (!LsFight() || !LsTeamGame() || m_iTeam != TERRORIST || !IsAlive() || TheCSBots()->GetScenario() != CCSBotManager::SCENARIO_DEFUSE_BOMB
+		|| TheCSBots()->IsBombPlanted() || CSGameRules()->IsFreezePeriod() || LsOrderActive())
+		return;
+	LsExecuteRound();
+	int round = LsRoundSerial();
+	float now = gpGlobals->time;
+	const CCSBotManager::Zone *site = LsTSite();
+	if (!site || m_lsPushRound == round || LsLurksOtherSite())
+		return;
+
+	// gone already: one who comes up after it goes straight in
+	float dist = float((site->m_center - pev->origin).Length2D());
+	bool closeBy = dist < 1100.0f;
+	if (s_execGoAt > 0.0f)
+	{
+		if (dist < 1700.0f)
+		{
+			m_lsPushRound = round;
+			const Vector *pos = TheCSBots()->GetRandomPositionInZone(site);
+			if (pos && !IsAttacking())
+			{
+				if (IsCarryingBomb())
+					SetTask(PLANT_BOMB);
+				MoveTo(pos, FASTEST_ROUTE);
+				LsWhy("execute");
+			}
+		}
+		return;
+	}
+
+	// the team left and the clock: whether to wait at all
+	int alive = 0, staged = 0;
+	for (int i = 1; i <= gpGlobals->maxClients; i++)
+	{
+		CBasePlayer *pT = UTIL_PlayerByIndex(i);
+		if (!pT || FNullEnt(pT->pev) || !pT->IsAlive() || pT->m_iTeam != TERRORIST)
+			continue;
+		alive++;
+		if (pT->IsBot() && static_cast<CCSBot *>(pT)->m_lsStagedRound == round)
+			staged++;
+	}
+	float left = LsTimeLeft();
+	bool go = alive <= 2 || left < 45.0f || staged >= Q_min(3, alive)
+		|| (s_execFirstAt > 0.0f && now - s_execFirstAt > 9.0f + 4.0f * LsTrait(90));
+	if (go && (staged > 0 || alive <= 2 || left < 45.0f))
+	{
+		s_execGoAt = now;
+		return;
+	}
+
+	// near the site, not in a fight: wait out of sight for the others
+	if (closeBy && m_lsStagedRound != round && !IsAttacking() && !IsEnemyVisible() && GetTimeSinceAttacked() > 3.0f)
+	{
+		m_lsStagedRound = round;
+		if (s_execFirstAt <= 0.0f)
+			s_execFirstAt = now;
+		Hide(GetLastKnownArea(), 25.0f, 300.0f);
+		LsWhy("stage");
+	}
+}
+
 bool CCSBot::LsTeamHeard(GameEventType event, CBasePlayer *pPlayer)
 {
 	if (!LsFight() || !LsTeamGame() || event != EVENT_WEAPON_FIRED || !pPlayer || pPlayer == this || !pPlayer->IsAlive())
 		return false;
-	if (!LsFree() || TheCSBots()->IsRoundOver() || LsRetakeRush())
+	if (!LsFree() || TheCSBots()->IsRoundOver() || LsRushing())
 		return false;
 	// (a bot shooting glass, the sky or a wall isn't in a fight)
 	if (pPlayer->IsBot() && !static_cast<CCSBot *>(pPlayer)->IsAttacking())

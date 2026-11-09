@@ -145,7 +145,7 @@ static float LsCornerRoom(CCSBot *me, const Vector &corner, const Vector2D &dir,
 // swing or a line; true while a jiggle is moving the bot itself
 bool CCSBot::LsCornerMoves(Vector *goal)
 {
-	if (!LsFight() || !HasPath() || LsRetakeRush())
+	if (!LsFight() || !HasPath() || LsRushing())
 		return false;
 	float now = gpGlobals->time;
 
@@ -344,7 +344,7 @@ public:
 // from the ways into the area (its approach areas); the stock pick if none is off-angle
 const Vector *CCSBot::LsOffAngle(const Vector *stockPick, const Vector *pos, CNavArea *source, float range)
 {
-	if (!LsFight() || LsSolo() || !stockPick || !source || !pos || IsSniper() || LsRetakeRush())
+	if (!LsFight() || LsSolo() || !stockPick || !source || !pos || IsSniper() || LsRushing())
 		return stockPick;
 
 	float skill = LsSkill();

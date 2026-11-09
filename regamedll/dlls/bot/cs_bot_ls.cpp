@@ -1244,7 +1244,7 @@ CNavArea *CCSBot::LsPickHuntArea()
 			// (Ts work toward the round's site, as a pub team drifts to "b" together, each by its
 			// own way; the odd lurker takes the other one)
 			const CCSBotManager::Zone *site = LsTSite();
-			bool other = LsStyle() == LS_STYLE_LURKER ? LsTrait(89) < 0.6f : LsTrait(89) < 0.12f;
+			bool other = LsLurksOtherSite();
 			for (int z = 0; z < TheCSBots()->GetZoneCount() && kept < 16; z++)
 			{
 				const CCSBotManager::Zone *zone = TheCSBots()->GetZone(z);
