@@ -269,7 +269,8 @@ void MoveToState::OnUpdate(CCSBot *me)
 		case CCSBot::PLANT_BOMB:
 		{
 			// if we are at bombsite with the bomb, plant it
-			if (me->IsAtBombsite() && me->IsCarryingBomb())
+			// (Loner-Strike: not on the first step in: LsPlantHere)
+			if (me->IsAtBombsite() && me->IsCarryingBomb() && me->LsPlantHere())
 			{
 				me->PlantBomb();
 				return;

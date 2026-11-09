@@ -174,8 +174,12 @@ void IdleState::OnUpdate(CCSBot *me)
 				// if we're at a bomb site, plant the bomb
 				if (me->IsAtBombsite())
 				{
-					// plant it
+					// (Loner-Strike: into the site to a spot with some cover first, as people do)
 					me->SetTask(CCSBot::PLANT_BOMB);
+					if (!me->LsPlantHere())
+						return;
+
+					// plant it
 					me->PlantBomb();
 
 					// radio to the team

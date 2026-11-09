@@ -1048,6 +1048,7 @@ public:
 	void LsFloorGunTick();							// fy_ maps: no gun at the start of a round, it runs for one on the floor
 	void LsStalemateTick();						// rounds with no objective: a long quiet ends with someone going looking
 	const CCSBotManager::Zone *LsQuietZone();		// the bomb site with the fewest teammates at it (ties at random)
+	bool LsPlantHere();								// at the site with the bomb: plant now, or walk in to a better spot first
 	bool LsFetchesBomb();							// one of the nearest two Ts to a dropped bomb
 	// (end team)
 	// Loner-Strike nades (cs_bot_ls_nades.cpp)
@@ -1061,7 +1062,8 @@ public:
 	void LsNadeStart(int id, const Vector &aim, float pause);
 	void LsNadeStop();
 	void LsStartOver();							// respawned or teleported: what it was in the middle of ends
-	bool LsBlindTick();							// flashed: its own way of coping (true: dealt with this frame)
+	bool LsBlindTick();
+	void LsSniperStep();							// after a sniper shot: a step aside while the zoom comes back							// flashed: its own way of coping (true: dealt with this frame)
 	bool LsKnifeOnly() const { return !m_rgpPlayerItems[PRIMARY_WEAPON_SLOT] && !m_rgpPlayerItems[PISTOL_SLOT]; }	// a knife and nothing else to shoot with
 	bool LsTossing() const { return m_isWaitingToTossGrenade; }
 	void LsHeAway(float secs) { m_lsHeBackAt = gpGlobals->time + secs; m_lsHeBlockedSince = -1.0f; }	// Gun Game's grenade put away for a while
@@ -1213,6 +1215,8 @@ private:
 	float m_lsMapCheckedAt = -1.0f;						// the frame the map was last checked (once a frame is enough)
 	float m_lsDiedAt = -100.0f;						// when it was last killed
 	bool m_lsWasBlind = false;
+	float m_lsSnipeStepAt = -10.0f;
+	int m_lsSnipeStepDir = 0;
 	float m_lsBlindTurnAt = 0.0f;					// flashed: next change of what it's doing
 	int m_lsBlindWay = 0;
 	bool m_lsBlindSpray = false;
@@ -1258,6 +1262,10 @@ private:
 	float m_lsDefuseHeardLast = -10.0f;			// last time it was told of a defuse going on
 	int m_lsForTimeRoll = -1;						// this fight: does it play for time (-1 not rolled)
 	float m_lsLateBombAt = 0.0f;					// a late carrier: next look at whether it's off to a site
+	int m_lsClockRound = -1;						// the round a CT settled in to run the clock down
+	int m_lsPlantRound = -1;						// the round it picked a plant spot
+	Vector m_lsPlantSpot;
+	float m_lsPlantBy = 0.0f;						// ...and plants wherever it is by then
 	int m_lsFloorRound = -1;						// the round it went for a floor gun
 	int m_lsYieldRound = -1;						// the round its kit yields were counted for
 	int m_lsYields = 0;							// times it left the bomb to a kit this round (twice at most)

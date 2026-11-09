@@ -120,6 +120,17 @@ void InvestigateNoiseState::OnUpdate(CCSBot *me)
 			// can see noise position
 			me->PrintIfWatched("Noise location is clear.\n");
 			//me->ForgetNoise();
+			// (Loner-Strike: a moment there, listening, eyes on where it came from; the
+			// careful longer)
+			if (LsFight() && !me->IsHurrying())
+			{
+				float secs = RANDOM_FLOAT(0.8f, 1.5f) + 2.0f * (1.0f - me->LsAggro());
+				Vector look = m_checkNoisePosition + Vector(0, 0, HalfHumanHeight);
+				me->SetLookAt("Loner-Strike: listening", &look, PRIORITY_MEDIUM, secs);
+				Vector here = me->pev->origin;
+				me->Hide(&here, secs, true);
+				return;
+			}
 			me->Idle();
 			return;
 		}

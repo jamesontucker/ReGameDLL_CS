@@ -915,3 +915,20 @@ bool CCSBot::LsBlindTick()
 	}
 	return true;
 }
+
+// A sniper shot: people don't stand in the same doorway for the bolt to come back and get
+// traded. The better ones step aside (left or right, one way per shot) and peek again from a
+// little over; newer ones stand there
+void CCSBot::LsSniperStep()
+{
+	if (!LsFight())
+		return;
+	float now = gpGlobals->time;
+	if (now - m_lsSnipeStepAt > 1.2f)
+		m_lsSnipeStepDir = RANDOM_FLOAT(0.0f, 1.0f) < 0.15f + 0.65f * LsSkill() ? RANDOM_LONG(1, 2) : 0;
+	m_lsSnipeStepAt = now;
+	if (m_lsSnipeStepDir == 1)
+		StrafeLeft();
+	else if (m_lsSnipeStepDir == 2)
+		StrafeRight();
+}

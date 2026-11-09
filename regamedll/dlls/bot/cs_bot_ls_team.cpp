@@ -52,6 +52,21 @@ void CCSBot::LsTeamTick()
 		LsWhy("late-bomb");
 	}
 
+	// a CT with the clock on its side (no plant, little time left): holds where it is, as people
+	// do, rather than hunting into the Ts; the bold few keep pushing. A plant still calls it off
+	if (m_iTeam == CT && m_lsClockRound != round && TheCSBots()->GetScenario() == CCSBotManager::SCENARIO_DEFUSE_BOMB
+		&& !TheCSBots()->IsBombPlanted() && !CSGameRules()->IsFreezePeriod() && LsTimeLeft() < 22.0f && !IsAttacking()
+		&& !LsOrderActive() && (IsHunting() || (IsMovingTo() && GetTask() != DEFUSE_BOMB)))
+	{
+		m_lsClockRound = round;
+		if (RANDOM_FLOAT(0.0f, 1.0f) > 0.15f + 0.4f * LsAggro() - (LsMatch() ? 0.2f : 0.0f))
+		{
+			SetTask(HOLD_POSITION);
+			Hide(GetLastKnownArea(), LsTimeLeft() + 5.0f, 500.0f, true);
+			LsWhy("hold-the-clock");
+		}
+	}
+
 	// a teammate's call it looked into first: on its way now, unless something came up
 	if (m_lsRotateAt > 0.0f && now >= m_lsRotateAt)
 	{
@@ -552,4 +567,50 @@ const CCSBotManager::Zone *CCSBot::LsQuietZone()
 		}
 	}
 	return best ? best : TheCSBots()->GetRandomZone();
+}
+
+// At a bomb site with the bomb. Stock bots plant on the first step in, in the open at the
+// entrance; people walk in to a spot with some cover first (a corner, behind a box, the far
+// side). It plants straight away when shot at lately, with an enemy in sight, with the clock
+// short, as a newer player, or once at its spot (or after 6 s of trying)
+bool CCSBot::LsPlantHere()
+{
+	if (!LsFight())
+		return true;
+	float now = gpGlobals->time;
+	int round = CSGameRules()->m_iTotalRoundsPlayed;
+	if (GetTimeSinceAttacked() < 3.0f || now - m_lsShotAtAt < 3.0f || IsEnemyVisible() || LsTimeLeft() < 12.0f || LsSkill() < 0.25f)
+		return true;
+	if (m_lsPlantRound == round)
+		return (m_lsPlantSpot - pev->origin).Make2D().IsLengthLessThan(70.0f) || now > m_lsPlantBy || !IsMovingTo();
+	m_lsPlantRound = round;
+	const CCSBotManager::Zone *zone = TheCSBots()->GetZone(&pev->origin);
+	if (!zone)
+		return true;
+	// (a few spots in the site: further in from where it came in, and near a hiding spot)
+	CNavArea *best = nullptr;
+	float bestScore = -1e9f;
+	for (int t = 0; t < 8; t++)
+	{
+		CNavArea *pArea = TheCSBots()->GetRandomAreaInZone(zone);
+		if (!pArea)
+			continue;
+		float d = float((*pArea->GetCenter() - pev->origin).Length2D());
+		if (d < 160.0f || d > 900.0f)
+			continue;
+		float score = d + RANDOM_FLOAT(0.0f, 250.0f) + (pArea->GetHidingSpotList()->size() ? 300.0f : 0.0f);
+		if (score > bestScore)
+		{
+			bestScore = score;
+			best = pArea;
+		}
+	}
+	if (!best)
+		return true;
+	m_lsPlantSpot = *best->GetCenter();
+	m_lsPlantBy = now + 6.0f;
+	MoveTo(&m_lsPlantSpot, FASTEST_ROUTE);
+	SetTask(PLANT_BOMB);
+	LsWhy("plant-spot");
+	return false;
 }

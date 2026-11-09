@@ -396,6 +396,8 @@ void AttackState::OnUpdate(CCSBot *me)
 		if (me->m_bResumeZoom)
 		{
 			m_scopeTimestamp = gpGlobals->time;
+			// (Loner-Strike: the better ones step out of the line while the bolt comes back)
+			me->LsSniperStep();
 			return;
 		}
 
