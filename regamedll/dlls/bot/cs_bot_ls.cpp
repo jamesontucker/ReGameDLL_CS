@@ -75,7 +75,6 @@ bool LsFight()
 	return cv_bot_ls_fight.value > 0.0f;
 }
 
-// Every bot for itself (deathmatch-type modes, bot_ls_solo)
 // How much who a bot is shapes how it plays: the app's personality slider (gm_personality,
 // 0-200): at 0 the bot style alone, at 100 mostly the person, at 200 nearly all of it
 static float LsPersonWeight()
@@ -91,6 +90,20 @@ static float LsPersonWeight()
 // playstyle, temper...), partly the bot style's profile, so a Newbie lobby's rusher and a
 // Gods lobby's rusher still differ. A team style (profile teamwork of 45 and up, as
 // Matchmaking gives) keeps at least that much teamwork, whoever the bot is
+// A mode with teams and objectives (not a deathmatch-type one, whatever bot_ls_solo says)
+bool CCSBot::LsTeamGame() const
+{
+	return TheCSBots() && TheCSBots()->GetScenario() != CCSBotManager::SCENARIO_DEATHMATCH;
+}
+
+// Free to head somewhere for team play: not in a fight, not on a job that mustn't be left
+// (the bomb, hostages, guarding the plant), not saving its gun, not under a plugin's control
+bool CCSBot::LsFree() const
+{
+	return !IsAttacking() && !IsBusy() && !LsBusy() && !IsCarryingBomb() && !m_lsSaving && !LsPuppetActive()
+		&& GetTask() != GUARD_TICKING_BOMB && !IsUsingLadder() && m_state != &m_plantBombState && m_state != &m_defuseBombState;
+}
+
 int CCSBot::LsStyle() const
 {
 	return LsPersonWeight() > 0.0f ? m_lsStyle : -1;
@@ -113,6 +126,7 @@ float CCSBot::LsTeamwork() const
 	return profile >= 0.45f ? Q_max(profile, mixed) : mixed;
 }
 
+// Every bot for itself (deathmatch-type modes, bot_ls_solo)
 bool LsSolo()
 {
 	return cv_bot_ls_solo.value > 0.0f && TheCSBots() && TheCSBots()->GetScenario() == CCSBotManager::SCENARIO_DEATHMATCH;
@@ -583,8 +597,12 @@ void Bot_LsServerCommand()
 	{
 		CBasePlayer *pPlayer = UTIL_PlayerByIndex(Q_atoi(CMD_ARGV(1)));
 		if (pPlayer && pPlayer->IsBot())
-			static_cast<CCSBot *>(pPlayer)->LsSetPersona(Q_max(0.0f, Q_min(1.0f, LsArg(3, -1.0f))), Q_max(0.0f, Q_min(1.0f, LsArg(4, -1.0f))),
+		{
+			// (a missing value stays "not told": -1, so the profile's is used)
+			float aggro = LsArg(3, -1.0f), team = LsArg(4, -1.0f);
+			static_cast<CCSBot *>(pPlayer)->LsSetPersona(aggro < 0.0f ? -1.0f : Q_min(1.0f, aggro), team < 0.0f ? -1.0f : Q_min(1.0f, team),
 				int(LsArg(5, -1.0f)), int(LsArg(6, 1.0f)), int(LsArg(7, 1.0f)));
+		}
 		return;
 	}
 
@@ -1205,7 +1223,10 @@ void CCSBot::LsShotAt(CBasePlayer *pShooter, const Vector &impact)
 	if (m_state == &m_plantBombState || m_state == &m_defuseBombState)
 		return;
 
-	if (IsVisible(pShooter, false))
+	// running for cover or saving its gun: it notices (looks), but keeps going; and it only
+	// takes the fight to a shooter in front of it (not with eyes in the back of its head)
+	bool keepsGoing = GetDisposition() == IGNORE_ENEMIES || m_lsSaving;
+	if (!keepsGoing && IsVisible(pShooter, true))
 	{
 		Attack(pShooter);
 		return;
@@ -1274,8 +1295,11 @@ bool CCSBot::LsObjectiveThreat(bool defusing)
 	float done = (now - Q_max(GetStateTimestamp(), m_lsObjUseAt)) / takes;
 	if (done > 0.75f)
 		return false;
-	// the bomb about to go: nothing else matters
-	if (defusing && TheCSBots()->GetBombTimeLeft() < takes + 1.0f)
+	// the bomb about to go: nothing else matters (a stop costs up to 2.5 s); and twice is
+	// enough for one plant or defuse
+	if (defusing && TheCSBots()->GetBombTimeLeft() < takes + 3.5f)
+		return false;
+	if (m_lsObjStops >= 2)
 		return false;
 	float bold = 0.5f * LsAggro() + 0.5f * LsTrait(30);
 	float stop = threat * (1.2f - 0.6f * bold) * (LsMatch() ? 1.1f : 1.0f);
@@ -1294,6 +1318,7 @@ bool CCSBot::LsObjectiveThreat(bool defusing)
 	SetLookAt("Loner-Strike: checking", &look, PRIORITY_HIGH, secs);
 	m_lsCheckUntil = now + secs;
 	m_lsObjUseAt = m_lsCheckUntil;
+	m_lsObjStops++;
 	return true;
 }
 
@@ -1336,7 +1361,7 @@ bool CCSBot::LsBangTick()
 	if (now >= m_lsBangUntil)
 		return false;
 	CBasePlayerWeapon *pWeapon = GetActiveWeapon();
-	if (!pWeapon || IsActiveWeaponClipEmpty() || !LsBangGun(pWeapon))
+	if (!IsAlive() || !pWeapon || IsActiveWeaponClipEmpty() || !LsBangGun(pWeapon) || IsFriendInLineOfFire())
 	{
 		m_lsBangUntil = 0.0f;
 		return false;
@@ -1437,15 +1462,15 @@ void CCSBot::LsHeard(GameEventType event, CBasePlayer *pPlayer, float dist)
 			m_lsPushUntil = now + RANDOM_FLOAT(1.0f, 2.0f);
 		return;
 	}
-	if (busy || IsVisible(pPlayer, false))
+	if (busy || !LsFree())
 		return;
 	if (event != EVENT_WEAPON_RELOADED && event != EVENT_PLAYER_FOOTSTEP && event != EVENT_WEAPON_FIRED)
 		return;
-	if (dist > 900.0f)
+	if (dist > 900.0f || IsVisible(pPlayer, false))
 		return;
 
 	// where they are, as heard (less exact further away)
-	float err = dist * 0.08f;
+	float err = dist * 0.15f;
 	Vector heard = pPlayer->pev->origin + Vector(RANDOM_FLOAT(-err, err), RANDOM_FLOAT(-err, err), 0.0f);
 
 	if (event == EVENT_WEAPON_RELOADED && aggro > 0.6f && !IsCarryingBomb() && RANDOM_FLOAT(0.0f, 1.0f) < 0.5f + 0.4f * (aggro - 0.6f))
@@ -1457,7 +1482,7 @@ void CCSBot::LsHeard(GameEventType event, CBasePlayer *pPlayer, float dist)
 	}
 
 	// the good ones spray a thin wall they know someone's behind
-	if (dist < 650.0f && skill > 0.55f && LsTrait(33) < skill - 0.3f && now - m_lsBangHeardAt > 6.0f && RANDOM_FLOAT(0.0f, 1.0f) < 0.35f)
+	if (dist < 650.0f && skill > 0.65f && LsTrait(33) < skill - 0.35f && now - m_lsBangHeardAt > 6.0f && RANDOM_FLOAT(0.0f, 1.0f) < 0.35f)
 	{
 		m_lsBangHeardAt = now;
 		if (LsBangThrough(heard + Vector(0, 0, 10.0f)))

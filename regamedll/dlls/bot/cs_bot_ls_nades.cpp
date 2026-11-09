@@ -396,11 +396,12 @@ static bool LsCtLine(int zoneIndex, Vector *spot)
 
 	if (!s_tried[zoneIndex])
 	{
-		s_tried[zoneIndex] = true;
 		const CCSBotManager::Zone *zone = TheCSBots()->GetZone(zoneIndex);
 		CBaseEntity *pSpawn = UTIL_FindEntityByClassname(nullptr, "info_player_start");
 		CNavArea *from = pSpawn ? TheNavAreaGrid.GetNearestNavArea(&pSpawn->pev->origin) : nullptr;
 		CNavArea *to = TheNavAreaGrid.GetNearestNavArea(&zone->m_center);
+		// (tried for good once the map's nav is there to try it on)
+		s_tried[zoneIndex] = from && to;
 		ShortestPathCost cost;
 		if (from && to && from != to && NavAreaBuildPath(from, to, &zone->m_center, cost))
 		{
@@ -431,6 +432,10 @@ void CCSBot::LsNadeStart(int id, const Vector &aim, float pause)
 		SelectItem(LsNadeName(id));
 	m_lsNadeId = id;
 	m_lsNadeAim = aim;
+	// (kept as a direction from here: it keeps walking while the pin comes out)
+	m_lsNadeFrom = pev->origin;
+	m_lsNadeAng = UTIL_VecToAngles(aim - GetEyePosition());
+	m_lsNadeAng.x = -m_lsNadeAng.x;
 	m_lsNadePhase = 1;
 	m_lsNadePhaseAt = gpGlobals->time;
 	m_lsNadeNextAt = gpGlobals->time + pause;
@@ -478,6 +483,16 @@ void CCSBot::LsNadeUpdate()
 		}
 		if (!m_isWaitingToTossGrenade && (pWeapon->m_flStartThrow <= 0.0f || now - pWeapon->m_flStartThrow < 0.55f))
 			return;
+
+		// walked on too far since it planned this (the flight, and who'd be facing a flash,
+		// were worked out from there): called off; otherwise the same direction from here
+		if ((pev->origin - m_lsNadeFrom).IsLengthGreaterThan(96.0f))
+		{
+			LsNadeStop();
+			return;
+		}
+		UTIL_MakeVectors(m_lsNadeAng);
+		m_lsNadeAim = GetEyePosition() + gpGlobals->v_forward * 300.0f;
 
 		m_lsNadeAmmoType = pWeapon->m_iPrimaryAmmoType;
 		m_lsNadeAmmo = m_rgAmmo[m_lsNadeAmmoType];
@@ -586,8 +601,10 @@ void CCSBot::LsNadeUpdate()
 
 	// a T smoke on the way CTs come into the site it's heading for
 	int site = LsNadeSite();
-	if (site >= 0 && !m_lsNadeSmokeRolled && LsHasNade(WEAPON_SMOKEGRENADE) && elapsed > 5.0f && !LsWithin(s_lsTeamNadeAt[team][LS_SMOKE], 12.0f))
+	if (site >= 0 && !m_lsNadeSmokeRolled && now >= m_lsNadeRetryAt && LsHasNade(WEAPON_SMOKEGRENADE) && elapsed > 5.0f && !LsWithin(s_lsTeamNadeAt[team][LS_SMOKE], 12.0f))
 	{
+		// (planning simulates a lot of throws: not again for a while if this one doesn't fit)
+		m_lsNadeRetryAt = now + RANDOM_FLOAT(3.0f, 5.0f);
 		Vector line;
 		const Vector &center = TheCSBots()->GetZone(site)->m_center;
 		if (LsCtLine(site, &line))
@@ -657,7 +674,7 @@ void CCSBot::LsNadeUpdate()
 		{
 			float dist = float((*target - pev->origin).Length());
 			Vector aim, burst;
-			if (dist > 350.0f && dist < 1300.0f && LsPlanThrow(WEAPON_HEGRENADE, *target, 250.0f, &aim, &burst) && LsHeSafe(this, burst))
+			if (dist > 350.0f && dist < 1300.0f && now >= m_lsNadeRetryAt && (m_lsNadeRetryAt = now + RANDOM_FLOAT(2.0f, 4.0f), LsPlanThrow(WEAPON_HEGRENADE, *target, 250.0f, &aim, &burst)) && LsHeSafe(this, burst))
 			{
 				s_lsTeamNadeAt[team][LS_HE] = now;
 				m_lsNadeBurst = burst;
@@ -812,7 +829,7 @@ static bool LsPistolRound()
 void CCSBot::LsPlanBuy()
 {
 	m_lsBuyPlan = LS_BUY;
-	if (!LsFight() || LsSolo() || !CSGameRules() || !TheCSBots())
+	if (!LsFight() || !LsTeamGame() || !CSGameRules() || !TheCSBots())
 		return;
 
 	// the pistol round, or still holding a gun from last round: the usual
@@ -1001,6 +1018,8 @@ void CCSBot::LsSaveCheck()
 		{
 			m_lsSaving = false;
 			SetDisposition(ENGAGE_AND_INVESTIGATE);
+			if (IsHiding())
+				Idle();
 			return;
 		}
 		if (IsAttacking() || IsDefusingBomb())

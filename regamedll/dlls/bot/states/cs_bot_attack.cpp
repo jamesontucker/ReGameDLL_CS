@@ -31,6 +31,7 @@
 // Begin attacking
 void AttackState::OnEnter(CCSBot *me)
 {
+	me->LsFightBegins();	// Loner-Strike
 	CBasePlayer *pEnemy = me->GetEnemy();
 
 	// store our posture when the attack began
@@ -211,9 +212,12 @@ void AttackState::OnUpdate(CCSBot *me)
 
 		// (Loner-Strike: in deathmatch everyone around is an enemy, so being outnumbered is
 		// normal: only pinned down and hurt makes someone fall back)
+		// (Loner-Strike: on a team map, a lone CT before the plant plays for time by its own
+		// roll, in place of stock's "outnumbered by two: always back off")
 		if (LsFight() && LsSolo()
 			? (isPinnedDown && me->pev->health < 35.0f)
-			: (isPinnedDown || me->LsPlayForTime() ||
+			: LsFight() ? (isPinnedDown || me->LsPlayForTime() || (me->IsOutnumbered() && m_isCoward))
+			: (isPinnedDown ||
 			(me->IsOutnumbered() && m_isCoward) ||
 			(me->OutnumberedCount() >= 2 && me->GetProfile()->GetAggression() < 1.0f)))
 		{

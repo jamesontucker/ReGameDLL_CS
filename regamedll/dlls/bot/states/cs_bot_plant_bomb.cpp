@@ -32,6 +32,7 @@
 void PlantBombState::OnEnter(CCSBot *me)
 {
 	me->Crouch();
+	me->LsObjectiveBegins();	// Loner-Strike
 	me->SetDisposition(CCSBot::SELF_DEFENSE);
 
 	float yaw = me->pev->v_angle.y;
@@ -56,6 +57,9 @@ void PlantBombState::OnUpdate(CCSBot *me)
 	// to deal with it, some risk it)
 	if (me->LsObjectiveThreat(false))
 		return;
+
+	// (back down to it after a check)
+	me->Crouch();
 
 	// if we aren't holding the C4, grab it, otherwise plant it
 	if (holdingC4)

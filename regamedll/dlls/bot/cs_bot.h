@@ -1109,6 +1109,10 @@ public:
 	bool LsRadioOk(GameEventType event);			// whether this radio message is sent (bot_ls_fight)
 	void LsShotAt(CBasePlayer *pShooter, const Vector &impact);	// enemy bullets landing or passing close
 	float LsObjUseAt() const { return m_lsObjUseAt; }	// planting/defusing started again then (after a threat)
+	void LsObjectiveBegins() { m_lsObjStops = 0; m_lsForTimeRoll = -1; }	// a plant or defuse starts
+	void LsFightBegins() { m_lsForTimeRoll = -1; }	// a new fight
+	bool LsTeamGame() const;						// a mode with teams and objectives (not deathmatch, whatever bot_ls_solo)
+	bool LsFree() const;							// free to go somewhere for team play: not busy, saving, puppeted
 	void LsCheckBeforeDefuse();						// a look round the site before defusing
 	bool LsObjectiveThreat(bool defusing);			// planting/defusing: a threat around it (true: stop for now)
 	void LsWhy(const char *why) { m_lsWhy = why; m_lsWhyAt = gpGlobals->time; }
@@ -1187,6 +1191,7 @@ private:
 	float m_lsTradeAt = -10.0f;						// last went to trade a teammate
 	int m_lsRetakeRound = -1;						// the round it waited for teammates before a retake
 	int m_lsPickupRound = -1;						// the round it went for a dropped gun after
+	int m_lsForTimeRoll = -1;						// this fight: does it play for time (-1 not rolled)
 	// (end team members)
 	// Loner-Strike nades (cs_bot_ls_nades.cpp): members
 	int m_lsNadePhase = 0;							// 0 none, 1 getting it out, 2 throwing, 3 looking away from its flash
@@ -1208,6 +1213,9 @@ private:
 	float m_lsClearSawAt = -10.0f;					// its enemy last seen with no smoke in the way
 	float m_lsSmokeLostAt = -10.0f;					// ...and lost (behind smoke or a wall) after that
 	float m_lsSmokeUntil = 0.0f;					// still shooting into the smoke where they went till then
+	Vector m_lsNadeFrom;							// where it was when it got the grenade out
+	Vector m_lsNadeAng;								// the throw's view angles, worked out there
+	float m_lsNadeRetryAt = 0.0f;					// a smoke or HE plan that didn't fit: not again till then
 	// (end nades members)
 	// Loner-Strike moves (cs_bot_ls_moves.cpp): members
 	Vector m_lsCornerAt;							// the corner the plan is for
@@ -1243,7 +1251,8 @@ private:
 	Vector m_lsShotFrom;							// ...fired from here
 	float m_lsCheckUntil = 0.0f;					// planting or defusing on hold: checking a threat until then
 	float m_lsObjUseAt = 0.0f;						// ...started using again then
-	float m_lsObjRolledAt = -1.0f;					// the last threat it decided about
+	float m_lsObjRolledAt = -1.0f;
+	int m_lsObjStops = 0;							// how often this plant or defuse has stopped for a threat					// the last threat it decided about
 	const char *m_lsWhy = "";						// why it's going where it's going (bot_ls_trace)
 	float m_lsWhyAt = 0.0f;
 	float m_lsTraceAt = 0.0f;

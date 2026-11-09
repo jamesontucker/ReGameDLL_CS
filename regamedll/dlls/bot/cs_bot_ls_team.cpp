@@ -11,7 +11,7 @@
 // Team play each frame (cheap: timers first)
 void CCSBot::LsTeamTick()
 {
-	if (!LsFight() || LsSolo() || !IsAlive())
+	if (!LsFight() || !LsTeamGame() || !IsAlive())
 		return;
 	float now = gpGlobals->time;
 	int round = CSGameRules()->m_iTotalRoundsPlayed;
@@ -20,7 +20,7 @@ void CCSBot::LsTeamTick()
 	if (m_lsRotateAt > 0.0f && now >= m_lsRotateAt)
 	{
 		m_lsRotateAt = 0.0f;
-		if (!IsAttacking() && !IsBusy() && !IsCarryingBomb())
+		if (LsFree())
 		{
 			MoveTo(&m_lsRotateTo, FASTEST_ROUTE);
 			LsWhy("rotate");
@@ -35,6 +35,8 @@ void CCSBot::LsTeamTick()
 		float best = 700.0f;
 		while ((pBox = UTIL_FindEntityByClassname(pBox, "weaponbox")))
 		{
+			if (FStrEq(STRING(pBox->pev->model), "models/w_backpack.mdl"))
+				continue;
 			float d = float((pBox->pev->origin - pev->origin).Length());
 			if (d < best)
 			{
@@ -50,8 +52,8 @@ void CCSBot::LsTeamTick()
 		return;
 	}
 
-	// a retake: a CT on its own waits for a teammate before going in (once a round), when
-	// there's time for it
+	// a retake: a CT on its own holds back a few seconds before going in (once a round, when
+	// there's time), so teammates can catch up rather than everyone going in one by one
 	if (m_iTeam == CT && TheCSBots()->IsBombPlanted() && m_lsRetakeRound != round && !IsAttacking() && !IsDefusingBomb()
 		&& GetFriendsRemaining() > 0 && GetNearbyFriendCount() == 0 && TheCSBots()->GetBombTimeLeft() > 22.0f)
 	{
@@ -78,7 +80,7 @@ void CCSBot::LsTeamTick()
 // to look and only go if they're not busy themselves (the fight they're in comes first)
 bool CCSBot::LsRadioAnswer()
 {
-	if (!LsFight() || LsSolo() || !m_radioSubject)
+	if (!LsFight() || !LsTeamGame() || !m_radioSubject)
 		return false;
 	switch (m_lastRadioCommand)
 	{
@@ -93,7 +95,7 @@ bool CCSBot::LsRadioAnswer()
 	case EVENT_RADIO_NEED_BACKUP:
 	case EVENT_RADIO_TAKING_FIRE:
 	{
-		if (IsAttacking() || IsBusy() || IsCarryingBomb())
+		if (!LsFree())
 			return true;
 		if (LsLoner() && RANDOM_FLOAT(0.0f, 1.0f) < 0.6f)
 			return true;
@@ -121,9 +123,9 @@ bool CCSBot::LsRadioAnswer()
 // to back them up, to trade if they go down. Loners mostly don't; once every few seconds
 bool CCSBot::LsTeamHeard(GameEventType event, CBasePlayer *pPlayer)
 {
-	if (!LsFight() || LsSolo() || event != EVENT_WEAPON_FIRED || !pPlayer || pPlayer == this || !pPlayer->IsAlive())
+	if (!LsFight() || !LsTeamGame() || event != EVENT_WEAPON_FIRED || !pPlayer || pPlayer == this || !pPlayer->IsAlive())
 		return false;
-	if (IsAttacking() || IsBusy() || IsCarryingBomb() || IsUsingLadder())
+	if (!LsFree())
 		return false;
 	float now = gpGlobals->time;
 	if (now - m_lsTradeAt < 5.0f)
@@ -149,21 +151,26 @@ bool CCSBot::LsTeamHeard(GameEventType event, CBasePlayer *pPlayer)
 // play for time (the team is coming, a site can be retaken); the bold ones take the fight
 bool CCSBot::LsPlayForTime()
 {
-	if (!LsFight() || LsSolo() || m_iTeam != CT || TheCSBots()->GetScenario() != CCSBotManager::SCENARIO_DEFUSE_BOMB)
+	if (!LsFight() || !LsTeamGame() || m_iTeam != CT || TheCSBots()->GetScenario() != CCSBotManager::SCENARIO_DEFUSE_BOMB)
 		return false;
 	if (TheCSBots()->IsBombPlanted() || GetNearbyFriendCount() > 0 || OutnumberedCount() < 2)
 		return false;
-	float bold = LsAggro();
-	// (campers and careful players hold back; rushers and knifers go in)
-	float lean = (LsStyle() == LS_STYLE_CAMPER || LsStyle() == LS_STYLE_CAREFUL) ? 1.3f : (LsStyle() == LS_STYLE_RUSHER || LsStyle() == LS_STYLE_KNIFER) ? 0.5f : 1.0f;
-	return RANDOM_FLOAT(0.0f, 1.0f) < Q_min(0.95f, (LsMatch() ? 0.8f : 0.55f) * (1.2f - bold) * lean);
+	// (rolled once a fight, not every think)
+	if (m_lsForTimeRoll < 0)
+	{
+		float bold = LsAggro();
+		// (campers and careful players hold back; rushers and knifers go in)
+		float lean = (LsStyle() == LS_STYLE_CAMPER || LsStyle() == LS_STYLE_CAREFUL) ? 1.3f : (LsStyle() == LS_STYLE_RUSHER || LsStyle() == LS_STYLE_KNIFER) ? 0.5f : 1.0f;
+		m_lsForTimeRoll = RANDOM_FLOAT(0.0f, 1.0f) < Q_min(0.95f, (LsMatch() ? 0.8f : 0.55f) * (1.2f - bold) * lean) ? 1 : 0;
+	}
+	return m_lsForTimeRoll == 1;
 }
 
 // Guarding the planted bomb: an enemy who ducked out of sight is let come to it (the clock is
 // on the Ts' side), rather than chased. Disciplined players nearly always; a few on a pub chase
 bool CCSBot::LsHoldsPlant()
 {
-	if (!LsFight() || LsSolo() || m_iTeam != TERRORIST || !TheCSBots()->IsBombPlanted() || GetTask() != GUARD_TICKING_BOMB)
+	if (!LsFight() || !LsTeamGame() || m_iTeam != TERRORIST || !TheCSBots()->IsBombPlanted() || GetTask() != GUARD_TICKING_BOMB)
 		return false;
 	// (a rusher can't sit still; a camper loves it)
 	float lean = LsStyle() == LS_STYLE_CAMPER ? 1.3f : LsStyle() == LS_STYLE_RUSHER ? 0.6f : 1.0f;
@@ -174,7 +181,7 @@ bool CCSBot::LsHoldsPlant()
 // the bold push on to the site while the CTs are a man down
 void CCSBot::LsEarlyPick(CBasePlayer *pVictim, CBasePlayer *pKiller)
 {
-	if (!LsFight() || LsSolo() || m_iTeam != TERRORIST || pVictim->m_iTeam != CT || pKiller == pVictim || pKiller->m_iTeam != TERRORIST)
+	if (!LsFight() || !LsTeamGame() || m_iTeam != TERRORIST || pVictim->m_iTeam != CT || pKiller == pVictim || pKiller->m_iTeam != TERRORIST)
 		return;
 	if (TheCSBots()->GetScenario() != CCSBotManager::SCENARIO_DEFUSE_BOMB || TheCSBots()->IsBombPlanted() || TheCSBots()->GetElapsedRoundTime() > 40.0f)
 		return;

@@ -34,6 +34,7 @@ void DefuseBombState::OnEnter(CCSBot *me)
 	me->Crouch();
 	me->SetDisposition(CCSBot::SELF_DEFENSE);
 	me->GetChatter()->Say("DefusingBomb");
+	me->LsObjectiveBegins();	// Loner-Strike
 	// (Loner-Strike: a quick look round the site first, as people check the corners)
 	me->LsCheckBeforeDefuse();
 }
@@ -55,7 +56,8 @@ void DefuseBombState::OnUpdate(CCSBot *me)
 	if (me->LsObjectiveThreat(true))
 		return;
 
-	// look at the bomb
+	// look at the bomb (back down to it after a check)
+	me->Crouch();
 	me->SetLookAt("Defuse bomb", bombPos, PRIORITY_HIGH);
 
 	// defuse...
