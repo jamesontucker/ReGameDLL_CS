@@ -1110,7 +1110,7 @@ CBasePlayer *CCSBot::FindMostDangerousThreat()
 				}
 				if (GetAttacker() == pThreat && GetTimeSinceAttacked() < 1.5f)
 					score *= 0.4f;
-				if (pThreat == currentThreat)
+				if (pThreat == static_cast<CBasePlayer *>(m_enemy))
 					score *= 0.6f;
 				if (score < best)
 				{

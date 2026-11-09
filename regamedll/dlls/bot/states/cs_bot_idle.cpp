@@ -405,7 +405,7 @@ void IdleState::OnUpdate(CCSBot *me)
 			// (Loner-Strike: a CT mostly holds a site or the ways into it, the one fewer teammates
 			// cover, a while at a time, rather than roaming the map; the bold sometimes push, a
 			// rusher mostly)
-			if (LsFight() && LsTeamGame() && !TheCSBots()->IsBombPlanted() && !me->GetGameState()->IsLooseBombLocationKnown()
+			if (LsFight() && me->LsTeamGame() && !TheCSBots()->IsBombPlanted() && !me->GetGameState()->IsLooseBombLocationKnown()
 				&& !me->LsShirksObjective() && TheCSBots()->GetZoneCount() > 0)
 			{
 				float push = me->LsStyle() == LS_STYLE_RUSHER ? 0.7f : 0.1f + 0.35f * me->LsAggro();
