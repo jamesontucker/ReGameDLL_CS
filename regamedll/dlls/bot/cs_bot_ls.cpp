@@ -146,7 +146,10 @@ bool LsSolo()
 	// rounds and teams, an aim_ or fy_ map, isn't deathmatch)
 	if (cv_bot_ls_solo.value <= 0.0f || !TheCSBots() || TheCSBots()->GetScenario() != CCSBotManager::SCENARIO_DEATHMATCH)
 		return false;
-	return cv_bot_deathmatch.value > 0.0f || (CSGameRules() && CSGameRules()->IsFreeForAll());
+	static cvar_t *s_dm = nullptr;
+	if (!s_dm)
+		s_dm = CVAR_GET_POINTER("bot_deathmatch");
+	return (s_dm && s_dm->value > 0.0f) || (CSGameRules() && CSGameRules()->IsFreeForAll());
 }
 
 // This bot goes its own way: everyone in deathmatch, and on objective maps a bot with

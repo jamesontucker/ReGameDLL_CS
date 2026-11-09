@@ -243,7 +243,9 @@ void CCSBot::LsAvenge(CBasePlayer *pVictim, CBasePlayer *pKiller)
 }
 
 // A dropped bomb: the nearest one or two Ts go for it (the rest carry on), so the whole team
-// doesn't run into the doorway the carrier just died in
+// doesn't run into the doorway the carrier just died in. Asked again each time a T thinks
+// about what to do, counting only living bots: if those two die on the way, the next two
+// go; a human standing nearer doesn't hold the bots back (they can't know he will)
 bool CCSBot::LsFetchesBomb()
 {
 	if (!LsFight())
@@ -254,7 +256,7 @@ bool CCSBot::LsFetchesBomb()
 	float mine = float((pBomb->pev->origin - pev->origin).Length());
 	int closer = 0;
 	LsForTeammates(this, [&](CBasePlayer *pPlayer) {
-		if ((pBomb->pev->origin - pPlayer->pev->origin).IsLengthLessThan(mine))
+		if (pPlayer->IsBot() && (pBomb->pev->origin - pPlayer->pev->origin).IsLengthLessThan(mine))
 			closer++;
 	});
 	return closer < 2;
