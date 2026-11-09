@@ -1067,6 +1067,7 @@ public:
 	bool LsOverwhelmed();							// several facing it at once: the less bold back off (once a fight, by its roll)
 	void LsFlankCheck();							// hit by someone it isn't fighting: turns to them, or a look, by its skill							// respawned or teleported: what it was in the middle of ends
 	bool LsBlindTick();
+	void LsHandUpdate(float goalYaw, float goalPitch, float dt);	// the view as a hand on a mouse moves it
 	Vector LsLaggedEnemyPos();						// the enemy as its hand follows them: a moment behind (by skill)
 	void LsTremorTick();							// a hand's tremor on the aim
 	void LsSeedAs(const char *name) { if (!FStrEq(name, m_lsSeedAs)) { Q_strlcpy(m_lsSeedAs, name); m_lsSeedName = 0; } }	// (gm_people's persona comes as the bot joins, before its habits are used)
@@ -1226,6 +1227,17 @@ private:
 	float m_lsOverwhelmedAt = -10.0f;				// several enemies facing it at once, then
 	float m_lsFlankReactAt = 0.0f;
 	float m_lsOverwhelmRollAt = 0.0f;					// next check of a hit from someone it isn't fighting
+	struct LsHand
+	{
+		bool moving = false;
+		float y0 = 0.0f, p0 = 0.0f;					// where the move started
+		float y1 = 0.0f, p1 = 0.0f;					// where it's going to land (the goal, plus the hand's error)
+		float goalY = 0.0f, goalP = 0.0f;				// the goal when it was planned (a moving one is followed)
+		float t0 = 0.0f, dur = 0.1f;
+		int corrections = 0;
+		float restUntil = 0.0f;
+	};
+	LsHand m_lsHandM;
 	bool m_lsHandMoving = false;
 	EntityHandle<CBasePlayer> m_lsTrackOf;			// whose positions the aim lag buffer holds
 	Vector m_lsTrackPos[8];

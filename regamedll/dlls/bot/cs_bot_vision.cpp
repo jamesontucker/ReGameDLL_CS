@@ -214,40 +214,14 @@ void CCSBot::UpdateLookAngles()
 		}
 	}
 
-	// Loner-Strike: a hand on a mouse, calm: the view sits still most of the time and moves in
-	// short quick bursts (a person's is still about two thirds of the time, a turn lasts about
-	// a fifth of a second), not the slow steady pan of a spring always chasing its target. It
-	// moves only once the target is a few degrees off and a moment has passed since the last
-	// turn; a big change goes at once
-	if (LsFight() && !IsAttacking() && LsCalm() && !IsUsingLadder())
+	// Loner-Strike: the view moved by a hand on a mouse, not a spring (LsHandUpdate): planned
+	// flicks with a bell-shaped speed curve, timed by distance and target size, landing a
+	// little off and corrected; still in between. Ladders keep the stock spring
+	if (LsFight() && !IsUsingLadder())
 	{
-		float now = gpGlobals->time;
-		float offYaw = NormalizeAngle(useYaw - pev->v_angle.y);
-		float offPitch = NormalizeAngle(usePitch - pev->v_angle.x);
-		float off = Q_max(float(fabs(offYaw)), float(fabs(offPitch)));
-		if (!m_lsHandMoving)
-		{
-			float deadZone = 3.0f + 3.5f * LsTrait(91);
-			bool rested = now >= m_lsHandRestUntil;
-			if (off > 25.0f || (off > deadZone && rested))
-				m_lsHandMoving = true;
-			else
-			{
-				m_lookYawVel = m_lookPitchVel = 0.0f;
-				return;
-			}
-		}
-		// (arrived, and not still swinging: the hand stops, and rests a moment)
-		if (off < 1.5f && fabs(m_lookYawVel) < 25.0f && fabs(m_lookPitchVel) < 25.0f)
-		{
-			m_lsHandMoving = false;
-			m_lsHandRestUntil = now + RANDOM_FLOAT(0.12f, 0.45f) + 0.5f * LsTrait(90);
-			m_lookYawVel = m_lookPitchVel = 0.0f;
-			return;
-		}
+		LsHandUpdate(useYaw, usePitch, deltaT);
+		return;
 	}
-	else
-		m_lsHandMoving = false;
 
 	// Yaw
 	float angleDiff = NormalizeAngle(useYaw - pev->v_angle.y);

@@ -1070,3 +1070,115 @@ void CCSBot::LsTremorTick()
 	m_lsTremorYaw = Q_max(-2.5f, Q_min(2.5f, m_lsTremorYaw));
 	m_lsTremorPitch = Q_max(-2.0f, Q_min(2.0f, m_lsTremorPitch));
 }
+
+// ---- the hand -----------------------------------------------------------------------------
+//
+// How a person turns with a mouse (what players read as "human" or "bot" in a spectator's view):
+//   - still most of the time; it moves in separate strokes, not a constant glide
+//   - each stroke is planned: a ballistic flick with a bell-shaped speed curve (minimum jerk),
+//     taking longer the further it goes and the smaller the target (Fitts's law)
+//   - it lands a little off, more for a big or hurried flick and a less skilled hand, usually
+//     a touch past (overshoot), then one or two small, slower corrections
+//   - small drifts of the target are let go (a dead zone: lazy tracking), until it's far enough
+//     off to be worth another stroke
+//   - up-down is slower and less accurate than side to side
+//   - after a calm look it rests a moment before the next
+// Skill, how bold it is and the moment (a fight, a startle, calm) set the numbers.
+
+static float LsMinJerk(float s)
+{
+	s = Q_max(0.0f, Q_min(1.0f, s));
+	return s * s * s * (10.0f - 15.0f * s + 6.0f * s * s);
+}
+
+void CCSBot::LsHandUpdate(float goalYaw, float goalPitch, float dt)
+{
+	LsHand &h = m_lsHandM;
+	float now = gpGlobals->time;
+	float skill = LsSkill();
+	bool fight = IsAttacking();
+	bool calm = !fight && LsCalm();
+	float oldY = pev->v_angle.y, oldP = pev->v_angle.x;
+
+	float offY = NormalizeAngle(goalYaw - pev->v_angle.y);
+	float offP = NormalizeAngle(goalPitch - pev->v_angle.x);
+	// (up-down counts for more: it's the harder way for a wrist)
+	float off = sqrtf(offY * offY + 1.56f * offP * offP);
+
+	// the target's size, in degrees: a person in a fight (smaller far away), a spot when calm
+	float width = 4.0f;
+	if (fight && m_enemy.IsValid())
+	{
+		float range = Q_max(64.0f, float((m_enemy->pev->origin - pev->origin).Length()));
+		width = Q_max(0.6f, 2.0f * 57.2958f * atanf(14.0f / range));
+	}
+
+	if (h.moving)
+	{
+		// (a moving goal is followed: the planned landing shifts with it)
+		float driftY = NormalizeAngle(goalYaw - h.goalY), driftP = NormalizeAngle(goalPitch - h.goalP);
+		float s = (now - h.t0) / h.dur;
+		float k = LsMinJerk(s);
+		pev->v_angle.y = h.y0 + NormalizeAngle(h.y1 + driftY - h.y0) * k;
+		pev->v_angle.x = h.p0 + (h.p1 + driftP - h.p0) * k;
+		if (s >= 1.0f)
+		{
+			h.moving = false;
+			offY = NormalizeAngle(goalYaw - pev->v_angle.y);
+			offP = NormalizeAngle(goalPitch - pev->v_angle.x);
+			off = sqrtf(offY * offY + 1.56f * offP * offP);
+			// (still off the target: a correction, slower and smaller; at most two)
+			if (off > Q_max(0.5f, 0.35f * width) && h.corrections < 2 && (fight || !calm || off > 2.5f))
+				h.corrections++;
+			else
+			{
+				h.corrections = 0;
+				h.restUntil = calm ? now + RANDOM_FLOAT(0.12f, 0.45f) + 0.5f * LsTrait(90) : now + RANDOM_FLOAT(0.02f, 0.08f);
+			}
+		}
+	}
+
+	if (!h.moving)
+	{
+		// when to move: a big change at once; a small one only past the dead zone, after a rest
+		float deadZone = fight ? Q_max(0.4f, 0.5f * width) * (1.6f - 0.8f * skill) : calm ? 3.0f + 3.5f * LsTrait(91) : 1.5f;
+		bool start = (off > 25.0f) || (off > deadZone && now >= h.restUntil) || (h.corrections > 0 && off > 0.3f);
+		if (start)
+		{
+			// how long (Fitts): a + b log2(1 + D/W), quicker for the skilled and in a fight
+			float b = 0.075f * (1.45f - 0.7f * skill) * (fight ? 0.8f : calm ? 1.1f : 0.9f);
+			float dur = 0.05f + b * log2f(1.0f + off / width);
+			if (m_lsPuppet.fast && now < m_lsPuppet.lookUntil)
+				dur *= 0.6f;
+			if (h.corrections > 0)
+				dur = Q_max(0.05f, dur * 0.8f);
+			h.dur = Q_max(0.06f, Q_min(0.65f, dur));
+
+			// where it lands: off by a share of the distance (more for a big, quick flick and a
+			// less skilled or rattled hand), usually a touch past
+			float stress = (LsHealth() < 40.0f ? 0.5f : 0.0f) + (GetTimeSinceAttacked() < 1.5f ? 0.4f : 0.0f) + (now < m_lsWhiffUntil ? 0.5f : 0.0f);
+			float spread = (h.corrections > 0 ? 0.04f : 0.08f) * (1.35f - skill) * (1.0f + stress);
+			auto gauss = []() { return (RANDOM_FLOAT(-1.0f, 1.0f) + RANDOM_FLOAT(-1.0f, 1.0f) + RANDOM_FLOAT(-1.0f, 1.0f)) * 0.577f; };
+			float along = 1.0f + (h.corrections > 0 ? 0.0f : 0.04f * (1.2f - skill)) + spread * gauss();
+			float across = 0.5f * spread * gauss();
+			h.y0 = pev->v_angle.y;
+			h.p0 = pev->v_angle.x;
+			// (along the direction of the move, and a little to the side of it)
+			h.y1 = h.y0 + offY * along - offP * across;
+			h.p1 = h.p0 + offP * along * 1.1f + offY * across * 0.5f;
+			h.goalY = goalYaw;
+			h.goalP = goalPitch;
+			h.t0 = now;
+			h.moving = true;
+		}
+	}
+
+	if (pev->v_angle.x < -89.0f)
+		pev->v_angle.x = -89.0f;
+	else if (pev->v_angle.x > 89.0f)
+		pev->v_angle.x = 89.0f;
+	pev->v_angle.z = 0.0f;
+	// (how fast it's turning, for what reads it: a flick blinds it to new things)
+	m_lookYawVel = NormalizeAngle(pev->v_angle.y - oldY) / Q_max(0.001f, dt);
+	m_lookPitchVel = (pev->v_angle.x - oldP) / Q_max(0.001f, dt);
+}
