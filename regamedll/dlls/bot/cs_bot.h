@@ -1407,7 +1407,8 @@ bool LsSolo();
 bool LsOwnMemory();
 bool LsHeSafe(CCSBot *me, const Vector &burst);
 float LsTimeLeft();	// the round's time left (a lot, when the round never runs out)
-int LsRoundSerial();	// a count of rounds that only goes up (a restart sets the game's own back to 0)
+int LsRoundSerial();
+const CCSBotManager::Zone *LsTSite();	// the Ts' site this round	// a count of rounds that only goes up (a restart sets the game's own back to 0)
 void Bot_LsRegisterCVars();
 void Bot_LsServerCommand();
 

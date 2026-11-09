@@ -190,7 +190,9 @@ void IdleState::OnUpdate(CCSBot *me)
 				else if (TheCSBots()->IsTimeToPlantBomb())
 				{
 					// move to the closest bomb site
-					const CCSBotManager::Zone *zone = TheCSBots()->GetClosestZone(me->GetLastKnownArea(), PathCost(me));
+					// (Loner-Strike: the team's site this round, unless time's short)
+					const CCSBotManager::Zone *zone = (LsFight() && LsTimeLeft() > 30.0f && LsTSite()) ? LsTSite()
+						: TheCSBots()->GetClosestZone(me->GetLastKnownArea(), PathCost(me));
 					if (zone)
 					{
 						// pick a random spot within the bomb zone

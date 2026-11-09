@@ -401,6 +401,21 @@ int LsRoundSerial()
 	return s_serial;
 }
 
+// The Ts' site for this round: one for the whole team (most head there, the carrier too)
+const CCSBotManager::Zone *LsTSite()
+{
+	static int s_round = -1;
+	static int s_zone = 0;
+	if (!TheCSBots() || TheCSBots()->GetZoneCount() <= 0)
+		return nullptr;
+	if (s_round != LsRoundSerial())
+	{
+		s_round = LsRoundSerial();
+		s_zone = RANDOM_LONG(0, TheCSBots()->GetZoneCount() - 1);
+	}
+	return TheCSBots()->GetZone(Q_min(s_zone, TheCSBots()->GetZoneCount() - 1));
+}
+
 // The round's time left; with rounds that never run out, plenty (rather than below zero,
 // which would read as the clock nearly gone)
 float LsTimeLeft()
@@ -1119,9 +1134,18 @@ CNavArea *CCSBot::LsPickHuntArea()
 		}
 		else if (m_iTeam == TERRORIST && TheCSBots()->GetScenario() == CCSBotManager::SCENARIO_DEFUSE_BOMB && !TheCSBots()->IsBombPlanted())
 		{
-			// (Ts work toward the bomb sites, by their own ways, rather than into dead ends)
+			// (Ts work toward the round's site, as a pub team drifts to "b" together, each by its
+			// own way; the odd lurker takes the other one)
+			const CCSBotManager::Zone *site = LsTSite();
+			bool other = LsStyle() == LS_STYLE_LURKER ? LsTrait(89) < 0.6f : LsTrait(89) < 0.12f;
 			for (int z = 0; z < TheCSBots()->GetZoneCount() && kept < 16; z++)
-				keep[kept++] = TheCSBots()->GetZone(z)->m_center;
+			{
+				const CCSBotManager::Zone *zone = TheCSBots()->GetZone(z);
+				if (!site || (zone == site) != other)
+					keep[kept++] = zone->m_center;
+			}
+			if (!kept && site)
+				keep[kept++] = site->m_center;
 		}
 		else if (m_iTeam == TERRORIST && TheCSBots()->GetScenario() == CCSBotManager::SCENARIO_RESCUE_HOSTAGES)
 		{
