@@ -549,6 +549,9 @@ void CCSBot::UpdateLookAround(bool updateNow)
 		// if we're sniping, switch look-at spots less often
 		if (IsUsingSniperRifle())
 			m_lookAroundStateTimestamp = gpGlobals->time + RANDOM_FLOAT(5.0f, 10.0f);
+		// (Loner-Strike: a person holds an angle a few seconds, longer the more patient they are)
+		else if (LsFight())
+			m_lookAroundStateTimestamp = gpGlobals->time + RANDOM_FLOAT(2.5f, 6.0f) + 2.0f * LsTrait(90);
 		else
 			m_lookAroundStateTimestamp = gpGlobals->time + RANDOM_FLOAT(1.0f, 2.0f);
 
@@ -559,6 +562,18 @@ void CCSBot::UpdateLookAround(bool updateNow)
 		}
 
 		int which = RANDOM_LONG(0, m_approachPointCount - 1);
+		// (Loner-Strike: mostly the nearer of two ways in to where it's looking, a small move;
+		// now and then any, a bigger check)
+		if (LsFight() && m_approachPointCount > 1 && RANDOM_FLOAT(0.0f, 1.0f) < 0.75f)
+		{
+			int other = RANDOM_LONG(0, m_approachPointCount - 1);
+			auto turn = [this](int i) {
+				Vector to = m_approachPoint[i] - pev->origin;
+				return Q_abs(NormalizeAngle(UTIL_VecToYaw(to) - pev->v_angle.y));
+			};
+			if (turn(other) < turn(which))
+				which = other;
+		}
 		Vector spot = m_approachPoint[which];
 
 		// don't look at the floor, look roughly at chest level
