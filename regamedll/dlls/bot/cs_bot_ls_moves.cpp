@@ -1123,6 +1123,9 @@ void CCSBot::LsHandUpdate(float goalYaw, float goalPitch, float dt)
 	float skill = LsSkill();
 	bool fight = IsAttacking();
 	bool calm = !fight && LsCalm();
+	// (standing still and calm, a person barely moves the view: 88-90% still in the playtest,
+	// against about half when moving; moving looks already matched)
+	bool standing = calm && pev->velocity.Length2D() < 60.0f;
 	float oldY = pev->v_angle.y, oldP = pev->v_angle.x;
 
 	float offY = NormalizeAngle(goalYaw - pev->v_angle.y);
@@ -1182,7 +1185,7 @@ void CCSBot::LsHandUpdate(float goalYaw, float goalPitch, float dt)
 				h.corrections = 0;
 				// (alert but not fighting, which a deathmatch mostly is: a look is held a moment too,
 				// though shorter than a calm one)
-				h.restUntil = calm ? now + RANDOM_FLOAT(0.25f, 0.8f) + 0.6f * LsTrait(90) : fight ? now + RANDOM_FLOAT(0.02f, 0.08f) : now + RANDOM_FLOAT(0.2f, 0.55f) + 0.3f * LsTrait(90);
+				h.restUntil = standing ? now + RANDOM_FLOAT(0.6f, 1.6f) + 0.8f * LsTrait(90) : calm ? now + RANDOM_FLOAT(0.25f, 0.8f) + 0.6f * LsTrait(90) : fight ? now + RANDOM_FLOAT(0.02f, 0.08f) : now + RANDOM_FLOAT(0.2f, 0.55f) + 0.3f * LsTrait(90);
 			}
 		}
 	}
@@ -1190,7 +1193,7 @@ void CCSBot::LsHandUpdate(float goalYaw, float goalPitch, float dt)
 	if (!h.moving)
 	{
 		// when to move: a big change at once; a small one only past the dead zone, after a rest
-		float deadZone = fight ? Q_max(0.2f, 0.5f * width) * (1.6f - 0.8f * skill) : calm ? 4.0f + 4.0f * LsTrait(91) : 3.5f + 2.0f * LsTrait(91);
+		float deadZone = fight ? Q_max(0.2f, 0.5f * width) * (1.6f - 0.8f * skill) : standing ? 6.0f + 5.0f * LsTrait(91) : calm ? 4.0f + 4.0f * LsTrait(91) : 3.5f + 2.0f * LsTrait(91);
 		// (a new thing to look at, calmly: a reaction first, mostly quick, now and then slow: a
 		// log-normal delay, shorter for the skilled. In a fight the stock reaction already applies)
 		float jump = sqrtf(NormalizeAngle(goalYaw - h.lastY) * NormalizeAngle(goalYaw - h.lastY) + NormalizeAngle(goalPitch - h.lastP) * NormalizeAngle(goalPitch - h.lastP));
