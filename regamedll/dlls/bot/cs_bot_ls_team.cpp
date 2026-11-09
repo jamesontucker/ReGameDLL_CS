@@ -50,6 +50,48 @@ void CCSBot::LsTeamTick()
 		}
 	}
 
+	// the carrier sticks with a teammate for a while early on (people with the bomb go with
+	// someone, not alone through mid), then goes to plant once at a site or when the time's up
+	if (m_iTeam == TERRORIST && IsCarryingBomb() && !CSGameRules()->IsFreezePeriod() && !LsOrderActive())
+	{
+		if (m_lsCarrierFollowUntil > 0.0f)
+		{
+			CBasePlayer *pLeader = m_lsCarrierLeader;
+			if (IsAtBombsite() || now > m_lsCarrierFollowUntil || !pLeader || !pLeader->IsAlive() || LsTimeLeft() < 35.0f || !IsFollowing())
+			{
+				m_lsCarrierFollowUntil = 0.0f;
+				if (IsFollowing())
+					StopFollowing();
+				if (!IsAttacking())
+					Idle();
+			}
+		}
+		else if (m_lsCarrierFollowRound != round && !IsAttacking() && !IsAtBombsite() && LsStyle() != LS_STYLE_RUSHER && LsTimeLeft() > 45.0f
+			&& TheCSBots()->GetElapsedRoundTime() > 2.0f && TheCSBots()->GetElapsedRoundTime() < 40.0f)
+		{
+			m_lsCarrierFollowRound = round;
+			CBasePlayer *pBest = nullptr;
+			float best = 1200.0f;
+			LsForTeammates(this, [&](CBasePlayer *pPlayer) {
+				if (pPlayer->IsBot() && (static_cast<CCSBot *>(pPlayer)->LsLoner() || static_cast<CCSBot *>(pPlayer)->IsCarryingBomb()))
+					return;
+				float d = float((pPlayer->pev->origin - pev->origin).Length());
+				if (d < best)
+				{
+					best = d;
+					pBest = pPlayer;
+				}
+			});
+			if (pBest)
+			{
+				Follow(pBest);
+				m_lsCarrierLeader = pBest;
+				m_lsCarrierFollowUntil = now + RANDOM_FLOAT(15.0f, 30.0f);
+				LsWhy("carrier-with-team");
+			}
+		}
+	}
+
 	// (nor goes to look into a noise with the bomb on its back: that's for the others)
 	if (m_iTeam == TERRORIST && IsCarryingBomb() && m_state == &m_investigateNoiseState && !IsAttacking() && LsTimeLeft() > 20.0f)
 	{
