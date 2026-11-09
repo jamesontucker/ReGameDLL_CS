@@ -76,11 +76,11 @@ void CCSBot::LsTeamTick()
 	{
 		if (m_iTeam == TERRORIST && IsHunting() && m_lsHostHoldAt <= now && GetLastKnownArea() && LsFree())
 		{
-			bool near = false;
+			bool byHostage = false;
 			CBaseEntity *pHostage = nullptr;
-			while (!near && (pHostage = UTIL_FindEntityByClassname(pHostage, "hostage_entity")))
-				near = pHostage->IsAlive() && (pHostage->pev->origin - pev->origin).IsLengthLessThan(600.0f);
-			if (near && RANDOM_FLOAT(0.0f, 1.0f) < 0.4f + 0.4f * (1.0f - LsAggro()))
+			while (!byHostage && (pHostage = UTIL_FindEntityByClassname(pHostage, "hostage_entity")))
+				byHostage = pHostage->IsAlive() && (pHostage->pev->origin - pev->origin).IsLengthLessThan(600.0f);
+			if (byHostage && RANDOM_FLOAT(0.0f, 1.0f) < 0.4f + 0.4f * (1.0f - LsAggro()))
 			{
 				float secs = RANDOM_FLOAT(8.0f, 20.0f);
 				Hide(GetLastKnownArea(), secs, 400.0f);
