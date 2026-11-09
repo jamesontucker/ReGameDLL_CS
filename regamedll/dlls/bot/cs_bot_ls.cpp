@@ -709,9 +709,23 @@ void CCSBot::LsOrderTick()
 	if (o.kind == 0)
 		return;
 	float now = gpGlobals->time;
-	if (now >= o.until || !IsAlive())
+	// (done, run out, or the round's moved on: the bomb's down, it has hostages; an order
+	// from before that would only keep it from the job)
+	if (now >= o.until || !IsAlive() || TheCSBots()->IsBombPlanted() || GetHostageEscortCount() > 0
+		|| (IsCarryingBomb() && !CSGameRules()->IsFreezePeriod()))
 	{
 		o = LsOrder();
+		pev->vuser1.x = 0.0f;
+		return;
+	}
+	if (o.kind == 3)
+	{
+		// holding the spot it was sent to: till the hide ends
+		if (!IsHiding())
+		{
+			o = LsOrder();
+			pev->vuser1.x = 0.0f;
+		}
 		return;
 	}
 	if (IsAttacking() || m_isEnemyVisible || LsOrderBusy() || IsOnLadder())
@@ -720,15 +734,32 @@ void CCSBot::LsOrderTick()
 	{
 		if ((o.at - pev->origin).Make2D().IsLengthLessThan(120.0f))
 		{
-			// there: holds it, if asked, else back to its own business
+			// there: a spot with some cover close by, held a while if asked (each bot its own
+			// spot, not five on one point); else back to its own business
 			if (o.holdSecs > 0.0f)
-				Hide(&o.at, o.holdSecs, true);
+			{
+				CNavArea *pArea = TheNavAreaGrid.GetNearestNavArea(&o.at);
+				SetTask(HOLD_POSITION);	// (a plant elsewhere still calls it off: HideState)
+				Hide(pArea, o.holdSecs, 350.0f, true);
+				o.kind = 3;
+				o.until = now + o.holdSecs + 2.0f;
+				pev->vuser1.x = o.until;
+				return;
+			}
 			o = LsOrder();
+			pev->vuser1.x = 0.0f;
 			return;
 		}
-		// (sent off it by something: a fight that's over, a state change; on its way again)
+		// (sent off it by something: a fight that's over, a state change; on its way again; but
+		// a spot it can't get to is given up)
 		if (!IsMovingTo() && now >= o.nextTry)
 		{
+			if (++o.tries > 2)
+			{
+				o = LsOrder();
+				pev->vuser1.x = 0.0f;
+				return;
+			}
 			o.nextTry = now + 2.0f;
 			MoveTo(&o.at, SAFEST_ROUTE);
 		}
@@ -836,7 +867,11 @@ void CCSBot::LsPuppetCommand(const char *what, float now)
 		}
 		if (FStrEq(tag, "bc"))
 		{
+			// ("nvm" while holding where it was sent: it stops holding)
+			if (m_lsOrder.kind == 3 && IsHiding())
+				Idle();
 			m_lsOrder = LsOrder();
+			pev->vuser1.x = 0.0f;
 			LsPuppetRelease();
 			return;
 		}
@@ -896,21 +931,35 @@ void CCSBot::LsPuppetCommand(const char *what, float now)
 	}
 	else if (FStrEq(what, "goto"))
 	{
-		// goto x y z [walk] [hold secs]: the latest order wins (a hold or crouch from before ends);
-		// with hold secs it holds the spot once there (a "go b" stays at b a while)
-		p.holdUntil = p.crouchUntil = 0.0f;
-		p.holdTag[0] = '\0';
+		// goto x y z [walk] [hold secs] [bc]: with bc a person's order (the latest wins, a hold
+		// or crouch from before ends, and with hold secs it holds near the spot once there);
+		// without it a plugin's walk (a gift, a step aside), which never replaces an order
+		bool chat = CMD_ARGC() > 8 && FStrEq(CMD_ARGV(8), "bc");
+		if (!chat && ordered)
+			return;
 		Vector to(LsArg(3), LsArg(4), LsArg(5));
+		if (chat)
+		{
+			p.holdUntil = p.crouchUntil = 0.0f;
+			p.holdTag[0] = '\0';
+		}
 		MoveTo(&to, SAFEST_ROUTE);
 		if (LsArg(6) > 0.0f)
 			p.walkUntil = now + most;
-		m_lsOrder = LsOrder();
-		m_lsOrder.kind = 1;
-		m_lsOrder.at = to;
-		m_lsOrder.until = now + 45.0f;
-		m_lsOrder.holdSecs = Q_min(LsArg(7), most);
-		m_lsOrder.nextTry = now + 2.0f;
-		pev->fuser4 = now;	// (taken: gm_botchat reads it)
+		if (chat)
+		{
+			m_lsOrder = LsOrder();
+			// (somewhere it can't get to isn't taken: gm_botchat then says it can't)
+			if (!HasPath())
+				return;
+			m_lsOrder.kind = 1;
+			m_lsOrder.at = to;
+			m_lsOrder.until = now + 45.0f;
+			m_lsOrder.holdSecs = Q_min(LsArg(7), most);
+			m_lsOrder.nextTry = now + 2.0f;
+			pev->fuser4 = now;	// (taken: gm_botchat reads it)
+			pev->vuser1.x = m_lsOrder.until;	// (and on till then: gm_pubserver won't kick it)
+		}
 	}
 	else if (FStrEq(what, "follow"))
 	{
@@ -928,6 +977,7 @@ void CCSBot::LsPuppetCommand(const char *what, float now)
 		m_lsOrder.until = p.followUntil;
 		m_lsOrder.nextTry = now + 2.0f;
 		pev->fuser4 = now;	// (taken: gm_botchat reads it)
+		pev->vuser1.x = m_lsOrder.until;
 	}
 	else
 	{
@@ -1055,7 +1105,7 @@ CNavArea *CCSBot::LsPickHuntArea()
 		picks[t] = RANDOM_LONG(0, count - 1);
 
 	CNavArea *best = nullptr;
-	float bestScore = -1.0f;
+	float bestScore = -1e9f;	// (the pulls can put every candidate below zero)
 	int index = 0;
 	for (auto area : TheNavAreaList)
 	{

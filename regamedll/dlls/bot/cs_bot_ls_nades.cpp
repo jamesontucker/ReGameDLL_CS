@@ -774,6 +774,22 @@ static int LsDecentBuy(int team)
 
 // the round the last pistol round was (LsTeamPlan: the one after is a force)
 static int s_lastPistol = -100;
+static bool LsPistolRound();
+
+// Every player on the team still has about the start money: the first round of a half (or
+// of the map) whatever the start money is
+static bool LsAllNearStart(int team)
+{
+	for (int i = 1; i <= gpGlobals->maxClients; i++)
+	{
+		CBasePlayer *pPlayer = UTIL_PlayerByIndex(i);
+		if (!pPlayer || pPlayer->m_iTeam != team || FStrEq(STRING(pPlayer->pev->netname), ""))
+			continue;
+		if (float(pPlayer->m_iAccount) > startmoney.value + 300.0f || pPlayer->m_rgpPlayerItems[PRIMARY_WEAPON_SLOT])
+			return false;
+	}
+	return true;
+}
 
 // The team's call for this round: buy, save or force (worked out once, by the first of
 // them to buy, so the team agrees)
@@ -802,8 +818,15 @@ static int LsTeamPlan(int team)
 			afford++;
 	}
 
+	// (a half's first round with more than pistol-round money: everyone buys what they can,
+	// never a team save on the first round)
+	// (a new map: last map's pistol round is no guide)
+	if (round == 0 && !LsPistolRound())
+		s_lastPistol = -100;
+	bool freshHalf = n > 0 && LsAllNearStart(team);
+
 	int plan = LS_BUY;
-	if (n > 0 && afford < 0.6f * n)
+	if (n > 0 && afford < 0.6f * n && !freshHalf)
 	{
 		int losses = (team == CT) ? CSGameRules()->m_iNumConsecutiveCTLoses : CSGameRules()->m_iNumConsecutiveTerroristLoses;
 		int avg = money / n;

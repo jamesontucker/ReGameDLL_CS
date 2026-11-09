@@ -25,10 +25,13 @@ void CCSBot::LsTeamTick()
 
 	// a T not hiding (on its way somewhere, hunting) near a defuse it can hear: the same as one
 	// hiding would (LsDefuseHeard), once per defuse
-	if (m_iTeam == TERRORIST && TheCSBots()->GetBombDefuser() && !IsHiding() && !IsAttacking() && !LsOrderActive()
-		&& now - m_lsDefuseActedAt > 12.0f)
+	// (not one running from the blast, nor for a defuse that can't finish in time)
+	CBasePlayer *pDefuser = TheCSBots()->GetBombDefuser();
+	if (m_iTeam == TERRORIST && pDefuser && !IsHiding() && !IsAttacking() && !LsOrderActive() && !IsEscapingFromBomb()
+		&& TheCSBots()->GetBombTimeLeft() > (pDefuser->m_bHasDefuser ? 5.0f : 10.0f) && now - m_lsDefuseActedAt > 12.0f)
 	{
-		if (LsDefuseHeard(TheCSBots()->GetBombDefuser()) == 1)
+		// (quiet a while only after heading for it; one it saw and shot at, it keeps listening for)
+		if (LsDefuseHeard(TheCSBots()->GetBombDefuser()) == 1 && IsMovingTo())
 			m_lsDefuseActedAt = now;
 	}
 
@@ -422,7 +425,7 @@ void CCSBot::LsFloorGunTick()
 	if (m_lsFloorRound == round)
 	{
 		// (got one, or someone else did: a claim only lasts while it's still going for it)
-		if (m_lsFloorGun && (m_bHasPrimary || (m_lsFloorGun->pev->effects & EF_NODRAW)))
+		if (m_lsFloorGun.IsValid() && (m_bHasPrimary || (m_lsFloorGun->pev->effects & EF_NODRAW)))
 		{
 			bool taken = !m_bHasPrimary;
 			m_lsFloorGun = nullptr;
@@ -457,7 +460,8 @@ void CCSBot::LsFloorGunTick()
 		for (int i = 1; i <= gpGlobals->maxClients && !taken; i++)
 		{
 			CBasePlayer *pPlayer = UTIL_PlayerByIndex(i);
-			if (pPlayer && pPlayer != this && pPlayer->IsBot() && pPlayer->IsAlive() && static_cast<CCSBot *>(pPlayer)->m_lsFloorGun == pEnt)
+			if (pPlayer && pPlayer != this && pPlayer->IsBot() && pPlayer->IsAlive() && static_cast<CBaseEntity *>(static_cast<CCSBot *>(pPlayer)->m_lsFloorGun) == pEnt
+				&& static_cast<CCSBot *>(pPlayer)->m_lsFloorRound == round)
 				taken = true;
 		}
 		if (taken)
@@ -499,7 +503,7 @@ void CCSBot::LsStalemateTick()
 	int mates = 0;
 	LsForTeammates(this, [&](CBasePlayer *) { mates++; });
 	// (once a round, or once more as the last one alive; never over a person's order)
-	bool again = mates == 0 && m_lsStaleLast != round;
+	bool again = mates == 0 && (m_lsStaleLast != round || now - m_lsStaleLastAt > 20.0f);
 	if ((m_lsStaleRound == round && !again) || LsOrderActive() || FStrEq(m_lsPuppet.holdTag, "bc") || IsFollowing() || IsMovingTo() || IsNoiseHeard()
 		|| !(IsHiding() || m_state == &m_idleState))
 		return;
@@ -512,7 +516,10 @@ void CCSBot::LsStalemateTick()
 		return;
 	m_lsStaleRound = round;
 	if (mates == 0)
+	{
 		m_lsStaleLast = round;
+		m_lsStaleLastAt = now;
+	}
 	if (m_lsPuppet.any)
 		LsPuppetRelease();
 	Hunt();

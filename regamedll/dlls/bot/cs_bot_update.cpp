@@ -333,6 +333,10 @@ void CCSBot::Update()
 		m_lastKnownArea->DrawConnectedAreas();
 	}
 
+	// (Loner-Strike: flashed the way a person is: see LsBlindTick)
+	if (LsBlindTick())
+		return;
+
 	// if we're blind, retreat!
 	if (IsBlind())
 	{

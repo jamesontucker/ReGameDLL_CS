@@ -259,6 +259,22 @@ void AttackState::OnUpdate(CCSBot *me)
 		}
 	}
 
+	// Loner-Strike: Gun Game's grenade level with them too far for an arc: closing in, not
+	// standing there holding it
+	if (LsFight() && me->LsNadeOnly() && me->IsUsingHEGrenade() && (pEnemy->pev->origin - me->pev->origin).IsLengthGreaterThan(1100.0f))
+	{
+		me->ForceRun(3.0f);
+		if (m_repathTimer.IsElapsed())
+		{
+			const Vector *to = me->IsEnemyVisible() ? &pEnemy->pev->origin : &me->GetLastKnownEnemyPosition();
+			me->ComputePath(TheNavAreaGrid.GetNearestNavArea(to), to, FASTEST_ROUTE);
+			m_repathTimer.Start(0.5f);
+		}
+		if (me->UpdatePathMovement(NO_SPEED_CHANGE) != CCSBot::PROGRESSING)
+			me->DestroyPath();
+		return;
+	}
+
 	// Knife fighting
 	// We need to pathfind right to the enemy to cut him
 	if (me->IsUsingKnife())
@@ -270,7 +286,9 @@ void AttackState::OnUpdate(CCSBot *me)
 		// if we are using a knife and our prey is looking towards us, run at him
 		// (Loner-Strike: in deathmatch-type modes nobody creeps up with the knife: they run
 		// at people, walking only the last bit behind someone)
-		if (me->IsPlayerFacingMe(pEnemy) || (LsFight() && LsSolo() && (pEnemy->pev->origin - me->pev->origin).IsLengthGreaterThan(250.0f)))
+		// (nor with the knife all it has, from far off: knife arenas)
+		float knifeRange = float((pEnemy->pev->origin - me->pev->origin).Length());
+		if (me->IsPlayerFacingMe(pEnemy) || (LsFight() && LsSolo() && knifeRange > 250.0f) || (LsFight() && me->LsKnifeOnly() && knifeRange > 400.0f))
 		{
 			me->ForceRun(5.0f);
 			me->Hurry(10.0f);

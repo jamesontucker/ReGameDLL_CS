@@ -852,3 +852,66 @@ void CCSBot::LsAreaStuck(const CNavArea *area)
 	m_lsFailArea = nullptr;
 	LsWhy("bad-area");
 }
+
+// Flashed. Stock bots pick one direction and walk it for the whole flash. People panic in
+// their own way and change their mind: the careful back off and crouch, the aggressive hold
+// and spray where the enemy was, newer players stumble about. As it fades: a quick look back
+// to where the trouble was
+bool CCSBot::LsBlindTick()
+{
+	if (!LsFight())
+		return false;
+	float now = gpGlobals->time;
+	if (!IsBlind())
+	{
+		if (m_lsWasBlind)
+		{
+			m_lsWasBlind = false;
+			if (GetTimeSinceLastSawEnemy() < 8.0f)
+			{
+				Vector look = GetLastKnownEnemyPosition() + Vector(0, 0, HalfHumanHeight);
+				SetLookAt("Loner-Strike: after the flash", &look, PRIORITY_HIGH, RANDOM_FLOAT(0.6f, 1.2f));
+			}
+		}
+		return false;
+	}
+	float aggro = LsAggro(), skill = LsSkill();
+	if (!m_lsWasBlind)
+	{
+		m_lsWasBlind = true;
+		m_lsBlindTurnAt = 0.0f;
+		// (a spray where they were: the aggressive, and only with someone seen just now)
+		m_lsBlindSpray = GetTimeSinceLastSawEnemy() < 4.0f && RANDOM_FLOAT(0.0f, 1.0f) < 0.08f + 0.4f * aggro;
+	}
+	if (now >= m_lsBlindTurnAt)
+	{
+		m_lsBlindTurnAt = now + RANDOM_FLOAT(0.4f, 0.9f);
+		float r = RANDOM_FLOAT(0.0f, 1.0f);
+		// 0 back off, 1/2 strafe, 3 crouch and hold, 4 stand still
+		if (skill > 0.6f)
+			m_lsBlindWay = r < 0.45f ? 0 : r < 0.75f ? 3 : r < 0.9f ? 1 + RANDOM_LONG(0, 1) : 4;
+		else if (aggro > 0.65f)
+			m_lsBlindWay = r < 0.5f ? 4 : r < 0.8f ? 1 + RANDOM_LONG(0, 1) : 0;
+		else
+			m_lsBlindWay = RANDOM_LONG(0, 4);
+	}
+	if (!IsAtHidingSpot())
+	{
+		switch (m_lsBlindWay)
+		{
+		case 0: MoveBackward(); break;
+		case 1: StrafeLeft(); break;
+		case 2: StrafeRight(); break;
+		case 3: Crouch(); break;
+		default: break;
+		}
+	}
+	if (m_lsBlindSpray)
+	{
+		Vector at = GetLastKnownEnemyPosition() + Vector(0, 0, HalfHumanHeight);
+		SetLookAt("Loner-Strike: spraying blind", &at, PRIORITY_HIGH, 0.3f);
+		if (!IsActiveWeaponClipEmpty() && (!(IsUsingPistol() || IsUsingSniperRifle()) || int(now * 6.0f) % 2 == 0))
+			PrimaryAttack();
+	}
+	return true;
+}

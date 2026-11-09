@@ -364,6 +364,8 @@ void CCSBot::RoundRespawn()
 	LsNadeReset();
 	LsStartOver();
 	m_lsOrder = LsOrder();
+	pev->fuser4 = 0.0f;
+	pev->vuser1 = g_vecZero;
 }
 
 void CCSBot::Disconnect()

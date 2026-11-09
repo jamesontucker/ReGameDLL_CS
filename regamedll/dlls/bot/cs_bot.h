@@ -1045,8 +1045,8 @@ public:
 	bool LsOrderBusy() const;						// too busy for a person's order (a fight aside): the bomb, a hostage, a throw
 	bool LsYieldsDefuse();							// at the bomb but leaves it: a kit CT is right there, or it can't finish
 	float LsHealth() const { return 100.0f * float(pev->health) / Q_max(100.0f, float(pev->max_health)); }	// health out of 100, whatever its max (War3, SuperHero; a mod that raises health without the max counts as healthier)
-	void LsFloorGunTick();
-	void LsStalemateTick();						// rounds with no objective: a long quiet ends with someone going looking							// fy_ maps: no gun at the start of a round, it runs for one on the floor
+	void LsFloorGunTick();							// fy_ maps: no gun at the start of a round, it runs for one on the floor
+	void LsStalemateTick();						// rounds with no objective: a long quiet ends with someone going looking
 	const CCSBotManager::Zone *LsQuietZone();		// the bomb site with the fewest teammates at it (ties at random)
 	bool LsFetchesBomb();							// one of the nearest two Ts to a dropped bomb
 	// (end team)
@@ -1060,10 +1060,11 @@ public:
 	bool LsNadeGunUp();								// an enemy turned up with a flash or smoke in hand: the gun instead
 	void LsNadeStart(int id, const Vector &aim, float pause);
 	void LsNadeStop();
-	void LsStartOver();
+	void LsStartOver();							// respawned or teleported: what it was in the middle of ends
+	bool LsBlindTick();							// flashed: its own way of coping (true: dealt with this frame)
 	bool LsKnifeOnly() const { return !m_rgpPlayerItems[PRIMARY_WEAPON_SLOT] && !m_rgpPlayerItems[PISTOL_SLOT]; }	// a knife and nothing else to shoot with
 	bool LsTossing() const { return m_isWaitingToTossGrenade; }
-	void LsHeAway(float secs) { m_lsHeBackAt = gpGlobals->time + secs; m_lsHeBlockedSince = -1.0f; }							// respawned or teleported: what it was in the middle of ends
+	void LsHeAway(float secs) { m_lsHeBackAt = gpGlobals->time + secs; m_lsHeBlockedSince = -1.0f; }	// Gun Game's grenade put away for a while
 	void LsTeleportCheck();						// moved further in a moment than anyone can run: LsStartOver
 	bool LsPlanThrow(int id, const Vector &target, float within, Vector *aim, Vector *burst);
 	bool LsPlanFlash(const Vector &corner, const Vector &beyond, Vector *aim, Vector *burst, bool *inMySight);
@@ -1129,7 +1130,7 @@ public:
 	void LsPuppetRelease();
 	bool LsPuppetActive() const;
 	bool LsBusy() const;							// doing something that mustn't be interrupted
-	bool LsLoner() const;
+	bool LsLoner() const;							// goes its own way (see bot_ls_solo)
 	bool LsBangTick();								// spraying through a wall, while it's on
 	bool LsBangGun(CBasePlayerWeapon *pWeapon) const;	// a gun that goes through doors and thin walls
 	bool LsBangThrough(const Vector &target);		// starts spraying a spot behind one thin thing
@@ -1146,7 +1147,7 @@ public:
 	bool LsObjectiveThreat(bool defusing);			// planting/defusing: a threat around it (true: stop for now)
 	void LsWhy(const char *why) { m_lsWhy = why; m_lsWhyAt = gpGlobals->time; }
 	void LsTrace();										// bot_ls_trace: what it's doing, to lstrace.csv
-	bool LsShirksObjective();						// a rogue who leaves the objective to others							// goes its own way (see bot_ls_solo)
+	bool LsShirksObjective();						// a rogue who leaves the objective to others
 	CNavArea *LsPickHuntArea();					// every bot for itself: where to hunt
 	bool LsTeammateCloser(const Vector &pos);
 	bool LsShouldSpread();
@@ -1193,12 +1194,13 @@ private:
 	// or another plugin's release doesn't end it; picked back up after a fight
 	struct LsOrder
 	{
-		int kind = 0;								// 0 none, 1 go to a spot, 2 follow someone
+		int kind = 0;								// 0 none, 1 go to a spot, 2 follow someone, 3 holding where it was sent
 		Vector at;
 		EntityHandle<CBasePlayer> leader;
 		float until = 0.0f;
 		float holdSecs = 0.0f;						// a go: then hold the spot that long
 		float nextTry = 0.0f;
+		int tries = 0;								// times sent back on its way
 	};
 	LsOrder m_lsOrder;
 	void LsOrderTick();
@@ -1209,12 +1211,16 @@ private:
 													// the game frees a bot without running its destructor)
 	char m_lsMap[64] = "";									// the map that memory is for
 	float m_lsMapCheckedAt = -1.0f;						// the frame the map was last checked (once a frame is enough)
-	float m_lsDiedAt = -100.0f;
+	float m_lsDiedAt = -100.0f;						// when it was last killed
+	bool m_lsWasBlind = false;
+	float m_lsBlindTurnAt = 0.0f;					// flashed: next change of what it's doing
+	int m_lsBlindWay = 0;
+	bool m_lsBlindSpray = false;
 	Vector m_lsFightHeard;							// gunfire it heard last (deathmatch hunting)
 	float m_lsFightHeardAt = -100.0f;
 	int m_lsEnemyDeaths = -1;						// its enemy's deaths when last seen (a respawned one isn't still there)
-	float m_lsHeBlockedSince = -1.0f;
-	float m_lsHeBackAt = 0.0f;						// ...and not back out before then				// Gun Game's grenade level: no safe throw since then						// when it was last killed
+	float m_lsHeBlockedSince = -1.0f;				// Gun Game's grenade level: no safe throw since then
+	float m_lsHeBackAt = 0.0f;						// ...and not back out before then
 	float m_lsDangerUntil = -1.0f;						// when all of that memory will have faded (nothing to look up after)
 	string_t m_lsSeedName = 0;								// the name LsSeed was worked out from
 	unsigned int m_lsSeed = 0;
@@ -1247,18 +1253,19 @@ private:
 	int m_lsRetakeRound = -1;						// the round it waited for teammates before a retake
 	int m_lsPickupRound = -1;						// the round it went for a dropped gun after
 	int m_lsTeamRound = -1;							// the round LsTeamTick last saw
-	float m_lsDefuseNoticeAt = -1.0f;
-	float m_lsDefuseActedAt = -100.0f;				// went for a defuse it heard (not while hiding) then				// when it takes in the defuse it hears
+	float m_lsDefuseNoticeAt = -1.0f;				// when it takes in the defuse it hears
+	float m_lsDefuseActedAt = -100.0f;				// went for a defuse it heard (not while hiding) then
 	float m_lsDefuseHeardLast = -10.0f;			// last time it was told of a defuse going on
-	int m_lsForTimeRoll = -1;
+	int m_lsForTimeRoll = -1;						// this fight: does it play for time (-1 not rolled)
 	float m_lsLateBombAt = 0.0f;					// a late carrier: next look at whether it's off to a site
-	int m_lsFloorRound = -1;
+	int m_lsFloorRound = -1;						// the round it went for a floor gun
 	int m_lsYieldRound = -1;						// the round its kit yields were counted for
 	int m_lsYields = 0;							// times it left the bomb to a kit this round (twice at most)
 	float m_lsStaleCheckAt = 0.0f;
-	int m_lsStaleRound = -1;
-	int m_lsStaleLast = -1;						// ...and as the last one alive						// the round it went looking to end a stalemate						// the round it went for a floor gun
-	CBaseEntity *m_lsFloorGun = nullptr;			// the one it's going for (others leave it to it)					// the round its carrier hurried to a site for the clock						// this fight: does it play for time (-1 not rolled)
+	int m_lsStaleRound = -1;						// the round it went looking to end a stalemate
+	int m_lsStaleLast = -1;							// ...and as the last one alive (again every 20 s)
+	float m_lsStaleLastAt = -100.0f;
+	EntityHandle<CBaseEntity> m_lsFloorGun;			// the one it's going for (others leave it to it)
 	// (end team members)
 	// Loner-Strike nades (cs_bot_ls_nades.cpp): members
 	int m_lsNadePhase = 0;							// 0 none, 1 getting it out, 2 throwing, 3 looking away from its flash
