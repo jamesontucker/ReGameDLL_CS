@@ -136,6 +136,9 @@ void BuyState::OnEnter(CCSBot *me)
 			m_buyPistol = true;
 		}
 	}
+
+	// Loner-Strike: save, force or the usual buy this round (cs_bot_ls_nades.cpp)
+	me->LsPlanBuy();
 }
 
 enum WeaponType
@@ -287,6 +290,14 @@ void BuyState::OnUpdate(CCSBot *me)
 	if (gpGlobals->time - me->GetStateTimestamp() > buyInterval)
 	{
 		me->m_stateTimestamp = gpGlobals->time;
+
+		// Loner-Strike: a save round: a pistol at most, the money kept for the next
+		if (me->LsSavingMoney())
+		{
+			me->LsBuyEco();
+			m_doneBuying = true;
+			return;
+		}
 
 		bool isPreferredAllDisallowed = true;
 
@@ -454,6 +465,10 @@ void BuyState::OnUpdate(CCSBot *me)
 		// If we now have a weapon, or have tried for too long, we're done
 		if (me->m_bHasPrimary || m_retries++ > 5)
 		{
+			// Loner-Strike: a force buy: something cheaper when its own gun is out of reach
+			if (!me->m_bHasPrimary && me->LsForcing())
+				me->LsBuyForce();
+
 			// primary ammo
 			if (me->m_bHasPrimary)
 			{
@@ -492,8 +507,11 @@ void BuyState::OnUpdate(CCSBot *me)
 				me->ClientCommand("secammo");
 			}
 
+			// Loner-Strike: grenades and the defuse kit with a plan (cs_bot_ls_nades.cpp)
+			if (LsFight() && !LsSolo())
+				me->LsBuyExtras();
 			// buy a grenade if we wish, and we don't already have one
-			if (m_buyGrenade && !me->HasGrenade())
+			else if (m_buyGrenade && !me->HasGrenade())
 			{
 				if (UTIL_IsTeamAllBots(me->m_iTeam))
 				{
@@ -531,7 +549,7 @@ void BuyState::OnUpdate(CCSBot *me)
 				}
 			}
 
-			if (m_buyDefuseKit)
+			if (m_buyDefuseKit && !(LsFight() && !LsSolo()))	// (Loner-Strike: see above)
 			{
 				me->ClientCommand("defuser");
 			}

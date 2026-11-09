@@ -66,7 +66,8 @@ void IdleState::OnUpdate(CCSBot *me)
 	if (me->IsSafe())
 	{
 		// if we have a grenade, use it
-		if (!me->EquipGrenade())
+		// (Loner-Strike: only the newer players who throw everything early run out with one)
+		if ((LsFight() && !LsSolo() && !me->LsNadeDumper()) || !me->EquipGrenade())
 		{
 			// high-skill bots run with the knife
 			if (me->GetProfile()->GetSkill() > 0.33f)

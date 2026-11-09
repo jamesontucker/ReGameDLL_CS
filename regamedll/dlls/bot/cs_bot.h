@@ -1025,6 +1025,33 @@ public:
 	// Loner-Strike team (cs_bot_ls_team.cpp)
 	// (end team)
 	// Loner-Strike nades (cs_bot_ls_nades.cpp)
+	void LsNadeReset();								// a new round
+	bool LsNadeBusy() const { return m_lsNadePhase != 0; }	// getting a grenade out, throwing it, or looking away from its flash
+	bool LsNadeDumper();							// a newer pub player who throws every grenade early in the round
+	float LsNadeUse();								// how well it uses grenades (0-1ish)
+	bool LsHasNade(int id);
+	void LsNadeUpdate();							// grenades with a purpose (instead of the stock end-of-safe-time toss)
+	bool LsNadeGunUp();								// an enemy turned up with a flash or smoke in hand: the gun instead
+	void LsNadeStart(int id, const Vector &aim, float pause);
+	void LsNadeStop();
+	bool LsPlanThrow(int id, const Vector &target, float within, Vector *aim, Vector *burst);
+	bool LsPlanFlash(const Vector &corner, const Vector &beyond, Vector *aim, Vector *burst, bool *inMySight);
+	bool LsFlashSafe(const Vector &burst, bool careless);	// no teammate facing the burst
+	bool LsNadeCorner(Vector *corner, Vector *beyond);	// the corner ahead on its path
+	int LsNadeSite();								// the bomb site a T is heading for, or -1
+	bool LsNadeHot(const Vector &spot);				// enemies likely round there
+	void LsSawClear(CBasePlayer *pPlayer);			// its enemy seen with no smoke in the way
+	float LsSmokeSprayTime();
+	bool LsClearLine(const Vector &spot, bool testFOV);	// in sight but for smoke
+	bool LsSeeIntoSmoke(CBasePlayer *pPlayer, bool testFOV, unsigned char *visParts);	// an enemy behind smoke it still shoots at
+	void LsPlanBuy();								// BuyState::OnEnter: save, force or buy this round
+	bool LsSavingMoney() const { return m_lsBuyPlan == 1; }
+	bool LsForcing() const { return m_lsBuyPlan == 2; }
+	void LsBuyEco();								// a save round: a pistol at most
+	void LsBuyForce();								// a force buy: a cheaper gun
+	void LsBuyExtras();								// grenades and the defuse kit (instead of the stock picks)
+	void LsSaveCheck();								// alone against many late in a lost round: hide, keep the gun
+	bool LsSavingGun() const { return m_lsSaving; }
 	// (end nades)
 	// Loner-Strike moves (cs_bot_ls_moves.cpp)
 	// (end moves)
@@ -1121,6 +1148,25 @@ private:
 	// Loner-Strike team (cs_bot_ls_team.cpp): members
 	// (end team members)
 	// Loner-Strike nades (cs_bot_ls_nades.cpp): members
+	int m_lsNadePhase = 0;							// 0 none, 1 getting it out, 2 throwing, 3 looking away from its flash
+	int m_lsNadeId = 0;								// the grenade it's throwing
+	Vector m_lsNadeAim;								// where it looks to throw it
+	Vector m_lsNadeBurst;							// where it should go off
+	float m_lsNadePhaseAt = 0.0f;
+	int m_lsNadeAmmoType = 0;
+	int m_lsNadeAmmo = 0;							// how many it had when the throw started
+	float m_lsNadeNextThink = 0.0f;
+	float m_lsNadeNextAt = 0.0f;					// no other grenade till then
+	bool m_lsNadeSmokeRolled = false;				// decided about the site smoke this round
+	bool m_lsNadeCornerRolled = false;				// decided about a flash for this corner
+	Vector m_lsNadeCornerAt;
+	int m_lsBuyPlan = 0;							// this round: 0 the usual buy, 1 save, 2 force
+	bool m_lsSaving = false;						// alone against many late on: keeping its gun
+	bool m_lsSaveDecided = false;					// decided about that this round
+	float m_lsSaveNext = 0.0f;
+	float m_lsClearSawAt = -10.0f;					// its enemy last seen with no smoke in the way
+	float m_lsSmokeLostAt = -10.0f;					// ...and lost (behind smoke or a wall) after that
+	float m_lsSmokeUntil = 0.0f;					// still shooting into the smoke where they went till then
 	// (end nades members)
 	// Loner-Strike moves (cs_bot_ls_moves.cpp): members
 	// (end moves members)

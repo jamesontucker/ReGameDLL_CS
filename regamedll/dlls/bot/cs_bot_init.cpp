@@ -361,6 +361,7 @@ void CCSBot::RoundRespawn()
 
 	// Loner-Strike: a new round starts clean
 	LsPuppetRelease();
+	LsNadeReset();
 }
 
 void CCSBot::Disconnect()
