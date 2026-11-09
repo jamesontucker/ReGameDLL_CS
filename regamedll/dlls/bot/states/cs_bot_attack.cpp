@@ -144,6 +144,9 @@ void AttackState::OnEnter(CCSBot *me)
 
 	// decide whether we might bail out of this fight
 	m_isCoward = (RANDOM_FLOAT(0.0f, 100.0f) > 100.0f * me->GetProfile()->GetAggression());
+
+	// Loner-Strike: caught by surprise, a newer player may hold walk or crouch
+	me->LsAttackBegins(m_crouchAndHold);
 }
 
 void AttackState::StopAttacking(CCSBot *me)
@@ -333,7 +336,8 @@ void AttackState::OnUpdate(CCSBot *me)
 		// if we have a sniper rifle and our enemy is too close, switch to pistol
 		// NOTE: Must be larger than NO_ZOOM range in AdjustZoom()
 		const float sniperMinRange = 310.0f;
-		if ((pEnemy->pev->origin - me->pev->origin).IsLengthLessThan(sniperMinRange))
+		// (Loner-Strike: newer players keep the sniper rifle up close)
+		if ((pEnemy->pev->origin - me->pev->origin).IsLengthLessThan(sniperMinRange) && !me->LsScopesClose())
 			me->EquipPistol();
 	}
 	else if (me->IsUsingShotgun())
@@ -356,6 +360,10 @@ void AttackState::OnUpdate(CCSBot *me)
 
 		Vector toAimSpot3D = me->m_aimSpot - me->pev->origin;
 		float targetRange = toAimSpot3D.Length();
+
+		// (Loner-Strike: and scope in anyway, which takes a moment)
+		if (me->LsScopesClose())
+			targetRange = Q_max(targetRange, 400.0f);
 
 		// dont adjust zoom level if we're already zoomed in - just fire
 		if (me->GetZoomLevel() == CCSBot::NO_ZOOM && me->AdjustZoom(targetRange))
@@ -540,7 +548,10 @@ void AttackState::OnUpdate(CCSBot *me)
 
 	// Loner-Strike: a crouch while shooting, a jump to look round a corner (some bots)
 	if (LsFight())
+	{
 		me->LsFightHabits(lsRange, m_crouchAndHold);
+		me->LsPanicUpdate();
+	}
 
 	// Loner-Strike: hit, it moves (whatever it decided when the fight began)
 	if (LsFight() && !m_dodge && !m_crouchAndHold && me->GetTimeSinceAttacked() < 1.0f)

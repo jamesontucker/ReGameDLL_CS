@@ -1042,6 +1042,22 @@ public:
 	// Loner-Strike nades (cs_bot_ls_nades.cpp)
 	// (end nades)
 	// Loner-Strike moves (cs_bot_ls_moves.cpp)
+	bool LsCornerMoves(Vector *goal);				// a blind corner ahead: jiggle, wide swing or outside line (true: a jiggle moves it)
+	int LsPickCornerPlan();							// ...which, for this corner
+	float LsCrouchTapTime();						// how long a crouch in a fight lasts (mostly taps)
+	const Vector *LsOffAngle(const Vector *stockPick, const Vector *pos, CNavArea *source, float range);	// a less obvious spot to hold
+	void LsPrefire(const Vector &spot);				// a hiding spot coming into view up close: a short burst (some)
+	void LsFallBack();								// falling back from a fight: eyes on the threat
+	bool LsFallingBack() const;
+	bool LsLookingBack() const;						// ...looking back at it right now
+	void LsMovesUpdate();							// each think, after the state machine: prefires, looking back
+	bool LsScopesClose();							// newer snipers scope in (and keep the rifle) up close
+	void LsAttackBegins(bool crouchAndHold);		// a fight starts: newer players may panic
+	void LsPanicUpdate();
+	int LsLadderSide();								// diagonal climb on this ladder: 1, -1, or 0 for straight
+	bool LsLadderYaw(float faceYaw, float *yaw);	// ...the view for it
+	void LsLadderClimb();							// ...the strafe for it
+	bool LsQuietDrop(float dz);						// sneaking: walk off a small drop instead of jumping
 	// (end moves)
 	// Loner-Strike (cs_bot_ls.cpp): each bot keeps to itself and moves like a person
 	unsigned int LsSeed();
@@ -1148,6 +1164,29 @@ private:
 	// Loner-Strike nades (cs_bot_ls_nades.cpp): members
 	// (end nades members)
 	// Loner-Strike moves (cs_bot_ls_moves.cpp): members
+	Vector m_lsCornerAt;							// the corner the plan is for
+	int m_lsCornerPlan = 0;							// what it does there
+	Vector2D m_lsCornerShift;						// a wide swing or the outside line: off the path by this much
+	bool m_lsCornerBlind = false;					// it couldn't see past the corner when the plan started
+	float m_lsJiggleUntil = 0.0f;					// a jiggle peek under way until
+	float m_lsJigglePhaseEnd = 0.0f;
+	int m_lsJigglePhase = 0;						// 0 out, 1 back
+	int m_lsJiggleLeft = 0;							// out-and-backs left
+	Vector2D m_lsJiggleOut;							// the way out round the corner
+	Vector m_lsJiggleLook;							// where someone past it would be
+	float m_lsNextJiggle = 0.0f;
+	Vector m_lsPrefireAt;							// prefiring this spot
+	float m_lsPrefireUntil = 0.0f;
+	float m_lsPrefireFireEnd = 0.0f;				// the burst ends then (0: not aimed yet)
+	float m_lsNextPrefire = 0.0f;
+	Vector m_lsBackFrom;							// falling back from a threat here
+	float m_lsBackUntil = 0.0f;
+	float m_lsNextGlance = 0.0f;
+	int m_lsBackStyle = 0;							// 2 eyes on it, 1 glances back
+	float m_lsPanicUntil = 0.0f;					// a newer player panicking until
+	int m_lsPanicKind = 0;							// 1 walk, 2 crouch
+	float m_lsLadderFor = -1.0f;					// the ladder (its start time) the climb was rolled for
+	int m_lsLadderSide = 0;
 	// (end moves members)
 	float m_lsBangHeardAt = -10.0f;					// last sprayed a wall at someone heard behind it
 	float m_lsPreAimAt = -10.0f;					// last pre-aimed at footsteps

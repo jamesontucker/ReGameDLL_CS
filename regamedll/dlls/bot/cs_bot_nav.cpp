@@ -145,7 +145,8 @@ bool CCSBot::DiscontinuityJump(float ground, bool onlyJumpDown, bool mustJump)
 			return true;
 		}
 	}
-	else if (!IsUsingLadder() && dz < -JumpHeight)
+	// (Loner-Strike: sneaking, a small drop is walked off quietly)
+	else if (!IsUsingLadder() && dz < -JumpHeight && !LsQuietDrop(dz))
 	{
 		if (Jump(mustJump))
 		{
