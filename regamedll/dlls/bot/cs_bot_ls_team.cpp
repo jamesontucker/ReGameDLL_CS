@@ -70,6 +70,34 @@ void CCSBot::LsTeamTick()
 		}
 	}
 
+	// hostage maps: a T that has reached its spot near the hostages holds it a while, rather
+	// than circling them; a CT with the clock running out and no hostages yet hurries for them
+	if (TheCSBots()->GetScenario() == CCSBotManager::SCENARIO_RESCUE_HOSTAGES && !CSGameRules()->IsFreezePeriod() && !IsAttacking() && !LsOrderActive())
+	{
+		if (m_iTeam == TERRORIST && IsHunting() && m_lsHostHoldAt <= now && GetLastKnownArea() && LsFree())
+		{
+			bool near = false;
+			CBaseEntity *pHostage = nullptr;
+			while (!near && (pHostage = UTIL_FindEntityByClassname(pHostage, "hostage_entity")))
+				near = pHostage->IsAlive() && (pHostage->pev->origin - pev->origin).IsLengthLessThan(600.0f);
+			if (near && RANDOM_FLOAT(0.0f, 1.0f) < 0.4f + 0.4f * (1.0f - LsAggro()))
+			{
+				float secs = RANDOM_FLOAT(8.0f, 20.0f);
+				Hide(GetLastKnownArea(), secs, 400.0f);
+				m_lsHostHoldAt = now + secs + RANDOM_FLOAT(5.0f, 15.0f);
+				LsWhy("hold-hostages");
+			}
+			else
+				m_lsHostHoldAt = now + RANDOM_FLOAT(4.0f, 8.0f);
+		}
+		else if (m_iTeam == CT && m_lsHostRushRound != round && LsTimeLeft() < 40.0f && GetHostageEscortCount() == 0 && CSGameRules()->m_iHostagesRescued == 0)
+		{
+			m_lsHostRushRound = round;
+			Hurry(40.0f);
+			LsWhy("hostages-late");
+		}
+	}
+
 	// a teammate's call it looked into first: on its way now, unless something came up
 	if (m_lsRotateAt > 0.0f && now >= m_lsRotateAt)
 	{
@@ -536,8 +564,8 @@ void CCSBot::LsStalemateTick()
 	float wait = mates == 0 ? 20.0f : 35.0f + 45.0f * (1.0f - aggro) + 20.0f * LsTrait(85);
 	if (TheCSBots()->GetElapsedRoundTime() < wait || GetTimeSinceLastSawEnemy() < 12.0f || GetTimeSinceAttacked() < 8.0f)
 		return;
-	// (the most patient never do, unless they're the last)
-	if (mates > 0 && aggro < 0.3f && LsTrait(86) < 0.6f)
+	// (the most patient never do, unless they're the last, or it's been two minutes)
+	if (mates > 0 && aggro < 0.3f && LsTrait(86) < 0.6f && (TheCSBots()->GetElapsedRoundTime() < 120.0f || RANDOM_FLOAT(0.0f, 1.0f) < 0.5f))
 		return;
 	m_lsStaleRound = round;
 	if (mates == 0)

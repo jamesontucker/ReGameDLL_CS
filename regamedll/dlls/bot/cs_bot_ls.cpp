@@ -755,7 +755,18 @@ void CCSBot::LsOrderTick()
 		{
 			// there: a spot with some cover close by, held a while if asked (each bot its own
 			// spot, not five on one point); else back to its own business
-			if (o.holdSecs > 0.0f)
+			// (a CT sent to the hostages takes them, not a hold beside them)
+			bool hostages = false;
+			if (m_iTeam == CT && TheCSBots()->GetScenario() == CCSBotManager::SCENARIO_RESCUE_HOSTAGES)
+			{
+				CBaseEntity *pHostage = nullptr;
+				while (!hostages && (pHostage = UTIL_FindEntityByClassname(pHostage, "hostage_entity")))
+				{
+					if (pHostage->IsAlive() && !(pHostage->pev->effects & EF_NODRAW) && (pHostage->pev->origin - pev->origin).IsLengthLessThan(300.0f))
+						hostages = true;
+				}
+			}
+			if (o.holdSecs > 0.0f && !hostages)
 			{
 				CNavArea *pArea = TheNavAreaGrid.GetNearestNavArea(&o.at);
 				SetTask(HOLD_POSITION);	// (a plant elsewhere still calls it off: HideState)

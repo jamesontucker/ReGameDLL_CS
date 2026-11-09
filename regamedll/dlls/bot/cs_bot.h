@@ -1265,7 +1265,9 @@ private:
 	float m_lsDefuseHeardLast = -10.0f;			// last time it was told of a defuse going on
 	int m_lsForTimeRoll = -1;						// this fight: does it play for time (-1 not rolled)
 	float m_lsLateBombAt = 0.0f;					// a late carrier: next look at whether it's off to a site
-	int m_lsClockRound = -1;						// the round a CT settled in to run the clock down
+	int m_lsClockRound = -1;
+	float m_lsHostHoldAt = 0.0f;					// hostage maps: a T's next go at holding near them
+	int m_lsHostRushRound = -1;					// the round a CT hurried for the hostages late						// the round a CT settled in to run the clock down
 	int m_lsPlantRound = -1;						// the round it picked a plant spot
 	Vector m_lsPlantSpot;
 	float m_lsPlantBy = 0.0f;						// ...and plants wherever it is by then
