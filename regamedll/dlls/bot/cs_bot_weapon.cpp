@@ -708,8 +708,17 @@ void CCSBot::ReloadCheck()
 	const float reloadAmmoRatio = LsFight() ? LsReloadRatio() : 0.6f;
 
 	// don't bother to reload if there are no enemies left
+	// (Loner-Strike: people do anyway, by habit, once the round's won)
 	if (GetEnemiesRemaining() == 0)
+	{
+		if (LsFight() && TheCSBots()->IsRoundOver() && m_lsWinReloadRound != LsRoundSerial() && !IsActiveWeaponReloading()
+			&& GetActiveWeapon() && !IsUsingKnife() && !IsUsingGrenade() && GetActiveWeaponAmmoRatio() <= reloadAmmoRatio)
+		{
+			m_lsWinReloadRound = LsRoundSerial();
+			Reload();
+		}
 		return;
+	}
 
 	if (IsDefusingBomb() || IsActiveWeaponReloading())
 		return;

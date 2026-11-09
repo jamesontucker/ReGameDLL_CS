@@ -1260,6 +1260,9 @@ private:
 	int m_lsPickupRound = -1;						// the round it went for a dropped gun after
 	int m_lsTeamRound = -1;							// the round LsTeamTick last saw
 	float m_lsDefuseNoticeAt = -1.0f;				// when it takes in the defuse it hears
+	int m_lsWinReloadRound = -1;
+	float m_lsSwapCheckAt = 0.0f;					// mid-round: next look for a better gun on the floor
+	int m_lsEscortRound = -1;						// the round it went with a late carrier					// the round it reloaded after winning
 	float m_lsFetchCheckAt = 0.0f;
 	float m_lsCarrierCheckAt = 0.0f;				// the carrier: next look at whether to let someone go first
 	int m_lsCarrierRound = -1;

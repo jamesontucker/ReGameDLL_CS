@@ -82,6 +82,12 @@ void CCSBot::OnEvent(GameEventType event, CBaseEntity *pEntity, CBaseEntity *pOt
 	// ...and an enemy dying early in the round to a teammate is a reason to push
 	if (event == EVENT_PLAYER_DIED && pPlayer && pPlayer->IsPlayer() && pOther && pOther->IsPlayer())
 		LsEarlyPick(pPlayer, static_cast<CBasePlayer *>(pOther));
+	// ...and one it killed itself: its aim stays on them a moment, as people's does
+	if (event == EVENT_PLAYER_DIED && pPlayer && pPlayer != this && pOther == this && LsFight() && !IsBlind())
+	{
+		Vector body = pPlayer->pev->origin;
+		SetLookAt("Loner-Strike: the kill", &body, PRIORITY_MEDIUM, RANDOM_FLOAT(0.3f, 0.5f) + 0.5f * (1.0f - LsAggro()));
+	}
 
 	// If we just saw a nearby friend die, and we haven't yet acquired an enemy
 	// automatically acquire our dead friend's killer

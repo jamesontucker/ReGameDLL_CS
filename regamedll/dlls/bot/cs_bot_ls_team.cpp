@@ -88,6 +88,26 @@ void CCSBot::LsTeamTick()
 		}
 	}
 
+	// a T without the bomb, late with no plant: goes with the carrier to its site, as a team
+	// does when the clock's running out (once a round; not mid-fight or under an order)
+	if (m_iTeam == TERRORIST && !IsCarryingBomb() && m_lsEscortRound != round && TheCSBots()->GetScenario() == CCSBotManager::SCENARIO_DEFUSE_BOMB
+		&& !TheCSBots()->IsBombPlanted() && !CSGameRules()->IsFreezePeriod() && LsTimeLeft() < 25.0f && LsFree() && !m_lsSaving)
+	{
+		m_lsEscortRound = round;
+		CCSBot *pCarrier = nullptr;
+		LsForTeammates(this, [&](CBasePlayer *pPlayer) {
+			if (pPlayer->IsBot() && pPlayer->m_bHasC4)
+				pCarrier = static_cast<CCSBot *>(pPlayer);
+		});
+		if (pCarrier && pCarrier->HasPath() && (pCarrier->pev->origin - pev->origin).IsLengthLessThan(1500.0f))
+		{
+			Vector to = pCarrier->GetPathEndpoint();
+			MoveTo(&to, FASTEST_ROUTE);
+			Hurry(15.0f);
+			LsWhy("escort-late-bomb");
+		}
+	}
+
 	// the bomb still on its back with the clock nearly gone: to a site, now
 	// (looked at every few seconds: after a fight, or from a hide or someone's "go" order, it
 	// still has to get there)
@@ -157,6 +177,40 @@ void CCSBot::LsTeamTick()
 		{
 			MoveTo(&m_lsRotateTo, FASTEST_ROUTE);
 			LsWhy("rotate");
+		}
+	}
+
+	// mid-round, out of a fight, with an SMG, a shotgun or nothing: a rifle or an AWP lying close
+	// by is picked up (people swap for a dead player's AK)
+	if (!TheCSBots()->IsRoundOver() && now >= m_lsSwapCheckAt && !IsAttacking() && !LsOrderActive() && !IsCarryingBomb() && LsFree()
+		&& !CSGameRules()->IsFreezePeriod() && !LsWeaponModeOn())
+	{
+		m_lsSwapCheckAt = now + 2.0f;
+		CBasePlayerItem *pPrimary = m_rgpPlayerItems[PRIMARY_WEAPON_SLOT];
+		bool poor = !pPrimary || pPrimary->m_iId == WEAPON_MP5N || pPrimary->m_iId == WEAPON_TMP || pPrimary->m_iId == WEAPON_MAC10 || pPrimary->m_iId == WEAPON_UMP45
+			|| pPrimary->m_iId == WEAPON_P90 || pPrimary->m_iId == WEAPON_M3 || pPrimary->m_iId == WEAPON_XM1014;
+		if (poor && GetTimeSinceLastSawEnemy() > 3.0f)
+		{
+			static const char *const better[] = { "models/w_ak47.mdl", "models/w_m4a1.mdl", "models/w_awp.mdl", "models/w_sg552.mdl", "models/w_aug.mdl",
+				"models/w_galil.mdl", "models/w_famas.mdl" };
+			CBaseEntity *pBox = nullptr;
+			while ((pBox = UTIL_FindEntityByClassname(pBox, "weaponbox")))
+			{
+				if ((pBox->pev->origin - pev->origin).IsLengthGreaterThan(450.0f))
+					continue;
+				bool good = false;
+				for (const char *g : better)
+					good = good || FStrEq(STRING(pBox->pev->model), g);
+				if (!good || !FVisible(pBox->pev->origin + Vector(0, 0, 8)))
+					continue;
+				// (dropped what it has first, so the new one is picked up on touch)
+				if (pPrimary)
+					DropPlayerItem(STRING(pPrimary->pev->classname));
+				Vector to = pBox->pev->origin;
+				MoveTo(&to, FASTEST_ROUTE);
+				LsWhy("swap-gun");
+				break;
+			}
 		}
 	}
 
