@@ -782,6 +782,7 @@ void CCSBot::LsStartOver()
 	m_lsFloorGun = nullptr;
 	m_lsHeBlockedSince = -1.0f;
 	m_lsWasBlind = m_lsBlindSpray = false;
+	m_lsCarrierFollowUntil = 0.0f;
 	m_lsLastPos = pev->origin;
 	m_lsLastPosAt = gpGlobals->time;
 }
