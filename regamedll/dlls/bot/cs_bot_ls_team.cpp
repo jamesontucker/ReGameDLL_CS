@@ -37,6 +37,19 @@ void CCSBot::LsTeamTick()
 			m_lsDefuseActedAt = now;
 	}
 
+	// a dropped bomb, seen on the radar: a T on its way somewhere or hiding (states that never
+	// look for it) goes for it too, if it's one of the nearest
+	if (m_iTeam == TERRORIST && now >= m_lsFetchCheckAt && TheCSBots()->GetLooseBomb() && !IsAttacking() && !LsOrderActive() && !m_lsSaving
+		&& (IsMovingTo() || IsHiding()) && GetTask() != PLANT_BOMB)
+	{
+		m_lsFetchCheckAt = now + 1.0f;
+		if (LsFetchesBomb())
+		{
+			FetchBomb();
+			LsWhy("fetch-bomb");
+		}
+	}
+
 	// the bomb still on its back with the clock nearly gone: to a site, now
 	// (looked at every few seconds: after a fight, or from a hide or someone's "go" order, it
 	// still has to get there)
@@ -461,8 +474,13 @@ bool CCSBot::LsFetchesBomb()
 	float mine = float((pBomb->pev->origin - pev->origin).Length());
 	int closer = 0;
 	LsForTeammates(this, [&](CBasePlayer *pPlayer) {
-		// (only bots free to go: one in a fight, or saving, isn't on its way)
-		if (pPlayer->IsBot() && (pBomb->pev->origin - pPlayer->pev->origin).IsLengthLessThan(mine) && static_cast<CCSBot *>(pPlayer)->LsFree())
+		// (only bots that will go, or are going: one fetching it, or one standing about or
+		// hunting and free; one on its way somewhere or hiding never looks for the bomb, and
+		// counting it would leave the bomb lying there)
+		if (!pPlayer->IsBot() || (pBomb->pev->origin - pPlayer->pev->origin).IsLengthGreaterThan(mine))
+			return;
+		CCSBot *pBot = static_cast<CCSBot *>(pPlayer);
+		if (pBot->m_state == &pBot->m_fetchBombState || ((pBot->m_state == &pBot->m_idleState || pBot->IsHunting()) && pBot->LsFree()))
 			closer++;
 	});
 	return closer < 2;
