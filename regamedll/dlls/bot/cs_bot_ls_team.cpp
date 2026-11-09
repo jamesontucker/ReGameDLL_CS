@@ -221,6 +221,10 @@ void CCSBot::LsTeamTick()
 					good = good || FStrEq(STRING(pBox->pev->model), g);
 				if (!good || !FVisible(pBox->pev->origin + Vector(0, 0, 8)))
 					continue;
+				// (one a living player dropped, a gift or a swap of their own, isn't fair game)
+				CBaseEntity *pOwner = pBox->pev->owner ? CBaseEntity::Instance(pBox->pev->owner) : nullptr;
+				if (pOwner && pOwner->IsPlayer() && pOwner->IsAlive())
+					continue;
 				// (another bot already on its way to it)
 				bool taken = false;
 				LsForTeammates(this, [&](CBasePlayer *pPlayer) {
@@ -729,11 +733,12 @@ const CCSBotManager::Zone *CCSBot::LsQuietZone()
 		float score = RANDOM_FLOAT(0.0f, 0.5f);
 		// (where they are, or for a bot on its way, where it's going: at spawn they're all far
 		// from both sites)
+		// (by the site each is closest to: on nuke the two are stacked, a radius would count both)
 		LsForTeammates(this, [&](CBasePlayer *pPlayer) {
 			Vector at = pPlayer->pev->origin;
 			if (pPlayer->IsBot() && static_cast<CCSBot *>(pPlayer)->HasPath())
 				at = static_cast<CCSBot *>(pPlayer)->GetPathEndpoint();
-			if ((at - zone->m_center).IsLengthLessThan(1200.0f))
+			if ((at - zone->m_center).IsLengthLessThan(1500.0f) && TheCSBots()->GetClosestZone(&at) == zone)
 				score += 1.0f;
 		});
 		if (score < bestScore)

@@ -253,7 +253,7 @@ void BuyState::OnUpdate(CCSBot *me)
 		// (and a few always late: still in the shop a second or few after freeze time, as people are)
 		float pace = me->LsBuyPace();
 		float waitToBuyTime = LsSolo() ? 0.0f : LsFight() ? 0.5f + 2.5f * pace : 2.0f; // 0.25f;
-		if (LsFight() && !LsSolo() && !LsMatch() && pace > 0.88f)
+		if (LsFight() && !LsSolo() && !LsMatch() && pace > 0.88f && !me->IsCarryingBomb())
 			waitToBuyTime = freezetime.value + 0.5f + 25.0f * (pace - 0.88f);
 		if (gpGlobals->time - me->GetStateTimestamp() < waitToBuyTime)
 			return;

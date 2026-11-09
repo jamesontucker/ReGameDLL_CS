@@ -83,10 +83,12 @@ void CCSBot::OnEvent(GameEventType event, CBaseEntity *pEntity, CBaseEntity *pOt
 	if (event == EVENT_PLAYER_DIED && pPlayer && pPlayer->IsPlayer() && pOther && pOther->IsPlayer())
 		LsEarlyPick(pPlayer, static_cast<CBasePlayer *>(pOther));
 	// ...and one it killed itself: its aim stays on them a moment, as people's does
-	if (event == EVENT_PLAYER_DIED && pPlayer && pPlayer != this && pOther == this && LsFight() && !IsBlind())
+	// (where they stood, at head height; only the newer ones look down at the body; not in
+	// deathmatch, where the next one's already coming)
+	if (event == EVENT_PLAYER_DIED && pPlayer && pPlayer != this && pOther == this && LsFight() && !LsSolo() && !IsBlind())
 	{
-		Vector body = pPlayer->pev->origin;
-		SetLookAt("Loner-Strike: the kill", &body, PRIORITY_MEDIUM, RANDOM_FLOAT(0.3f, 0.5f) + 0.5f * (1.0f - LsAggro()));
+		Vector spot = pPlayer->pev->origin + (LsSkill() < 0.35f ? Vector(0, 0, 0) : Vector(0, 0, HalfHumanHeight + 10.0f));
+		SetLookAt("Loner-Strike: the kill", &spot, PRIORITY_MEDIUM, RANDOM_FLOAT(0.3f, 0.5f) + 0.5f * (1.0f - LsAggro()));
 	}
 
 	// If we just saw a nearby friend die, and we haven't yet acquired an enemy

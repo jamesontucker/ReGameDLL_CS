@@ -747,7 +747,7 @@ void CCSBot::LsOrderTick()
 		}
 		return;
 	}
-	if (IsAttacking() || m_isEnemyVisible || LsOrderBusy() || IsOnLadder())
+	if (IsAttacking() || m_isEnemyVisible || LsOrderBusy() || IsOnLadder() || IsBuying())
 		return;
 	if (o.kind == 1)
 	{
@@ -988,7 +988,10 @@ void CCSBot::LsPuppetCommand(const char *what, float now)
 			p.holdUntil = p.crouchUntil = p.lookUntil = 0.0f;
 			p.holdTag[0] = '\0';
 		}
-		MoveTo(&to, SAFEST_ROUTE);
+		// (still in the shop: it finishes buying first; the order sends it once it's done)
+		bool buying = chat && IsBuying();
+		if (!buying)
+			MoveTo(&to, SAFEST_ROUTE);
 		if (LsArg(6) > 0.0f)
 			p.walkUntil = now + most;
 		if (chat)
@@ -996,7 +999,7 @@ void CCSBot::LsPuppetCommand(const char *what, float now)
 			m_lsOrder = LsOrder();
 			pev->vuser1.x = 0.0f;
 			// (somewhere it can't get to isn't taken: gm_botchat then says it can't)
-			if (!HasPath())
+			if (!buying && !HasPath())
 				return;
 			m_lsOrder.kind = 1;
 			m_lsOrder.at = to;
