@@ -1236,6 +1236,8 @@ private:
 		float t0 = 0.0f, dur = 0.1f;
 		int corrections = 0;
 		float restUntil = 0.0f;
+		float reactUntil = 0.0f;					// a new thing to look at: not before then
+		float lastY = 0.0f, lastP = 0.0f;			// last frame's goal (a sudden change is something new)
 	};
 	LsHand m_lsHandM;
 	bool m_lsHandMoving = false;

@@ -1115,21 +1115,32 @@ void CCSBot::LsHandUpdate(float goalYaw, float goalPitch, float dt)
 
 	if (h.moving)
 	{
-		// (a moving goal is followed: the planned landing shifts with it)
+		// (the stroke is committed for its first 60%: the hand can't take in a change that fast;
+		// after that, a goal that's moved well away aborts it for a new stroke from here)
 		float driftY = NormalizeAngle(goalYaw - h.goalY), driftP = NormalizeAngle(goalPitch - h.goalP);
 		float s = (now - h.t0) / h.dur;
 		float k = LsMinJerk(s);
-		pev->v_angle.y = h.y0 + NormalizeAngle(h.y1 + driftY - h.y0) * k;
-		pev->v_angle.x = h.p0 + (h.p1 + driftP - h.p0) * k;
-		if (s >= 1.0f)
+		pev->v_angle.y = h.y0 + NormalizeAngle(h.y1 - h.y0) * k;
+		pev->v_angle.x = h.p0 + (h.p1 - h.p0) * k;
+		if (s >= 0.6f && s < 1.0f && sqrtf(driftY * driftY + driftP * driftP) > Q_max(2.0f, 0.5f * width))
+		{
+			h.moving = false;
+			h.corrections = 0;
+			h.restUntil = now;
+		}
+		else if (s >= 1.0f)
 		{
 			h.moving = false;
 			offY = NormalizeAngle(goalYaw - pev->v_angle.y);
 			offP = NormalizeAngle(goalPitch - pev->v_angle.x);
 			off = sqrtf(offY * offY + 1.56f * offP * offP);
-			// (still off the target: a correction, slower and smaller; at most two)
+			// (still off the target: a correction, slower and smaller, at most two, after the
+			// moment it takes to see the miss)
 			if (off > Q_max(0.5f, 0.35f * width) && h.corrections < 2 && (fight || !calm || off > 2.5f))
+			{
 				h.corrections++;
+				h.restUntil = now + RANDOM_FLOAT(0.01f, 0.03f);
+			}
 			else
 			{
 				h.corrections = 0;
@@ -1142,11 +1153,22 @@ void CCSBot::LsHandUpdate(float goalYaw, float goalPitch, float dt)
 	{
 		// when to move: a big change at once; a small one only past the dead zone, after a rest
 		float deadZone = fight ? Q_max(0.4f, 0.5f * width) * (1.6f - 0.8f * skill) : calm ? 3.0f + 3.5f * LsTrait(91) : 1.5f;
-		bool start = (off > 25.0f) || (off > deadZone && now >= h.restUntil) || (h.corrections > 0 && off > 0.3f);
+		// (a new thing to look at, calmly: a reaction first, mostly quick, now and then slow: a
+		// log-normal delay, shorter for the skilled. In a fight the stock reaction already applies)
+		float jump = sqrtf(NormalizeAngle(goalYaw - h.lastY) * NormalizeAngle(goalYaw - h.lastY) + NormalizeAngle(goalPitch - h.lastP) * NormalizeAngle(goalPitch - h.lastP));
+		if (!fight && jump > 20.0f)
+		{
+			float z = (RANDOM_FLOAT(-1.0f, 1.0f) + RANDOM_FLOAT(-1.0f, 1.0f) + RANDOM_FLOAT(-1.0f, 1.0f)) * 0.577f;
+			float base = 0.12f + 0.06f * (1.0f - skill);
+			float mu = -2.5f + 0.5f * (1.0f - skill), sigma = 0.4f + 0.15f * (1.0f - skill);
+			h.reactUntil = now + base + expf(mu + sigma * z);
+		}
+		bool start = now >= h.reactUntil
+			&& ((off > 25.0f) || (off > deadZone && now >= h.restUntil) || (h.corrections > 0 && off > 0.3f && now >= h.restUntil));
 		if (start)
 		{
 			// how long (Fitts): a + b log2(1 + D/W), quicker for the skilled and in a fight
-			float b = 0.075f * (1.45f - 0.7f * skill) * (fight ? 0.8f : calm ? 1.1f : 0.9f);
+			float b = (0.08f + 0.07f * (1.0f - skill)) * (fight ? 0.9f : calm ? 1.05f : 0.95f);
 			float dur = 0.05f + b * log2f(1.0f + off / width);
 			if (m_lsPuppet.fast && now < m_lsPuppet.lookUntil)
 				dur *= 0.6f;
@@ -1173,6 +1195,8 @@ void CCSBot::LsHandUpdate(float goalYaw, float goalPitch, float dt)
 		}
 	}
 
+	h.lastY = goalYaw;
+	h.lastP = goalPitch;
 	if (pev->v_angle.x < -89.0f)
 		pev->v_angle.x = -89.0f;
 	else if (pev->v_angle.x > 89.0f)
