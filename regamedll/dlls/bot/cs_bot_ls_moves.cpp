@@ -1060,7 +1060,9 @@ Vector CCSBot::LsLaggedEnemyPos()
 void CCSBot::LsTremorTick()
 {
 	float dt = g_flBotCommandInterval;
-	float sigma = 0.25f + 0.9f * (1.0f - LsSkill());
+	// (shakier under stress: hurt, hit just now, or a spray that hit nothing)
+	float stress = (LsHealth() < 40.0f ? 0.6f : 0.0f) + (GetTimeSinceAttacked() < 1.5f ? 0.5f : 0.0f) + (gpGlobals->time < m_lsWhiffUntil ? 0.6f : 0.0f);
+	float sigma = (0.25f + 0.9f * (1.0f - LsSkill())) * (1.0f + stress);
 	const float theta = 6.0f;
 	auto gauss = []() { return (RANDOM_FLOAT(-1.0f, 1.0f) + RANDOM_FLOAT(-1.0f, 1.0f) + RANDOM_FLOAT(-1.0f, 1.0f)) * 0.577f; };
 	m_lsTremorYaw += -theta * m_lsTremorYaw * dt + sigma * 2.4f * sqrtf(dt) * gauss();

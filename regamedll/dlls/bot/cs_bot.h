@@ -1232,7 +1232,9 @@ private:
 	float m_lsTrackAt[8] = {};
 	int m_lsTrackN = 0;
 	float m_lsTremorYaw = 0.0f;
-	float m_lsTremorPitch = 0.0f;						// calm looks: a burst of the mouse under way
+	float m_lsTremorPitch = 0.0f;
+	float m_lsWhiffUntil = 0.0f;					// a spray that hit nothing: shakier till then
+	int m_lsShotsNoHit = 0;						// calm looks: a burst of the mouse under way
 	float m_lsHandRestUntil = 0.0f;					// ...and the hand resting till then
 	float m_lsSnipeStepAt = -10.0f;
 	int m_lsSnipeStepDir = 0;

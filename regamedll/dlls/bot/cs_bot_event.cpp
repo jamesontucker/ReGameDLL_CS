@@ -68,6 +68,10 @@ void CCSBot::OnEvent(GameEventType event, CBaseEntity *pEntity, CBaseEntity *pOt
 
 	CBasePlayer *pPlayer = static_cast<CBasePlayer *>(pEntity);
 
+	// Loner-Strike: a hit of its own: not whiffing
+	if (event == EVENT_PLAYER_TOOK_DAMAGE && pOther == this)
+		m_lsShotsNoHit = 0;
+
 	// Loner-Strike: an enemy's bullets landing close (or passing close): being shot at
 	if (event == EVENT_BULLET_IMPACT)
 	{
@@ -90,8 +94,12 @@ void CCSBot::OnEvent(GameEventType event, CBaseEntity *pEntity, CBaseEntity *pOt
 	// deathmatch, where the next one's already coming)
 	if (event == EVENT_PLAYER_DIED && pPlayer && pPlayer != this && pOther == this && LsFight() && !LsSolo() && !IsBlind())
 	{
-		Vector spot = pPlayer->pev->origin + (LsSkill() < 0.35f ? Vector(0, 0, 0) : Vector(0, 0, HalfHumanHeight + 10.0f));
+		// (the good ones keep their aim on the spot; casual players let go, a glance down and away)
+		bool release = LsSkill() < 0.5f && LsTrait(95) < 0.6f;
+		Vector spot = release ? pPlayer->pev->origin + Vector(RANDOM_FLOAT(-40.0f, 40.0f), RANDOM_FLOAT(-40.0f, 40.0f), -20.0f)
+			: pPlayer->pev->origin + Vector(0, 0, HalfHumanHeight + 10.0f);
 		SetLookAt("Loner-Strike: the kill", &spot, PRIORITY_MEDIUM, RANDOM_FLOAT(0.3f, 0.5f) + 0.5f * (1.0f - LsAggro()));
+		m_lsShotsNoHit = 0;
 	}
 
 	// If we just saw a nearby friend die, and we haven't yet acquired an enemy

@@ -135,6 +135,12 @@ void CCSBot::FireWeaponAtEnemy()
 					else
 					{
 						PrimaryAttack();
+						// (Loner-Strike: ten shots and nothing hit: rattled a moment)
+						if (LsFight() && ++m_lsShotsNoHit >= 10)
+						{
+							m_lsShotsNoHit = 0;
+							m_lsWhiffUntil = gpGlobals->time + 3.0f;
+						}
 					}
 				}
 

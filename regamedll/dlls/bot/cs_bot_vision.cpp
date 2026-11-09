@@ -1299,6 +1299,22 @@ bool CCSBot::IsNoticable(const CBasePlayer *pPlayer, unsigned char visibleParts)
 {
 	float deltaT = m_attentionInterval.GetElapsedTime();
 
+	// Loner-Strike: attention, as a person's: nothing new is taken in mid-flick (the eyes skip
+	// over the world during a fast turn), and in a fight the edges of the view narrow: someone
+	// well off to the side of the one being fought is often missed (unless they shoot: LsFlankCheck)
+	if (LsFight())
+	{
+		if (fabs(m_lookYawVel) > 350.0f)
+			return false;
+		if (IsAttacking())
+		{
+			Vector to = pPlayer->pev->origin - pev->origin;
+			float off = float(fabs(NormalizeAngle(UTIL_VecToYaw(to) - pev->v_angle.y)));
+			if (off > 40.0f && RANDOM_FLOAT(0.0f, 1.0f) > 0.3f + 0.5f * LsSkill())
+				return false;
+		}
+	}
+
 	// all chances are specified in terms of a standard "quantum" of time
 	// in which a normal person would notice something
 	const float noticeQuantum = 0.25f;
