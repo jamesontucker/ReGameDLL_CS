@@ -359,9 +359,10 @@ void CCSBot::RoundRespawn()
 	CBasePlayer::RoundRespawn();
 	EndVoiceFeedback();
 
-	// Loner-Strike: a new round starts clean
+	// Loner-Strike: a new round (or a deathmatch respawn) starts clean
 	LsPuppetRelease();
 	LsNadeReset();
+	LsStartOver();
 }
 
 void CCSBot::Disconnect()

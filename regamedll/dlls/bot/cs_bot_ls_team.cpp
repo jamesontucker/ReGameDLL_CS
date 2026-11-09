@@ -23,6 +23,17 @@ void CCSBot::LsTeamTick()
 		m_lsForTimeRoll = -1;
 	}
 
+	// the bomb still on its back with the clock nearly gone: to a site, now
+	if (IsCarryingBomb() && m_lsLateBombRound != round && !IsAttacking() && !IsAtBombsite() && TheCSBots()->GetScenario() == CCSBotManager::SCENARIO_DEFUSE_BOMB
+		&& !CSGameRules()->IsFreezePeriod() && CSGameRules()->GetRoundRemainingTime() < 25.0f)
+	{
+		m_lsLateBombRound = round;
+		Hurry(25.0f);
+		if (IsHunting())
+			Idle();
+		LsWhy("late-bomb");
+	}
+
 	// a teammate's call it looked into first: on its way now, unless something came up
 	if (m_lsRotateAt > 0.0f && now >= m_lsRotateAt)
 	{
@@ -168,6 +179,20 @@ bool CCSBot::LsTeamHeard(GameEventType event, CBasePlayer *pPlayer)
 	float d = float((pPlayer->pev->origin - pev->origin).Length());
 	if (d < 250.0f || d > 1000.0f)
 		return false;
+	// (nor a person shooting at nothing: only with an enemy in their sight)
+	if (!pPlayer->IsBot())
+	{
+		bool foe = false;
+		for (int i = 1; i <= gpGlobals->maxClients && !foe; i++)
+		{
+			CBasePlayer *pOther = UTIL_PlayerByIndex(i);
+			if (pOther && pOther->IsAlive() && pOther->m_iTeam != pPlayer->m_iTeam && (pOther->m_iTeam == CT || pOther->m_iTeam == TERRORIST)
+				&& (pOther->pev->origin - pPlayer->pev->origin).IsLengthLessThan(2500.0f) && pPlayer->FVisible(pOther))
+				foe = true;
+		}
+		if (!foe)
+			return false;
+	}
 	m_lsTradeAt = now;
 	float chance = LsLoner() ? 0.15f : 0.35f + 0.5f * LsTeamwork();
 	if (LsMatch())
@@ -210,6 +235,80 @@ bool CCSBot::LsHoldsPlant()
 	// (a rusher can't sit still; a camper loves it)
 	float lean = LsStyle() == LS_STYLE_CAMPER ? 1.3f : LsStyle() == LS_STYLE_RUSHER ? 0.6f : 1.0f;
 	return RANDOM_FLOAT(0.0f, 1.0f) < Q_min(0.97f, (LsMatch() ? 0.9f : 0.65f) * lean);
+}
+
+// A T guarding the planted bomb, and a CT starts defusing it: only one it can see is shot at
+// straight away. One it only hears takes a moment to register (less for the better ones),
+// then it looks to where the sound is and heads there; too far off and it doesn't hear it
+bool CCSBot::LsDefuseHeard(CBasePlayer *pDefuser)
+{
+	if (!LsFight() || !LsTeamGame())
+		return false;
+	float now = gpGlobals->time;
+	if (IsVisible(pDefuser, true))
+	{
+		Attack(pDefuser);
+		return true;
+	}
+	float away = float((pDefuser->pev->origin - pev->origin).Length());
+	if (away > 1400.0f)
+		return true;
+	// (a new defuse: when it notices)
+	if (now - m_lsDefuseHeardLast > 1.0f)
+		m_lsDefuseNoticeAt = now + RANDOM_FLOAT(0.3f, 0.7f) + 0.6f * (1.0f - LsSkill()) + away / 2800.0f;
+	m_lsDefuseHeardLast = now;
+	if (now < m_lsDefuseNoticeAt)
+		return true;
+
+	float err = away * (0.12f - 0.06f * LsSkill());
+	Vector heard = pDefuser->pev->origin + Vector(RANDOM_FLOAT(-err, err), RANDOM_FLOAT(-err, err), HalfHumanHeight);
+	SetLookAt("Loner-Strike: the defuse", &heard, PRIORITY_HIGH, RANDOM_FLOAT(1.0f, 2.0f));
+	Vector to = pDefuser->pev->origin;
+	MoveTo(&to, FASTEST_ROUTE);
+	InhibitLookAround(10.0f);
+	LsWhy("defuse-heard");
+	return true;
+}
+
+// A CT at the planted bomb about to defuse: without a kit it leaves it to a teammate with one
+// who's close (and covers them), and one that couldn't finish in the time left gets out (the
+// newer ones try anyway)
+bool CCSBot::LsYieldsDefuse()
+{
+	if (!LsFight() || !LsTeamGame() || !TheCSBots()->IsBombPlanted())
+		return false;
+	const Vector *bomb = GetGameState()->GetBombPosition();
+	if (!bomb)
+		return false;
+	float left = TheCSBots()->GetBombTimeLeft();
+	if (left < (m_bHasDefuser ? 5.0f : 10.0f) + 0.2f)
+	{
+		if (LsTrait(83) < 0.25f + 0.6f * LsSkill() && TryToRetreat())
+		{
+			LsWhy("no-time-to-defuse");
+			return true;
+		}
+		return false;
+	}
+	if (m_bHasDefuser || (TheCSBots()->GetBombDefuser() && TheCSBots()->GetBombDefuser() != this))
+		return false;
+	// (a kit, close to the bomb, with time for it to get there and finish)
+	bool kitNear = false;
+	for (int i = 1; i <= gpGlobals->maxClients; i++)
+	{
+		CBasePlayer *pPlayer = UTIL_PlayerByIndex(i);
+		if (!pPlayer || pPlayer == this || !pPlayer->IsAlive() || pPlayer->m_iTeam != m_iTeam || !pPlayer->m_bHasDefuser)
+			continue;
+		// (a person with a kit only counts right at the bomb: they may not be going for it)
+		if ((pPlayer->pev->origin - *bomb).IsLengthLessThan(pPlayer->IsBot() ? 600.0f : 200.0f) && left > 7.0f)
+			kitNear = true;
+	}
+	if (!kitNear)
+		return false;
+	SetTask(HOLD_POSITION);
+	Hide(GetLastKnownArea(), RANDOM_FLOAT(3.0f, 6.0f), 300.0f);
+	LsWhy("kit-defuses");
+	return true;
 }
 
 // A teammate got a kill early in the round (a CT down in the first 40 s, Ts on a bomb map):
@@ -256,8 +355,117 @@ bool CCSBot::LsFetchesBomb()
 	float mine = float((pBomb->pev->origin - pev->origin).Length());
 	int closer = 0;
 	LsForTeammates(this, [&](CBasePlayer *pPlayer) {
-		if (pPlayer->IsBot() && (pBomb->pev->origin - pPlayer->pev->origin).IsLengthLessThan(mine))
+		// (only bots free to go: one in a fight, or saving, isn't on its way)
+		if (pPlayer->IsBot() && (pBomb->pev->origin - pPlayer->pev->origin).IsLengthLessThan(mine) && static_cast<CCSBot *>(pPlayer)->LsFree())
 			closer++;
 	});
 	return closer < 2;
+}
+
+// A map with guns lying about (fy_, some aim_ maps): a bot without a primary at the start of
+// a round runs for the best one close by, as people sprint for the AK. One bot to a gun.
+void CCSBot::LsFloorGunTick()
+{
+	if (!LsFight() || LsSolo() || !IsAlive() || !CSGameRules() || CSGameRules()->IsFreezePeriod() || LsWeaponModeOn())
+		return;
+	int round = CSGameRules()->m_iTotalRoundsPlayed;
+	if (m_lsFloorRound == round)
+	{
+		if (m_lsFloorGun && (m_bHasPrimary || (m_lsFloorGun->pev->effects & EF_NODRAW)))
+			m_lsFloorGun = nullptr;
+		return;
+	}
+	if (m_bHasPrimary || TheCSBots()->GetElapsedRoundTime() > 15.0f || IsAttacking() || IsCarryingBomb())
+		return;
+	m_lsFloorRound = round;
+	m_lsFloorGun = nullptr;
+
+	CBaseEntity *pEnt = nullptr, *pBest = nullptr;
+	float best = 1500.0f;
+	while ((pEnt = UTIL_FindEntityByClassname(pEnt, "armoury_entity")))
+	{
+		if (pEnt->pev->effects & EF_NODRAW)
+			continue;
+		ArmouryItemPack item = static_cast<CArmoury *>(pEnt)->m_iItem;
+		if (item >= ARMOURY_FLASHBANG && item != ARMOURY_FAMAS && item != ARMOURY_SG550 && item != ARMOURY_GALIL && item != ARMOURY_UMP45)
+			continue;	// (grenades, armour, pistols: not worth the run)
+		if (item == ARMOURY_SHIELD)
+			continue;
+		// (someone already on their way to it)
+		bool taken = false;
+		for (int i = 1; i <= gpGlobals->maxClients && !taken; i++)
+		{
+			CBasePlayer *pPlayer = UTIL_PlayerByIndex(i);
+			if (pPlayer && pPlayer != this && pPlayer->IsBot() && pPlayer->IsAlive() && static_cast<CCSBot *>(pPlayer)->m_lsFloorGun == pEnt)
+				taken = true;
+		}
+		if (taken)
+			continue;
+		float d = float((pEnt->pev->origin - pev->origin).Length());
+		// (a rifle or the AWP is worth a longer run than an SMG or a shotgun)
+		bool rifle = item == ARMOURY_AK47 || item == ARMOURY_M4A1 || item == ARMOURY_AWP || item == ARMOURY_SG552 || item == ARMOURY_AUG
+			|| item == ARMOURY_FAMAS || item == ARMOURY_GALIL;
+		if (rifle)
+			d *= 0.6f;
+		if (d < best)
+		{
+			best = d;
+			pBest = pEnt;
+		}
+	}
+	if (!pBest)
+		return;
+	m_lsFloorGun = pBest;
+	Vector to = pBest->pev->origin;
+	MoveTo(&to, FASTEST_ROUTE);
+	LsWhy("floor-gun");
+}
+
+// Rounds on a map with no objective (awp_, aim_, fy_ played in rounds): nothing makes anyone
+// move, and both sides can hold till the clock runs out. After a quiet spell the bold go
+// looking (sooner the bolder), and the last one alive on a side always does
+void CCSBot::LsStalemateTick()
+{
+	float now = gpGlobals->time;
+	if (now < m_lsStaleCheckAt)
+		return;
+	m_lsStaleCheckAt = now + RANDOM_FLOAT(2.0f, 4.0f);
+	if (!LsFight() || LsSolo() || LsTeamGame() || !IsAlive() || IsAttacking() || IsHunting() || !CSGameRules() || CSGameRules()->IsFreezePeriod())
+		return;
+	int mates = 0;
+	LsForTeammates(this, [&](CBasePlayer *) { mates++; });
+	float aggro = LsAggro();
+	float wait = mates == 0 ? 20.0f : 35.0f + 45.0f * (1.0f - aggro) + 20.0f * LsTrait(85);
+	if (TheCSBots()->GetElapsedRoundTime() < wait || GetTimeSinceLastSawEnemy() < 12.0f || GetTimeSinceAttacked() < 8.0f)
+		return;
+	// (the most patient never do, unless they're the last)
+	if (mates > 0 && aggro < 0.3f && LsTrait(86) < 0.6f)
+		return;
+	if (m_lsPuppet.any)
+		LsPuppetRelease();
+	Hunt();
+	Hurry(RANDOM_FLOAT(6.0f, 12.0f));
+	LsWhy("stalemate");
+}
+
+// The bomb site with the fewest living teammates within 1200 units (ties at random)
+const CCSBotManager::Zone *CCSBot::LsQuietZone()
+{
+	const CCSBotManager::Zone *best = nullptr;
+	float bestScore = 1e9f;
+	for (int z = 0; z < TheCSBots()->GetZoneCount(); z++)
+	{
+		const CCSBotManager::Zone *zone = TheCSBots()->GetZone(z);
+		float score = RANDOM_FLOAT(0.0f, 0.5f);
+		LsForTeammates(this, [&](CBasePlayer *pPlayer) {
+			if ((pPlayer->pev->origin - zone->m_center).IsLengthLessThan(1200.0f))
+				score += 1.0f;
+		});
+		if (score < bestScore)
+		{
+			bestScore = score;
+			best = zone;
+		}
+	}
+	return best ? best : TheCSBots()->GetRandomZone();
 }

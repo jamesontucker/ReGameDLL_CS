@@ -1590,6 +1590,10 @@ CCSBot::PathResult CCSBot::UpdatePathMovement(bool allowSpeedChange)
 			PrintIfWatched("I fell off!\n");
 		}
 
+		// (Loner-Strike: remembered, so the same route isn't tried all round)
+		if (!didFall && m_pathIndex < m_pathLength)
+			LsAreaStuck(m_path[m_pathIndex].area);
+
 		// if we havent made any progress in a long time, give up
 		if (m_pathIndex < m_pathLength - 1)
 		{

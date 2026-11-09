@@ -290,6 +290,9 @@ void MoveToState::OnUpdate(CCSBot *me)
 
 					if (toBomb.IsLengthLessThan(defuseRange))
 					{
+						// (Loner-Strike: left to a kit next to it, or no time to finish)
+						if (me->LsYieldsDefuse())
+							return;
 						me->DefuseBomb();
 						return;
 					}

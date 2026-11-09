@@ -183,11 +183,14 @@ void HuntState::OnUpdate(CCSBot *me)
 			m_huntArea = me->LsPickHuntArea();
 			if (m_huntArea)
 			{
-				me->LsWhy(me->LsShouldSpread() ? "hunt-spread" : "hunt");
+				me->LsWhy("hunt");
 				// (in deathmatch the quickest way there: the safest kept teammates on the
-				// same few routes, away from the enemy)
-				me->ComputePath(m_huntArea, nullptr, LsSolo() ? FASTEST_ROUTE : SAFEST_ROUTE);
-				return;
+				// same few routes, away from the enemy; a few who've been killed lately
+				// take the long way round, a flank)
+				bool flank = LsSolo() && LsOwnMemory() && me->LsRemembersDanger() && me->LsTrait(84) < 0.4f;
+				// (no way there: the stock pick below, not another random one next frame)
+				if (me->ComputePath(m_huntArea, nullptr, (LsSolo() && !flank) ? FASTEST_ROUTE : SAFEST_ROUTE))
+					return;
 			}
 		}
 

@@ -488,7 +488,7 @@ static void LsPrefireTick(CCSBot *me, const Vector &at, float &until, float &fir
 	if (now >= until)
 		return;
 	if (me->IsAttacking() || me->IsBlind() || me->IsReloading() || me->IsActiveWeaponClipEmpty() || me->IsUsingKnife() || me->IsUsingGrenade()
-		|| LsTeammateNear(me, at, 200.0f))
+		|| LsTeammateNear(me, at, 200.0f) || me->IsFriendInLineOfFire())
 	{
 		until = 0.0f;
 		return;
@@ -757,8 +757,9 @@ bool CCSBot::LsDucksOff(const CNavArea *area, const Vector &spot) const
 
 // Nothing has startled it lately: no enemy in sight or seen in the last few seconds, not hurt
 // or shot at, no loud noise close by. Then its looks about are calm turns (LsCalm in
-// UpdateLookAngles); a startle makes them quick again
-bool CCSBot::LsCalm() const
+// UpdateLookAngles); a startle makes them quick again. pluginLooks false: a quick look a plugin
+// asked for doesn't count (its next step, a spin's or a nod's hold, is still taken)
+bool CCSBot::LsCalm(bool pluginLooks) const
 {
 	float now = gpGlobals->time;
 	if (IsEnemyVisible() || GetTimeSinceLastSawEnemy() < 4.0f || GetTimeSinceAttacked() < 3.0f || now - m_lsShotAtAt < 3.0f)
@@ -766,7 +767,80 @@ bool CCSBot::LsCalm() const
 	if (m_noiseTimestamp > 0.0f && now - m_noiseTimestamp < 2.0f && m_noisePriority >= PRIORITY_MEDIUM)
 		return false;
 	// (a pre-aim at footsteps just now, or a quick look a plugin asked for: quick turns)
-	if (now - m_lsPreAimAt < 1.5f || (now < m_lsPuppet.lookUntil && m_lsPuppet.fast))
+	if (now - m_lsPreAimAt < 1.5f || (pluginLooks && now < m_lsPuppet.lookUntil && m_lsPuppet.fast))
 		return false;
 	return !IsUsingLadder() && !IsBlind();
+}
+
+// Respawned, or moved by a plugin or a teleporter: a wall spray, a prefire or a fall-back look
+// would carry on from the new place at the old one, and the path is from somewhere else
+void CCSBot::LsStartOver()
+{
+	m_lsBangUntil = 0.0f;
+	m_lsPrefireUntil = 0.0f;
+	m_lsBackUntil = 0.0f;
+	m_lsLastPos = pev->origin;
+	m_lsLastPosAt = gpGlobals->time;
+}
+
+void CCSBot::LsTeleportCheck()
+{
+	float now = gpGlobals->time;
+	float gap = now - m_lsLastPosAt;
+	Vector was = m_lsLastPos;
+	m_lsLastPos = pev->origin;
+	m_lsLastPosAt = now;
+	// (faster than 1000 units a second, a fall aside: a long drop is fast too, but straight down)
+	if (gap <= 0.0f || gap > 0.5f || !IsAlive())
+		return;
+	Vector moved = pev->origin - was;
+	if (moved.Make2D().IsLengthLessThan(Q_max(256.0f, 1000.0f * gap)))
+		return;
+	LsStartOver();
+	if (!LsFight())
+		return;
+	DestroyPath();
+	ResetStuckMonitor();
+	LsNadeStop();
+	if (m_lsPuppet.any)
+		LsPuppetRelease();
+	LsWhy("teleported");
+}
+
+// An area it couldn't get into (under a ledge, a bad link in the nav): gave up twice in a row
+// within half a minute and it's avoided for 30 s, so the next path goes another way
+bool CCSBot::LsBadArea(const CNavArea *area) const
+{
+	if (!LsFight() || !area)
+		return false;
+	for (int i = 0; i < 4; i++)
+	{
+		if (m_lsBadAreas[i] == area && gpGlobals->time < m_lsBadAreaUntil[i])
+			return true;
+	}
+	return false;
+}
+
+void CCSBot::LsAreaStuck(const CNavArea *area)
+{
+	if (!LsFight() || !area || IsAttacking())
+		return;
+	float now = gpGlobals->time;
+	if (area != m_lsFailArea || now - m_lsFailAt > 30.0f)
+	{
+		m_lsFailArea = area;
+		m_lsFailAt = now;
+		return;
+	}
+	// (the slot that's free, or ran out first)
+	int slot = 0;
+	for (int i = 1; i < 4; i++)
+	{
+		if (m_lsBadAreaUntil[i] < m_lsBadAreaUntil[slot])
+			slot = i;
+	}
+	m_lsBadAreas[slot] = area;
+	m_lsBadAreaUntil[slot] = now + 30.0f;
+	m_lsFailArea = nullptr;
+	LsWhy("bad-area");
 }

@@ -210,8 +210,11 @@ void CCSBot::Update()
 	}
 
 	LsTrace();	// Loner-Strike (testing)
+	LsTeleportCheck();	// Loner-Strike
 
 	LsTeamTick();	// Loner-Strike: team play
+	LsFloorGunTick();	// Loner-Strike: fy_ maps
+	LsStalemateTick();	// Loner-Strike: awp_ / aim_ / fy_ rounds
 
 	// Loner-Strike: spraying a wall at someone heard behind it (in a fight, the attack does it)
 	if (!IsAttacking())
@@ -368,10 +371,17 @@ void CCSBot::Update()
 			// enough not to get caught in it)
 			Vector aim, burst;
 			float range = float((threat->pev->origin - pev->origin).Length());
+			// (and not onto a teammate: team Gun Game turns friendly fire on at this level)
 			if (LsFight() && LsNadeOnly() && range > 250.0f && range < 1100.0f && LsPlanThrow(WEAPON_HEGRENADE, threat->pev->origin, 220.0f, &aim, &burst))
-				ThrowGrenade(&aim);
+			{
+				if (LsHeSafe(this, burst))
+					ThrowGrenade(&aim);
+			}
 			else if (!(LsFight() && LsNadeOnly() && range <= 250.0f))
-				ThrowGrenade(&threat->pev->origin);
+			{
+				if (!(LsFight() && LsNadeOnly()) || LsHeSafe(this, threat->pev->origin))
+					ThrowGrenade(&threat->pev->origin);
+			}
 			else
 				EquipPistol();	// (too close for it: the Glock)
 		}

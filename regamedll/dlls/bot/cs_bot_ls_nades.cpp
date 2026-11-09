@@ -273,7 +273,7 @@ bool CCSBot::LsFlashSafe(const Vector &burst, bool careless)
 }
 
 // No teammate where the HE goes off
-static bool LsHeSafe(CCSBot *me, const Vector &burst)
+bool LsHeSafe(CCSBot *me, const Vector &burst)
 {
 	for (int i = 1; i <= gpGlobals->maxClients; i++)
 	{
@@ -1016,9 +1016,9 @@ void CCSBot::LsBuyExtras()
 		}
 		else
 		{
+			// (no smoke: CTs have no smoke plan, and one never thrown is money wasted)
 			list[n++] = "flash";
 			list[n++] = "hegren";
-			if (user > 0.6f) list[n++] = "sgren";
 			if (user > 0.75f) list[n++] = "flash";
 		}
 		// some never bother with them; the first is the one they'd have

@@ -1041,6 +1041,12 @@ public:
 	bool LsPlayForTime();							// a CT alone against several before the plant: fall back
 	bool LsHoldsPlant();							// guarding the planted bomb: hold, don't chase
 	void LsEarlyPick(CBasePlayer *pVictim, CBasePlayer *pKiller);	// a T teammate got an early kill: push
+	bool LsDefuseHeard(CBasePlayer *pDefuser);		// a T guarding hears the defuse: handled the human way (true)
+	bool LsYieldsDefuse();							// at the bomb but leaves it: a kit CT is right there, or it can't finish
+	float LsHealth() const { return 100.0f * float(pev->health) / Q_max(100.0f, float(pev->max_health)); }	// health out of 100, whatever its max (War3, SuperHero; a mod that raises health without the max counts as healthier)
+	void LsFloorGunTick();
+	void LsStalemateTick();						// rounds with no objective: a long quiet ends with someone going looking							// fy_ maps: no gun at the start of a round, it runs for one on the floor
+	const CCSBotManager::Zone *LsQuietZone();		// the bomb site with the fewest teammates at it (ties at random)
 	bool LsFetchesBomb();							// one of the nearest two Ts to a dropped bomb
 	// (end team)
 	// Loner-Strike nades (cs_bot_ls_nades.cpp)
@@ -1053,6 +1059,8 @@ public:
 	bool LsNadeGunUp();								// an enemy turned up with a flash or smoke in hand: the gun instead
 	void LsNadeStart(int id, const Vector &aim, float pause);
 	void LsNadeStop();
+	void LsStartOver();							// respawned or teleported: what it was in the middle of ends
+	void LsTeleportCheck();						// moved further in a moment than anyone can run: LsStartOver
 	bool LsPlanThrow(int id, const Vector &target, float within, Vector *aim, Vector *burst);
 	bool LsPlanFlash(const Vector &corner, const Vector &beyond, Vector *aim, Vector *burst, bool *inMySight);
 	bool LsFlashSafe(const Vector &burst, bool careless);	// no teammate facing the burst
@@ -1094,8 +1102,10 @@ public:
 	bool LsQuietDrop(float dz);						// sneaking: walk off a small drop instead of jumping
 	bool LsBadLadder(const CNavLadder *ladder) const { return ladder && ladder == m_lsBadLadder && gpGlobals->time < m_lsBadLadderUntil; }
 	void LsLadderStuck(const CNavLadder *ladder) { m_lsBadLadder = ladder; m_lsBadLadderUntil = gpGlobals->time + 25.0f; }
+	bool LsBadArea(const CNavArea *area) const;		// an area it keeps failing to get into (costly for a while)
+	void LsAreaStuck(const CNavArea *area);			// gave up getting into it: twice in a row and it's a bad area
 	bool LsDucksOff(const CNavArea *area, const Vector &spot) const;	// getting off a ladder into a low space: crouch
-	bool LsCalm() const;							// nothing has startled it lately (calm looks turn slower)
+	bool LsCalm(bool pluginLooks = true) const;		// nothing has startled it lately (calm looks turn slower)
 	bool LsPuppetLooking() const { return gpGlobals->time < m_lsPuppet.lookUntil; }	// a plugin has it looking somewhere
 	bool LsStuck() const { return m_isStuck; }
 	// (end moves)
@@ -1103,6 +1113,7 @@ public:
 	unsigned int LsSeed();
 	float LsTrait(unsigned int which);
 	float LsGetDanger(const CNavArea *area);
+	bool LsRemembersDanger() const { return gpGlobals->time < m_lsDangerUntil; }	// any of its own danger memory not yet faded
 	void LsAddDangerNearby(float amount, CNavArea *startArea, const Vector *pos, float maxRadius);
 	void LsSawTeammateDie(CBasePlayer *pVictim);
 	bool LsRouteTaste(RouteType route, struct LsRoute *out);	// false: no taste in routes now
@@ -1177,6 +1188,8 @@ private:
 	LsDanger m_lsDanger[96];						// this bot's own danger memory, by area id (a fixed table:
 													// the game frees a bot without running its destructor)
 	char m_lsMap[64] = "";									// the map that memory is for
+	float m_lsMapCheckedAt = -1.0f;						// the frame the map was last checked (once a frame is enough)
+	float m_lsDangerUntil = -1.0f;						// when all of that memory will have faded (nothing to look up after)
 	string_t m_lsSeedName = 0;								// the name LsSeed was worked out from
 	unsigned int m_lsSeed = 0;
 	float m_lsPauseUntil = 0.0f;
@@ -1208,7 +1221,13 @@ private:
 	int m_lsRetakeRound = -1;						// the round it waited for teammates before a retake
 	int m_lsPickupRound = -1;						// the round it went for a dropped gun after
 	int m_lsTeamRound = -1;							// the round LsTeamTick last saw
-	int m_lsForTimeRoll = -1;						// this fight: does it play for time (-1 not rolled)
+	float m_lsDefuseNoticeAt = -1.0f;				// when it takes in the defuse it hears
+	float m_lsDefuseHeardLast = -10.0f;			// last time it was told of a defuse going on
+	int m_lsForTimeRoll = -1;
+	int m_lsLateBombRound = -1;
+	int m_lsFloorRound = -1;
+	float m_lsStaleCheckAt = 0.0f;						// the round it went for a floor gun
+	CBaseEntity *m_lsFloorGun = nullptr;			// the one it's going for (others leave it to it)					// the round its carrier hurried to a site for the clock						// this fight: does it play for time (-1 not rolled)
 	// (end team members)
 	// Loner-Strike nades (cs_bot_ls_nades.cpp): members
 	int m_lsNadePhase = 0;							// 0 none, 1 getting it out, 2 throwing, 3 looking away from its flash
@@ -1261,6 +1280,10 @@ private:
 	int m_lsLadderSide = 0;
 	const CNavLadder *m_lsBadLadder = nullptr;		// a ladder it got stuck on (not used again till m_lsBadLadderUntil)
 	float m_lsBadLadderUntil = 0.0f;
+	const CNavArea *m_lsFailArea = nullptr;			// the last area it gave up getting into
+	float m_lsFailAt = -100.0f;
+	const CNavArea *m_lsBadAreas[4] = {};			// areas it got stuck on twice (costly till m_lsBadAreaUntil)
+	float m_lsBadAreaUntil[4] = {};
 	// (end moves members)
 	float m_lsBangHeardAt = -10.0f;					// last sprayed a wall at someone heard behind it
 	float m_lsPreAimAt = -10.0f;					// last pre-aimed at footsteps
@@ -1270,6 +1293,8 @@ private:
 	bool m_lsPeekThis = false;
 	int m_lsSneakRound = -1;						// the round the late-round sneak was rolled for
 	bool m_lsSneakLate = false;
+	Vector m_lsLastPos;							// where it was last frame (teleports)
+	float m_lsLastPosAt = -1.0f;
 	float m_lsBangUntil = 0.0f;						// spraying through a wall at where the enemy went until then
 	float m_lsBangRolledAt = -1.0f;					// the lost sight it decided about
 	Vector m_lsBangAt;
@@ -1318,6 +1343,7 @@ bool LsFight();
 bool LsMatch();
 bool LsSolo();
 bool LsOwnMemory();
+bool LsHeSafe(CCSBot *me, const Vector &burst);
 void Bot_LsRegisterCVars();
 void Bot_LsServerCommand();
 
@@ -1923,6 +1949,9 @@ public:
 			else
 			{
 				dist = (*area->GetCenter() - *fromArea->GetCenter()).Length();
+				// (Loner-Strike: somewhere it keeps getting stuck getting into: the long way)
+				if (m_bot->LsBadArea(area))
+					dist *= 20.0f;
 			}
 
 			// Loner-Strike: this bot's favourite (and not so favourite) parts of the map
@@ -1996,6 +2025,12 @@ public:
 			{
 				// add in the danger of this path - danger is per unit length travelled
 				cost += dist * dangerFactor * (LsOwnMemory() ? m_bot->LsGetDanger(area) : area->GetDanger(m_bot->m_iTeam - 1));
+			}
+			else if (LsOwnMemory() && LsSolo())
+			{
+				// (Loner-Strike: deathmatch takes the quick way, but not back down the lane it
+				// keeps dying in)
+				cost += dist * dangerFactor * 0.3f * m_bot->LsGetDanger(area);
 			}
 
 			if (!m_bot->IsAttacking())

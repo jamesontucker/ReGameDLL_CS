@@ -191,6 +191,10 @@ void HideState::OnUpdate(CCSBot *me)
 				// if we are near the ticking bomb and someone starts defusing it, attack!
 				if (TheCSBots()->GetBombDefuser())
 				{
+					// (Loner-Strike: seen, shot; heard, a moment to take it in, then go)
+					if (me->LsDefuseHeard(TheCSBots()->GetBombDefuser()))
+						return;
+
 					Vector toDefuser = TheCSBots()->GetBombDefuser()->pev->origin;
 					const float hearDefuseRange = 2000.0f;
 					if ((toDefuser - me->pev->origin).IsLengthLessThan(hearDefuseRange))

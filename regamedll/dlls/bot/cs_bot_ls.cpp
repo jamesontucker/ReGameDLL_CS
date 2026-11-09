@@ -269,11 +269,17 @@ float CCSBot::LsTrait(unsigned int which)
 // a container: the game frees a bot without running its destructor
 void CCSBot::LsCheckMap()
 {
+	// (a path search asks for every area it opens: the name is compared once a frame; a new
+	// map restarts the clock, so a time that went backwards checks too)
+	if (gpGlobals->time == m_lsMapCheckedAt)
+		return;
+	m_lsMapCheckedAt = gpGlobals->time;
 	if (Q_strcmp(m_lsMap, STRING(gpGlobals->mapname)) != 0)
 	{
 		Q_strlcpy(m_lsMap, STRING(gpGlobals->mapname));
 		for (auto &d : m_lsDanger)
 			d.amount = 0.0f;
+		m_lsDangerUntil = -1.0f;
 	}
 }
 
@@ -287,6 +293,8 @@ static float LsDangerNow(const CCSBot::LsDanger &d)
 float CCSBot::LsGetDanger(const CNavArea *area)
 {
 	LsCheckMap();
+	if (gpGlobals->time > m_lsDangerUntil)
+		return 0.0f;
 	for (const auto &d : m_lsDanger)
 	{
 		if (d.amount > 0.0f && d.id == area->GetID())
@@ -324,6 +332,8 @@ void CCSBot::LsAddDangerToArea(const CNavArea *area, float amount)
 	}
 	slot->amount = LsDangerNow(*slot) + amount;
 	slot->time = gpGlobals->time;
+	// (it fades at 1/120 a second)
+	m_lsDangerUntil = Q_max(m_lsDangerUntil, slot->time + 120.0f * slot->amount);
 }
 
 // As IncreaseDangerNearby, into this bot's own memory
@@ -375,6 +385,17 @@ void CCSBot::LsSawTeammateDie(CBasePlayer *pVictim)
 {
 	if (!pVictim)
 		return;
+
+	// the bomb carrier: every T sees where the bomb dropped on the radar, and that someone's
+	// watching that spot (so a fetcher doesn't walk into the same line of fire)
+	CBaseEntity *pBomb = TheCSBots() ? TheCSBots()->GetLooseBomb() : nullptr;
+	if (LsFight() && LsOwnMemory() && m_iTeam == TERRORIST && pVictim->m_iTeam == TERRORIST
+		&& (pVictim->m_bHasC4 || (pBomb && (pBomb->pev->origin - pVictim->pev->origin).IsLengthLessThan(150.0f)))
+		&& !IsVisible(&pVictim->pev->origin, CHECK_FOV))
+	{
+		LsAddDangerNearby(0.5f, TheNavAreaGrid.GetNearestNavArea(&pVictim->pev->origin), &pVictim->pev->origin, 400.0f);
+		return;
+	}
 
 	// see it happen, not only hear about it (a little less than dying there yourself)
 	if (!IsVisible(&pVictim->pev->origin, CHECK_FOV))
@@ -510,8 +531,8 @@ bool CCSBot::LsUpdatePause()
 	if (IsAttacking() || GetTimeSinceLastSawEnemy() < 8.0f || IsOnLadder() || IsCarryingBomb() || LsBusy() || m_isStuck)
 		return false;
 
-	// the bomb is down: no time for that
-	if (TheCSBots()->IsBombPlanted())
+	// the bomb is down, or the clock nearly out: no time for that
+	if (TheCSBots()->IsBombPlanted() || (!LsSolo() && CSGameRules() && CSGameRules()->GetRoundRemainingTime() < 30.0f))
 		return false;
 
 	// never in the air, or where it has to jump or crouch through (it would stop short)
@@ -686,7 +707,7 @@ void Bot_LsServerCommand()
 
 	// not while it's in a fight or busy with something that matters, nor while something
 	// has startled it
-	if (!FStrEq(what, "release") && (me->IsAttacking() || me->IsEnemyVisible() || me->LsBusy() || (LsFight() && !me->LsCalm())))
+	if (!FStrEq(what, "release") && (me->IsAttacking() || me->IsEnemyVisible() || me->LsBusy() || (LsFight() && !me->LsCalm(false))))
 		return;
 
 	me->LsPuppetCommand(what, now);
@@ -862,9 +883,18 @@ CNavArea *CCSBot::LsPickHuntArea()
 				nearest = Q_min(nearest, float((*c - avoid[k]).Length2D()));
 			score += nearest;
 
-			// a deathmatch with hardly anyone left: toward where an enemy was last seen
-			if (LsSolo() && GetEnemiesRemaining() <= 2 && GetTimeSinceLastSawEnemy() < 30.0f)
-				score -= 0.5f * float((*c - GetLastKnownEnemyPosition()).Length2D());
+			// a deathmatch: toward where an enemy was last seen, more so the fewer are left
+			// (with a crowd there's someone everywhere)
+			if (LsSolo() && GetTimeSinceLastSawEnemy() < 30.0f)
+			{
+				int left = GetEnemiesRemaining();
+				if (left <= 6)
+					score -= (left <= 1 ? 1.2f : left <= 2 ? 0.8f : 0.35f) * float((*c - GetLastKnownEnemyPosition()).Length2D());
+			}
+
+			// and in deathmatch: not where it keeps getting killed
+			if (LsSolo() && LsOwnMemory())
+				score -= 2500.0f * Q_min(1.0f, LsGetDanger(area));
 
 			// near what this side looks after
 			if (kept)
@@ -1130,8 +1160,11 @@ void CCSBot::LsSneak()
 		sneaky += 0.25f;
 	bool sneakyCarrier = IsCarryingBomb() && (LsStyle() == LS_STYLE_LURKER || LsStyle() == LS_STYLE_NINJA || LsStyle() == LS_STYLE_CAREFUL)
 		&& CSGameRules() && CSGameRules()->GetRoundRemainingTime() > 40.0f;
+	// (a ninja or lurker CT walks in to a planted bomb while there's time for it)
+	bool quietRetake = m_iTeam == CT && TheCSBots() && TheCSBots()->IsBombPlanted() && (LsStyle() == LS_STYLE_NINJA || LsStyle() == LS_STYLE_LURKER)
+		&& TheCSBots()->GetBombTimeLeft() > 15.0f + (m_bHasDefuser ? 5.0f : 10.0f);
 	bool loud = IsHurrying() || GetTimeSinceAttacked() < 5.0f || GetTimeSinceLastSawEnemy() < 6.0f || IsSafe()
-		|| (TheCSBots() && TheCSBots()->IsBombPlanted()) || (IsCarryingBomb() && !sneakyCarrier) || GetHostageEscortCount() > 0;
+		|| (TheCSBots() && TheCSBots()->IsBombPlanted() && !quietRetake) || (IsCarryingBomb() && !sneakyCarrier) || GetHostageEscortCount() > 0;
 
 	bool want = false;
 	if (!loud && sneaky > 0.45f)
@@ -1323,7 +1356,8 @@ void CCSBot::LsShotAt(CBasePlayer *pShooter, const Vector &impact)
 {
 	if (!IsAlive() || IsBlind() || !pShooter->IsPlayer() || pShooter == this || !pShooter->IsAlive() || !IsEnemy(pShooter))
 		return;
-	if (IsAttacking() && IsEnemyVisible())
+	bool busy = IsAttacking() && IsEnemyVisible();
+	if (busy && (pShooter == GetEnemy() || gpGlobals->time - m_lsShotAtAt < 0.8f))
 		return;
 
 	Vector eye = pev->origin + pev->view_ofs;
@@ -1337,6 +1371,19 @@ void CCSBot::LsShotAt(CBasePlayer *pShooter, const Vector &impact)
 	float miss = (from + line * t - eye).Length();
 	if (miss > 90.0f && (impact - eye).Length() > 110.0f)
 		return;
+
+	// in a fight with someone else and a second one's bullets are hitting it: now and then
+	// (the better ones more often) it turns to them, if it can see them; else it carries on
+	if (busy)
+	{
+		m_lsShotAtAt = gpGlobals->time;
+		if (miss < 30.0f && IsVisible(pShooter, false) && RANDOM_FLOAT(0.0f, 1.0f) < 0.25f + 0.4f * LsSkill())
+		{
+			Attack(pShooter);
+			LsWhy("second-shooter");
+		}
+		return;
+	}
 
 	// once a moment, not every bullet
 	if (gpGlobals->time - m_lsShotAtAt < 0.8f)
@@ -1446,6 +1493,9 @@ bool CCSBot::LsObjectiveThreat(bool defusing)
 	// enough for one plant or defuse
 	if (defusing && TheCSBots()->GetBombTimeLeft() < takes + 3.5f)
 		return false;
+	// (likewise the round about to run out on a plant)
+	if (!defusing && CSGameRules() && CSGameRules()->GetRoundRemainingTime() < takes + 3.5f)
+		return false;
 	if (m_lsObjStops >= 2)
 		return false;
 	float bold = 0.5f * LsAggro() + 0.5f * LsTrait(30);
@@ -1508,7 +1558,8 @@ bool CCSBot::LsBangTick()
 	if (now >= m_lsBangUntil)
 		return false;
 	CBasePlayerWeapon *pWeapon = GetActiveWeapon();
-	if (!IsAlive() || IsBlind() || !pWeapon || IsActiveWeaponClipEmpty() || !LsBangGun(pWeapon) || IsFriendInLineOfFire())
+	if (!IsAlive() || IsBlind() || !pWeapon || IsActiveWeaponClipEmpty() || !LsBangGun(pWeapon) || IsFriendInLineOfFire()
+		|| (m_lsBangAt - pev->origin).IsLengthGreaterThan(1600.0f))
 	{
 		m_lsBangUntil = 0.0f;
 		return false;
@@ -1637,7 +1688,11 @@ void CCSBot::LsHeard(GameEventType event, CBasePlayer *pPlayer, float dist)
 	float dz = float(pPlayer->pev->origin.z - pev->origin.z);
 	if (dz > 120.0f || dz < -120.0f)
 	{
-		Vector glance = pev->origin + pev->view_ofs + Vector(0, 0, dz > 0.0f ? 80.0f : -80.0f);
+		// (toward where it came from, tipped 20-35 degrees up or down, not at the ceiling or the floor)
+		Vector flat = pPlayer->pev->origin - pev->origin;
+		flat.z = 0.0f;
+		flat = flat.IsZero() ? Vector(BotCOS(pev->v_angle.y), BotSIN(pev->v_angle.y), 0.0f) : flat.Normalize();
+		Vector glance = pev->origin + pev->view_ofs + 200.0f * flat + Vector(0, 0, (dz > 0.0f ? 1.0f : -1.0f) * RANDOM_FLOAT(75.0f, 140.0f));
 		if (now - m_lsPreAimAt > 3.0f)
 		{
 			SetLookAt("Loner-Strike: listening", &glance, PRIORITY_LOW, RANDOM_FLOAT(0.6f, 1.2f));

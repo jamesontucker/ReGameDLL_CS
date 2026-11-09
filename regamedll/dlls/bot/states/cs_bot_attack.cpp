@@ -178,7 +178,12 @@ void AttackState::OnUpdate(CCSBot *me)
 			pWeapon->m_iId == WEAPON_FLASHBANG ||
 			pWeapon->m_iId == WEAPON_SMOKEGRENADE)
 		{
-			me->EquipBestWeapon();
+			// (Loner-Strike: not Gun Game's grenade out on its grenade level, beyond arm's
+			// length: it's what scores there, and it's thrown from the update)
+			CBasePlayer *pFoe = me->GetEnemy();
+			bool keep = LsFight() && pWeapon->m_iId == WEAPON_HEGRENADE && me->LsNadeOnly() && pFoe && (pFoe->pev->origin - me->pev->origin).IsLengthGreaterThan(250.0f);
+			if (!keep)
+				me->EquipBestWeapon();
 		}
 	}
 
@@ -201,7 +206,7 @@ void AttackState::OnUpdate(CCSBot *me)
 		// need to do something else.
 		// If we are outnumbered, retreat.
 		// (Loner-Strike: not while it's doing fine: healthy and not hit lately; for a while)
-		if (LsFight() && gpGlobals->time > m_pinnedDownTimestamp && me->pev->health > 60.0f && me->GetTimeSinceAttacked() > 2.0f
+		if (LsFight() && gpGlobals->time > m_pinnedDownTimestamp && me->LsHealth() > 60.0f && me->GetTimeSinceAttacked() > 2.0f
 			&& me->m_lsPinnedExtended < 2.0f * me->LsPinnedDownTime())
 		{
 			m_pinnedDownTimestamp = gpGlobals->time + 2.0f;
@@ -215,9 +220,9 @@ void AttackState::OnUpdate(CCSBot *me)
 		// (Loner-Strike: on a team map, a lone CT before the plant plays for time by its own
 		// roll, in place of stock's "outnumbered by two: always back off")
 		if (LsFight() && LsSolo()
-			? ((isPinnedDown && me->pev->health < 35.0f)
+			? ((isPinnedDown && me->LsHealth() < 35.0f)
 				|| (!CSGameRules()->IsFreeForAll() && m_isCoward && me->LsStyle() != LS_STYLE_RUSHER
-					&& (me->OutnumberedCount() >= 3 || (me->OutnumberedCount() >= 2 && me->pev->health < 50.0f))))
+					&& (me->OutnumberedCount() >= 3 || (me->OutnumberedCount() >= 2 && me->LsHealth() < 50.0f))))
 			: LsFight() ? (isPinnedDown || me->LsPlayForTime() || (me->IsOutnumbered() && m_isCoward))
 			: (isPinnedDown ||
 			(me->IsOutnumbered() && m_isCoward) ||
@@ -487,7 +492,7 @@ void AttackState::OnUpdate(CCSBot *me)
 	// (Loner-Strike: in deathmatch people go after someone who ducked out of sight, the
 	// aggressive ones straight away)
 	if (LsFight() && LsSolo())
-		chaseTime = (0.3f + 1.7f * (1.0f - me->LsAggro())) * (me->pev->health < 20.0f ? 2.0f : 1.0f);
+		chaseTime = (0.3f + 1.7f * (1.0f - me->LsAggro())) * (me->LsHealth() < 20.0f ? 2.0f : 1.0f);
 	else if (LsFight())
 		chaseTime = Q_max(0.2f, chaseTime - me->LsChaseExtra());
 
