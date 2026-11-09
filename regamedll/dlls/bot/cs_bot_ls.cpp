@@ -946,7 +946,7 @@ void CCSBot::LsPuppetCommand(const char *what, float now)
 			Q_strlcpy(p.holdTag, tag);
 		}
 		if (chat)
-			pev->fuser4 = now;	// (taken: gm_botchat reads it)
+			pev->fuser4 = now; m_lsOrderFields = true;	// (taken: gm_botchat reads it)
 	}
 	else if (FStrEq(what, "crouch"))
 	{
@@ -1021,7 +1021,7 @@ void CCSBot::LsPuppetCommand(const char *what, float now)
 			m_lsOrder.until = now + 45.0f;
 			m_lsOrder.holdSecs = Q_min(LsArg(7), most);
 			m_lsOrder.nextTry = now + 2.0f;
-			pev->fuser4 = now;	// (taken: gm_botchat reads it)
+			pev->fuser4 = now; m_lsOrderFields = true;	// (taken: gm_botchat reads it)
 			pev->vuser1.x = m_lsOrder.until;	// (and on till then: gm_pubserver won't kick it)
 		}
 	}
@@ -1040,7 +1040,7 @@ void CCSBot::LsPuppetCommand(const char *what, float now)
 		m_lsOrder.leader = pLeader;
 		m_lsOrder.until = p.followUntil;
 		m_lsOrder.nextTry = now + 2.0f;
-		pev->fuser4 = now;	// (taken: gm_botchat reads it)
+		pev->fuser4 = now; m_lsOrderFields = true;	// (taken: gm_botchat reads it)
 		pev->vuser1.x = m_lsOrder.until;
 	}
 	else

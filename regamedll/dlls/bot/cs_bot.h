@@ -1206,6 +1206,7 @@ private:
 		int tries = 0;								// times sent back on its way
 	};
 	LsOrder m_lsOrder;
+	bool m_lsOrderFields = false;					// fuser4/vuser1 hold this code's order marks (cleared on respawn)
 	void LsOrderTick();
 	bool LsOrderActive() const { return m_lsOrder.kind != 0 && gpGlobals->time < m_lsOrder.until; }
 	void LsCheckMap();
@@ -1263,7 +1264,9 @@ private:
 	int m_lsWinReloadRound = -1;
 	float m_lsSwapCheckAt = 0.0f;
 	EntityHandle<CBaseEntity> m_lsSwapBox;		// the gun it's walking over to swap for
-	float m_lsSwapUntil = 0.0f;					// mid-round: next look for a better gun on the floor
+	float m_lsSwapUntil = 0.0f;
+	float m_lsSwapDropAt = 0.0f;					// when it dropped its own for the swap
+	Vector m_lsSwapDropPos;					// mid-round: next look for a better gun on the floor
 	int m_lsEscortRound = -1;						// the round it went with a late carrier
 	float m_lsEscortCheckAt = 0.0f;					// the round it reloaded after winning
 	float m_lsFetchCheckAt = 0.0f;

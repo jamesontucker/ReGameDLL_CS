@@ -202,8 +202,31 @@ void CCSBot::LsTeamTick()
 		else if ((pBox->pev->origin - pev->origin).Make2D().IsLengthLessThan(80.0f))
 		{
 			if (pMine)
+			{
 				DropPlayerItem(STRING(pMine->pev->classname));
+				m_lsSwapDropAt = now;
+				m_lsSwapDropPos = pev->origin;
+			}
 			m_lsSwapBox = nullptr;
+		}
+	}
+	// (dropped its own, and someone took the new one first: its own back)
+	else if (m_lsSwapDropAt > 0.0f && now - m_lsSwapDropAt > 1.0f)
+	{
+		m_lsSwapDropAt = 0.0f;
+		if (!m_rgpPlayerItems[PRIMARY_WEAPON_SLOT] && !IsAttacking())
+		{
+			CBaseEntity *pOwn = nullptr;
+			while ((pOwn = UTIL_FindEntityByClassname(pOwn, "weaponbox")))
+			{
+				if ((pOwn->pev->origin - m_lsSwapDropPos).IsLengthLessThan(150.0f))
+				{
+					Vector to = pOwn->pev->origin;
+					MoveTo(&to, FASTEST_ROUTE);
+					LsWhy("swap-back");
+					break;
+				}
+			}
 		}
 	}
 	else if (!TheCSBots()->IsRoundOver() && now >= m_lsSwapCheckAt && !IsAttacking() && !LsOrderActive() && !IsCarryingBomb() && LsFree()

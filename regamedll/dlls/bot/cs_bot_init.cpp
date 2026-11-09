@@ -364,8 +364,13 @@ void CCSBot::RoundRespawn()
 	LsNadeReset();
 	LsStartOver();
 	m_lsOrder = LsOrder();
-	pev->fuser4 = 0.0f;
-	pev->vuser1 = g_vecZero;
+	// (only if it was this code that set them: another mod may use these fields)
+	if (m_lsOrderFields)
+	{
+		pev->fuser4 = 0.0f;
+		pev->vuser1 = g_vecZero;
+		m_lsOrderFields = false;
+	}
 }
 
 void CCSBot::Disconnect()
