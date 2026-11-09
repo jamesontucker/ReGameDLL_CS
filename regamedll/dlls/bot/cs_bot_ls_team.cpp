@@ -50,6 +50,13 @@ void CCSBot::LsTeamTick()
 		}
 	}
 
+	// (nor goes to look into a noise with the bomb on its back: that's for the others)
+	if (m_iTeam == TERRORIST && IsCarryingBomb() && m_state == &m_investigateNoiseState && !IsAttacking() && LsTimeLeft() > 20.0f)
+	{
+		Idle();
+		LsWhy("carrier-no-noise");
+	}
+
 	// the carrier, on its way to plant: people don't go through the door first with the bomb,
 	// nor chase someone they just saw; it lets a teammate go ahead (a few seconds at a time, a
 	// few times a round, while there's time) and leaves the chasing to others

@@ -414,7 +414,7 @@ void IdleState::OnUpdate(CCSBot *me)
 				float guardBombsiteChance = -34.0f * me->GetMorale();
 				// (Loner-Strike: campers and careful players anchor a site, as a pub's B anchor does)
 				if (LsFight() && me->m_iTeam == CT)
-					guardBombsiteChance += me->LsStyle() == LS_STYLE_CAMPER ? 70.0f : me->LsStyle() == LS_STYLE_CAREFUL ? 40.0f : 0.0f;
+					guardBombsiteChance += me->LsStyle() == LS_STYLE_CAMPER ? 55.0f : me->LsStyle() == LS_STYLE_CAREFUL ? 30.0f : 0.0f;
 
 				if (RANDOM_FLOAT(0.0f, 100.0f) < guardBombsiteChance)
 				{
