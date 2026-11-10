@@ -67,13 +67,13 @@ void CCSBot::LsTeamTick()
 			m_lsDefuseActedAt = now;
 	}
 
-	// a dropped bomb, seen on the radar: a T on its way somewhere or hiding (states that never
-	// look for it) goes for it too, if it's one of the nearest
-	if (m_iTeam == TERRORIST && now >= m_lsFetchCheckAt && TheCSBots()->GetLooseBomb() && !IsAttacking() && !LsOrderActive() && !m_lsSaving
-		&& (IsMovingTo() || IsHiding()) && GetTask() != PLANT_BOMB)
+	// a dropped bomb, seen on the radar: the team's fetcher (LsBombFetcher) goes for it,
+	// whatever it was doing
+	if (m_iTeam == TERRORIST && now >= m_lsFetchCheckAt && TheCSBots()->GetLooseBomb() && !IsAttacking() && m_state != &m_fetchBombState
+		&& GetTask() != PLANT_BOMB)
 	{
 		m_lsFetchCheckAt = now + 1.0f;
-		if (LsFetchesBomb())
+		if (LsBombFetcher() == this)
 		{
 			FetchBomb();
 			LsWhy("fetch-bomb");
@@ -889,23 +889,45 @@ bool CCSBot::LsFetchesBomb()
 {
 	if (!LsFight())
 		return true;
+	return LsBombFetcher() == this;
+}
+
+// The one T bot that goes for a dropped bomb: the nearest that's free (not in a fight, not
+// saving its gun, not under a person's order), picked for the team and picked again every
+// two seconds, so one that dies, gets into a fight or gets stuck hands it on. (It was "go if
+// fewer than two closer ones would": closer ones that never went, hunting or looking into a
+// noise, kept everyone back and the bomb lay there: 41% never picked up, 25% for 0.1.2)
+CCSBot *CCSBot::LsBombFetcher()
+{
+	static int s_index = 0;
+	static float s_at = -100.0f;
 	CBaseEntity *pBomb = TheCSBots()->GetLooseBomb();
 	if (!pBomb)
-		return true;
-	float mine = float((pBomb->pev->origin - pev->origin).Length());
-	int closer = 0;
-	LsForTeammates(this, [&](CBasePlayer *pPlayer) {
-		// (only bots that will go, or are going: one fetching it, or one standing about or
-		// hunting and free; one on its way somewhere or hiding never looks for the bomb, and
-		// counting it would leave the bomb lying there)
-		if (!pPlayer->IsBot() || (pBomb->pev->origin - pPlayer->pev->origin).IsLengthGreaterThan(mine))
-			return;
+		return nullptr;
+	float now = gpGlobals->time;
+	CBasePlayer *pKept = s_index ? UTIL_PlayerByIndex(s_index) : nullptr;
+	if (now - s_at < 2.0f && now >= s_at && pKept && pKept->IsBot() && pKept->IsAlive() && pKept->m_iTeam == TERRORIST)
+		return static_cast<CCSBot *>(pKept);
+	s_at = now;
+	s_index = 0;
+	float best = 1e9f;
+	for (int i = 1; i <= gpGlobals->maxClients; i++)
+	{
+		CBasePlayer *pPlayer = UTIL_PlayerByIndex(i);
+		if (!pPlayer || FNullEnt(pPlayer->pev) || !pPlayer->IsBot() || !pPlayer->IsAlive() || pPlayer->m_iTeam != TERRORIST)
+			continue;
 		CCSBot *pBot = static_cast<CCSBot *>(pPlayer);
-		bool looks = pBot->m_state == &pBot->m_idleState || pBot->IsHunting() || pBot->IsMovingTo() || pBot->IsHiding();
-		if (pBot->m_state == &pBot->m_fetchBombState || (looks && !pBot->IsAttacking() && !pBot->LsSavingGun() && !pBot->LsOrderActive() && pBot->GetTask() != PLANT_BOMB))
-			closer++;
-	});
-	return closer < 2;
+		if (pBot->IsAttacking() || pBot->LsSavingGun() || pBot->LsOrderActive())
+			continue;
+		float d = float((pBomb->pev->origin - pBot->pev->origin).Length());
+		if (d < best)
+		{
+			best = d;
+			s_index = i;
+		}
+	}
+	CBasePlayer *pPick = s_index ? UTIL_PlayerByIndex(s_index) : nullptr;
+	return pPick ? static_cast<CCSBot *>(pPick) : nullptr;
 }
 
 // A map with guns lying about (fy_, some aim_ maps): a bot without a primary at the start of

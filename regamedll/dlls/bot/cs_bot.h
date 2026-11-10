@@ -1033,7 +1033,8 @@ public:
 	int LsHumor() const { return m_lsHumor; }
 	void LsSetPersona(float aggro, float team, int style, int temper, int humor, int skill) { m_lsAggro = aggro; m_lsTeam = team; m_lsStyle = style; m_lsTemper = temper; m_lsHumor = humor; m_lsSkillTrait = skill; }
 	float LsSkill() const;
-	float LsExecPatience();							// seconds it waits at an execute's stage before calling the go							// the profile's skill, leaned toward who the bot is
+	float LsExecPatience();
+	CCSBot *LsBombFetcher();						// the one T bot that goes for a dropped bomb now							// seconds it waits at an execute's stage before calling the go							// the profile's skill, leaned toward who the bot is
 	// Loner-Strike team (cs_bot_ls_team.cpp)
 	void LsTeamTick();								// team play each frame: retakes, rotations, pickups
 	bool LsRadioAnswer();							// a teammate's radio call, answered like a person (true: handled)
