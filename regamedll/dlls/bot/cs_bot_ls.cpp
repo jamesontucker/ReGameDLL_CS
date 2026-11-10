@@ -3679,7 +3679,7 @@ void CCSBot::LsBumpCheck()
 			return;
 		m_lsBumpAt = 0.0f;
 		CBasePlayer *pFoe = UTIL_PlayerByIndex(m_lsBumpBy);
-		if (!pFoe || !pFoe->IsAlive() || !IsEnemy(pFoe))
+		if (!pFoe || !pFoe->IsAlive() || !IsEnemy(pFoe) || (pFoe->pev->origin - pev->origin).IsLengthGreaterThan(110.0f))
 			return;
 		Vector at = pFoe->pev->origin + pFoe->pev->view_ofs * 0.8f;
 		SetLookAt("Loner-Strike: bumped", &at, PRIORITY_HIGH, 0.8f, false);
@@ -3698,6 +3698,11 @@ void CCSBot::LsBumpCheck()
 			continue;
 		Vector d = pFoe->pev->origin - pev->origin;
 		if (d.Length2D() > 44.0f || Q_abs(d.z) > 72.0f)
+			continue;
+		// (really touching: not the other side of a thin wall or floor)
+		TraceResult tr;
+		UTIL_TraceLine(pev->origin, pFoe->pev->origin, ignore_monsters, ENT(pev), &tr);
+		if (tr.flFraction < 1.0f)
 			continue;
 		m_lsBumpBy = m;
 		m_lsBumpAt = now + 0.12f + 0.5f * (1.0f - LsSkill());
@@ -3788,8 +3793,15 @@ void CCSBot::LsCrouchWalk()
 		return;
 	}
 	float now = gpGlobals->time;
-	// (a few steps at most: then up and on)
+	// (a few steps at most: then up and on, and not again for a bit; never when it's stuck or a
+	// jump is coming up on its path: a crouching bot can't jump)
 	if (m_lsCrouchWalking && now - m_lsCrouchWalkSince > 3.5f)
+	{
+		stop();
+		m_lsCrouchWalkNext = now + 4.0f;
+		return;
+	}
+	if (now < m_lsCrouchWalkNext || m_isStuck || IsNearJump() || IsJumping())
 	{
 		stop();
 		return;

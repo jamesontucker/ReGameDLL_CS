@@ -1411,7 +1411,7 @@ CCSBot::PathResult CCSBot::UpdatePathMovement(bool allowSpeedChange)
 			}
 		}
 
-		if (!didCrouch && !IsJumping())
+		if (!didCrouch && !IsJumping() && !m_lsCrouchWalking)	// (Loner-Strike: crouching past a low wall: LsCrouchWalk)
 		{
 			// no crouch areas coming up
 			StandUp();

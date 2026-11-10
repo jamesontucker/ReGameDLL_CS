@@ -361,7 +361,11 @@ void CCSBot::Update()
 
 	// (Loner-Strike: flashed the way a person is: see LsBlindTick)
 	if (LsBlindTick())
+	{
+		// (blind: nobody to tell the plugins about)
+		pev->euser4 = nullptr;
 		return;
+	}
 
 	// (Loner-Strike: and not staring at a wall with nothing going on; an enemy bumping into it
 	// is felt)

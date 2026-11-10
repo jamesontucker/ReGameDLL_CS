@@ -178,6 +178,18 @@ bool CCSBot::Initialize(const BotProfile *profile)
 // Reset internal data to initial state
 void CCSBot::ResetValues()
 {
+	// (Loner-Strike: nothing from the last life carries over: a bump it was about to react to,
+	// crouch-walking, the angles it had checked)
+	m_lsBumpAt = 0.0f;
+	m_lsBumpBy = 0;
+	m_lsCrouchWalking = false;
+	m_lsCrouchWalkNext = 0.0f;
+	m_lsScanNext = 0.0f;
+	for (int r = 0; r < 4; r++)
+	{
+		m_lsScanArea[r] = 0;
+		m_lsScanAt[r] = 0.0f;
+	}
 	m_chatter.Reset();
 	m_gameState.Reset();
 

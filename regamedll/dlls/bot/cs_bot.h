@@ -871,6 +871,7 @@ private:
 	void LsCrouchWalk();				// Loner-Strike: crouch past a low wall that hides it from an angle
 	bool m_lsCrouchWalking = false;
 	float m_lsCrouchWalkSince = 0.0f;
+	float m_lsCrouchWalkNext = 0.0f;		// not again before (a cooldown after a few steps)
 	void LsBumpCheck();					// Loner-Strike: an enemy bumping into it is noticed, wherever it's looking
 	unsigned short m_lsScanArea[4] = {};	// the last angles it checked (knowledge area index + 1), and when
 	float m_lsScanAt[4] = {};
