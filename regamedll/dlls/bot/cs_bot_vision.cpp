@@ -248,8 +248,19 @@ void CCSBot::UpdateLookAngles()
 			{
 				if (m_lsHuhUntil <= 0.0f && m_lsHuhNoise != m_noiseTimestamp)
 				{
-					m_lsHuhUntil = now + RANDOM_FLOAT(0.35f, 0.7f);
 					m_lsHuhNoise = m_noiseTimestamp;
+					// whether it looks at all is who it is: careful, lurking and skilled ones
+					// check sounds; a rusher set on where it's going mostly doesn't; and each
+					// has its own habit (trait 96)
+					int style = LsStyle();
+					float p = 0.55f + 0.25f * LsSkill() - 0.35f * LsAggro() + 0.3f * (LsTrait(96) - 0.5f);
+					if (style == LS_STYLE_CAREFUL || style == LS_STYLE_LURKER || style == LS_STYLE_NINJA || style == LS_STYLE_CAMPER)
+						p += 0.2f;
+					else if (style == LS_STYLE_RUSHER || style == LS_STYLE_KNIFER)
+						p -= 0.25f;
+					p = Q_max(0.1f, Q_min(0.95f, p));
+					if (RANDOM_FLOAT(0.0f, 1.0f) < p)
+						m_lsHuhUntil = now + RANDOM_FLOAT(0.35f, 0.7f);
 				}
 				if (m_lsHuhUntil > 0.0f && now < m_lsHuhUntil)
 					huh = true;
