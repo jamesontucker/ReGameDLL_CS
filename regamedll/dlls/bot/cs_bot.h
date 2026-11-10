@@ -1520,6 +1520,10 @@ struct LsAreaKnow
 	// standing head, and a crouched one. Which side to hug, and when crouching hides you
 	unsigned short exposedStand[LS_KNOW_ANGLES];
 	unsigned short exposedCrouch[LS_KNOW_ANGLES];
+	// cover right next to each of those points, all round (bit d: something solid within 64
+	// units that way): at a crouched head, and at standing eyes. Low cover is low and not high
+	unsigned short pointCoverLow[9];
+	unsigned short pointCoverHigh[9];
 };
 #pragma pack(pop)
 void LsSightStep();
@@ -1530,7 +1534,7 @@ const LsAreaKnow *LsKnow(const CNavArea *a);
 CNavArea *LsKnowArea(unsigned short index);
 bool LsWallbangKnown(const CNavArea *a, const CNavArea *b, float *thick, char *mat);
 bool LsExposureReady();
-void LsExposurePoint(const CNavArea *area, int point, Vector *out);	// one of 9 across it, on the floor
+void LsExposurePoint(const CNavArea *area, int point, Vector *out);	// one of 9 across it (the outer ones by its edges), on the floor
 bool LsMatch();
 bool LsSolo();
 bool LsOwnMemory();

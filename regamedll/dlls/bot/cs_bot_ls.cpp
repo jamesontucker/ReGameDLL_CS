@@ -2502,7 +2502,7 @@ double LsNowMs()
 }
 
 const unsigned int LSV_MAGIC = 0x3256534C;	// "LSV2"
-const unsigned int LSV_VERSION = 3;
+const unsigned int LSV_VERSION = 4;
 const float LSV_RANGE = 3500.0f;			// farther than this counts as not in sight
 const float LSV_BANG_RANGE = 1000.0f;		// wallbang spots looked for this close
 const double LSV_BUDGET_MS = 0.4;			// per frame
@@ -2765,7 +2765,14 @@ void Area(size_t idx)
 	k.ceiling = (unsigned char)Q_min(255.0f, Open(Vector(c.x, c.y, c.z + 40.0f), Vector(0, 0, 1), 1000.0f) / 4.0f);
 
 	// corners: all round, at eye and waist height, an edge with open space past it (someone
-	// could be just round it); the nearest first
+	// could be just round it); the nearest first. Not from a thin strip along a wall (its
+	// middle is against the wall, every ray glances along it): its neighbours have those corners
+	k.cornerCount = 0;
+	{
+		const Extent *ex = area->GetExtent();
+		if (ex->hi.x - ex->lo.x < 64.0f || ex->hi.y - ex->lo.y < 64.0f)
+			return;
+	}
 	const int N = 48;
 	float dEye[N], dWaist[N];
 	// (how square on each ray met what it hit: one glancing along a wall runs on much further
@@ -2975,6 +2982,21 @@ void Exposure(size_t idx)
 	Vector pts[9];
 	for (int p = 0; p < 9; p++)
 		LsExposurePoint(area, p, &pts[p]);
+	// the cover right by each point, all round
+	for (int p = 0; p < 9; p++)
+	{
+		k.pointCoverLow[p] = k.pointCoverHigh[p] = 0;
+		Vector lowAt(pts[p].x, pts[p].y, pts[p].z + CROUCH_HEAD), highAt(pts[p].x, pts[p].y, pts[p].z + EYE);
+		for (int d = 0; d < LS_KNOW_DIRS; d++)
+		{
+			float yaw = 360.0f / LS_KNOW_DIRS * d;
+			Vector dir(BotCOS(yaw), BotSIN(yaw), 0.0f);
+			if (Open(lowAt, dir, 64.0f) < 64.0f)
+				k.pointCoverLow[p] |= (unsigned short)(1 << d);
+			if (Open(highAt, dir, 64.0f) < 64.0f)
+				k.pointCoverHigh[p] |= (unsigned short)(1 << d);
+		}
+	}
 	for (int a = 0; a < k.angleCount; a++)
 	{
 		k.exposedStand[a] = k.exposedCrouch[a] = 0;
@@ -3356,10 +3378,16 @@ bool LsExposureReady()
 // One of an area's 9 exposure points: a 3 x 3 grid across it, a fifth in from its edges, on its floor
 void LsExposurePoint(const CNavArea *area, int point, Vector *out)
 {
-	static const float T[3] = { 0.2f, 0.5f, 0.8f };
+	// (the outer ones 20 units in from its edges: where someone hugging a wall or a box stands;
+	// a side too narrow for that keeps to the middle)
 	const Extent *e = area->GetExtent();
-	int col = point % 3, row = point / 3;
-	Vector p(e->lo.x + (e->hi.x - e->lo.x) * T[col], e->lo.y + (e->hi.y - e->lo.y) * T[row], 0.0f);
+	auto at = [](float lo, float hi, int k) {
+		float mid = 0.5f * (lo + hi);
+		if (k == 1 || hi - lo < 60.0f)
+			return mid;
+		return k == 0 ? lo + 20.0f : hi - 20.0f;
+	};
+	Vector p(at(e->lo.x, e->hi.x, point % 3), at(e->lo.y, e->hi.y, point / 3), 0.0f);
 	p.z = area->GetZ(&p);
 	*out = p;
 }
