@@ -281,7 +281,15 @@ void CCSBot::UpdateLookAngles()
 				if (m_lsBehindSince <= 0.0f && now >= m_lsBehindNext)
 				{
 					m_lsBehindSince = now;
-					m_lsBehindNext = now + RANDOM_FLOAT(1.5f, 3.0f);
+					// (how often is who it is: careful ones, lurkers and ninjas check behind
+					// often, rushers and knifers hardly; each its own habit, trait 97)
+					float every = RANDOM_FLOAT(1.5f, 3.0f) * (1.3f - 0.6f * LsTrait(97));
+					int style = LsStyle();
+					if (style == LS_STYLE_CAREFUL || style == LS_STYLE_LURKER || style == LS_STYLE_NINJA)
+						every *= 0.6f;
+					else if (style == LS_STYLE_RUSHER || style == LS_STYLE_KNIFER)
+						every *= 1.8f;
+					m_lsBehindNext = now + every;
 				}
 				bool glance = m_lsBehindSince > 0.0f && now - m_lsBehindSince < 0.45f;
 				float limit = glance ? 140.0f : 90.0f;
@@ -653,7 +661,16 @@ void CCSBot::UpdateLookAround(bool updateNow)
 		// (Loner-Strike: a person holding a spot checks the openings in turn, a couple of seconds
 		// each, a little longer the more patient they are)
 		else if (LsFight())
-			m_lookAroundStateTimestamp = gpGlobals->time + RANDOM_FLOAT(1.8f, 4.0f) + 1.2f * LsTrait(90);
+		{
+			// (campers and awpers sit on an angle longer, careful ones move on sooner)
+			float hold = RANDOM_FLOAT(1.8f, 4.0f) + 1.2f * LsTrait(90);
+			int style = LsStyle();
+			if (style == LS_STYLE_CAMPER || style == LS_STYLE_AWPER)
+				hold *= 1.5f;
+			else if (style == LS_STYLE_CAREFUL)
+				hold *= 0.75f;
+			m_lookAroundStateTimestamp = gpGlobals->time + hold;
+		}
 		else
 			m_lookAroundStateTimestamp = gpGlobals->time + RANDOM_FLOAT(1.0f, 2.0f);
 
@@ -699,7 +716,10 @@ void CCSBot::UpdateLookAround(bool updateNow)
 						pick[picks++] = seen[k];
 				}
 				which = pick[RANDOM_LONG(0, picks - 1)];
-				if (picks > 1 && RANDOM_FLOAT(0.0f, 1.0f) < 0.7f)
+				// (the neighbouring one mostly: 70% of the time; a new player's checks are
+				// all over the place, a good one's tidier)
+				float tidy = 0.45f + 0.4f * LsSkill();
+				if (picks > 1 && RANDOM_FLOAT(0.0f, 1.0f) < tidy)
 				{
 					int other = pick[RANDOM_LONG(0, picks - 1)];
 					if (turn(other) < turn(which))

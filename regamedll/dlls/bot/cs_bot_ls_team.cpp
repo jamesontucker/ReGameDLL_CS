@@ -591,7 +591,7 @@ void CCSBot::LsExecuteTick()
 	}
 	float left = LsTimeLeft();
 	bool go = alive <= 2 || left < 45.0f || staged >= Q_min(3, alive)
-		|| (s_execFirstAt > 0.0f && now - s_execFirstAt > 5.0f + 3.0f * LsTrait(90));
+		|| (s_execFirstAt > 0.0f && now - s_execFirstAt > LsExecPatience());
 	if (go && (staged > 0 || alive <= 2 || left < 45.0f))
 	{
 		s_execGoAt = now;
@@ -608,6 +608,19 @@ void CCSBot::LsExecuteTick()
 		Hide(GetLastKnownArea(), 10.0f, 150.0f);
 		LsWhy("stage");
 	}
+}
+
+// How long it waits at the stage for the others before it calls the go: 5-8 s, a rusher
+// (or an aggressive one) a lot less, a careful one a bit more
+float CCSBot::LsExecPatience()
+{
+	float wait = 5.0f + 3.0f * LsTrait(90) - 2.5f * LsAggro();
+	int style = LsStyle();
+	if (style == LS_STYLE_RUSHER || style == LS_STYLE_KNIFER)
+		wait -= 1.5f;
+	else if (style == LS_STYLE_CAREFUL || style == LS_STYLE_CAMPER)
+		wait += 1.5f;
+	return Q_max(2.0f, wait);
 }
 
 bool CCSBot::LsTeamHeard(GameEventType event, CBasePlayer *pPlayer)
