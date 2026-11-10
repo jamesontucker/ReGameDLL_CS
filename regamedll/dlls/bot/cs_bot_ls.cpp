@@ -2260,6 +2260,15 @@ bool CCSBot::LsBangThrough(const Vector &target)
 	TraceResult in, mates;
 	if (!LsBulletGetsThrough(this, pWeapon->m_iId, eye, target, &in))
 		return false;
+	// (one who doesn't know the rules only tries the obvious: a door, a breakable, wood)
+	if (!LsKnows(LSK_PENETRATION))
+	{
+		CBaseEntity *pHit = in.pHit ? CBaseEntity::Instance(in.pHit) : nullptr;
+		bool obvious = (pHit && (FClassnameIs(pHit->pev, "func_door") || FClassnameIs(pHit->pev, "func_door_rotating") || FClassnameIs(pHit->pev, "func_breakable")))
+			|| LsSurfaceAt(eye, target, in.pHit) == CHAR_TEX_WOOD;
+		if (!obvious)
+			return false;
+	}
 	// nobody on this side of the wall in the way, nor one of ours just past it
 	UTIL_TraceLine(eye, in.vecEndPos, dont_ignore_monsters, ENT(pev), &mates);
 	if (mates.flFraction < 1.0f && mates.pHit && CBaseEntity::Instance(mates.pHit) && CBaseEntity::Instance(mates.pHit)->IsPlayer())
@@ -2493,13 +2502,13 @@ double LsNowMs()
 }
 
 const unsigned int LSV_MAGIC = 0x3256534C;	// "LSV2"
-const unsigned int LSV_VERSION = 2;
+const unsigned int LSV_VERSION = 3;
 const float LSV_RANGE = 3500.0f;			// farther than this counts as not in sight
 const float LSV_BANG_RANGE = 1000.0f;		// wallbang spots looked for this close
 const double LSV_BUDGET_MS = 0.4;			// per frame
 const double LSV_SAVE_EVERY_MS = 20000.0;	// progress saved this often while it works
 const float EYE = 60.0f, CROUCH_HEAD = 34.0f, WAIST = 24.0f;
-enum { STAGE_PAIRS, STAGE_AREAS, STAGE_ANGLES, STAGE_DONE };
+enum { STAGE_PAIRS, STAGE_AREAS, STAGE_ANGLES, STAGE_EXPOSURE, STAGE_DONE };
 
 #pragma pack(push, 1)
 struct PairInfo
@@ -2955,6 +2964,32 @@ void Angles(size_t idx)
 	}
 }
 
+// One area's exposure: from each of its angles (the place an enemy would appear), which of
+// its 9 points can be seen, at a standing head and a crouched one
+void Exposure(size_t idx)
+{
+	if (idx >= s_know.count)
+		return;
+	LsAreaKnow &k = s_know.know[idx];
+	const CNavArea *area = s_know.areas[idx];
+	Vector pts[9];
+	for (int p = 0; p < 9; p++)
+		LsExposurePoint(area, p, &pts[p]);
+	for (int a = 0; a < k.angleCount; a++)
+	{
+		k.exposedStand[a] = k.exposedCrouch[a] = 0;
+		const CNavArea *from = s_know.areas[k.angles[a].area];
+		Vector eye(from->GetCenter()->x, from->GetCenter()->y, from->GetCenter()->z + EYE);
+		for (int p = 0; p < 9; p++)
+		{
+			if (Clear(eye, Vector(pts[p].x, pts[p].y, pts[p].z + EYE)))
+				k.exposedStand[a] |= (unsigned short)(1 << p);
+			if (Clear(eye, Vector(pts[p].x, pts[p].y, pts[p].z + CROUCH_HEAD)))
+				k.exposedCrouch[a] |= (unsigned short)(1 << p);
+		}
+	}
+}
+
 void Path(char *out, size_t len)
 {
 	char gd[64]{};
@@ -3201,6 +3236,17 @@ void LsSightStep()
 			}
 			Area(s_know.i++);
 		}
+		else if (s_know.stage == STAGE_ANGLES)
+		{
+			if (s_know.i >= n)
+			{
+				s_know.stage = STAGE_EXPOSURE;
+				s_know.i = 0;
+				Save();
+				continue;
+			}
+			Angles(s_know.i++);
+		}
 		else
 		{
 			if (s_know.i >= n)
@@ -3211,7 +3257,7 @@ void LsSightStep()
 				Finish();
 				return;
 			}
-			Angles(s_know.i++);
+			Exposure(s_know.i++);
 		}
 		if (out())
 			break;
@@ -3266,7 +3312,7 @@ int LsSightQuality(const CNavArea *a, const CNavArea *b)
 // What's known about an area (cover, corners, angles, objects); null until that's worked out
 const LsAreaKnow *LsKnow(const CNavArea *a)
 {
-	if (s_know.stage < STAGE_ANGLES)
+	if (s_know.stage <= STAGE_ANGLES)
 		return nullptr;
 	int x = LsKnowIndex(a);
 	return x < 0 ? nullptr : &s_know.know[x];
@@ -3297,4 +3343,47 @@ bool LsWallbangKnown(const CNavArea *a, const CNavArea *b, float *thick, char *m
 		}
 	}
 	return false;
+}
+
+bool LsExposureReady()
+{
+	return s_know.stage == STAGE_DONE;
+}
+
+// One of an area's 9 exposure points: a 3 x 3 grid across it, a fifth in from its edges, on its floor
+void LsExposurePoint(const CNavArea *area, int point, Vector *out)
+{
+	static const float T[3] = { 0.2f, 0.5f, 0.8f };
+	const Extent *e = area->GetExtent();
+	int col = point % 3, row = point / 3;
+	Vector p(e->lo.x + (e->hi.x - e->lo.x) * T[col], e->lo.y + (e->hi.y - e->lo.y) * T[row], 0.0f);
+	p.z = area->GetZ(&p);
+	*out = p;
+}
+
+// Whether this bot knows a part of the game beyond the basics (see LSK_*): the better it is the
+// more it knows, a newer player some of it, and its personality leans it (an AWPer knows the
+// angles, a nader the lineups, a rusher the timings, a lurker how to keep quiet and out of
+// sight). Decided once per bot (from its name), so it knows the same things every game
+bool CCSBot::LsKnows(int fact)
+{
+	if (!LsFight() || fact < 0 || fact >= LSK_COUNT)
+		return false;
+	float s = LsSkill();
+	static const float FLOOR[LSK_COUNT] = { 0.15f, 0.35f, 0.25f, 0.4f, 0.1f, 0.05f, 0.3f, 0.35f, 0.2f, 0.2f };
+	float p = FLOOR[fact] + (1.0f - FLOOR[fact]) * s;
+	int style = LsStyle();
+	switch (fact)
+	{
+	case LSK_TIMINGS: if (style == LS_STYLE_RUSHER) p += 0.25f; break;
+	case LSK_LINEUPS: if (style == LS_STYLE_NADER) p += 0.4f; break;
+	case LSK_QUIET: case LSK_EXPOSURE:
+		if (style == LS_STYLE_LURKER || style == LS_STYLE_NINJA || style == LS_STYLE_CAREFUL) p += 0.2f;
+		else if (style == LS_STYLE_RUSHER) p -= 0.2f;
+		break;
+	case LSK_ECONOMY: case LSK_DEFUSE_MATH: if (style == LS_STYLE_OBJECTIVE || style == LS_STYLE_CAREFUL) p += 0.15f; break;
+	case LSK_CROSSHAIR: if (style == LS_STYLE_AWPER || style == LS_STYLE_CAMPER) p += 0.15f; break;
+	case LSK_PENETRATION: case LSK_WALLBANG_SPOTS: if (style == LS_STYLE_AWPER) p += 0.15f; break;
+	}
+	return LsTrait(200 + fact) < p;
 }

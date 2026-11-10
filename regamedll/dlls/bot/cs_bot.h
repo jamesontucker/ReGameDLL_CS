@@ -859,6 +859,12 @@ private:
 	bool BendLineOfSight(const Vector *eye, const Vector *point, Vector *bend) const;	// "bend" our line of sight until we can see the target point. Return bend point, false if cant bend.
 	bool LsCornerAhead(Vector *out);		// Loner-Strike: an edge ahead someone could be just past
 	void LsWallSanity();				// Loner-Strike: catching itself staring at a wall, and looking away
+	// Loner-Strike: what it knows about the game beyond the basics every player picks up (walls
+	// stop bullets, footsteps give you away, AWPs are for long range): more the better it is,
+	// some by personality; the same every time it plays (LsKnows)
+	enum { LSK_PENETRATION, LSK_WALLBANG_SPOTS, LSK_STOP_TO_SHOOT, LSK_QUIET, LSK_TIMINGS, LSK_LINEUPS, LSK_ECONOMY,
+		LSK_DEFUSE_MATH, LSK_CROSSHAIR, LSK_EXPOSURE, LSK_COUNT };
+	bool LsKnows(int fact);
 	void LsLookableSpot(Vector *spot);	// Loner-Strike: a spot behind a wall becomes the edge it'd be seen past
 	float m_lsWallSince = 0.0f;			// facing a wall up close since
 	float m_lsWallNext = 0.0f;			// not checked again before
@@ -1510,6 +1516,10 @@ struct LsAreaKnow
 	LsKnownCorner corners[LS_KNOW_CORNERS];
 	LsKnownAngle angles[LS_KNOW_ANGLES];	// where enemies appear from, the busiest first
 	LsKnownObject objects[LS_KNOW_OBJECTS];
+	// which of the area's points (3 x 3 across it, LsExposurePoint) each angle sees: at a
+	// standing head, and a crouched one. Which side to hug, and when crouching hides you
+	unsigned short exposedStand[LS_KNOW_ANGLES];
+	unsigned short exposedCrouch[LS_KNOW_ANGLES];
 };
 #pragma pack(pop)
 void LsSightStep();
@@ -1519,6 +1529,8 @@ int LsSightQuality(const CNavArea *a, const CNavArea *b);	// 0-255, how much
 const LsAreaKnow *LsKnow(const CNavArea *a);
 CNavArea *LsKnowArea(unsigned short index);
 bool LsWallbangKnown(const CNavArea *a, const CNavArea *b, float *thick, char *mat);
+bool LsExposureReady();
+void LsExposurePoint(const CNavArea *area, int point, Vector *out);	// one of 9 across it, on the floor
 bool LsMatch();
 bool LsSolo();
 bool LsOwnMemory();
