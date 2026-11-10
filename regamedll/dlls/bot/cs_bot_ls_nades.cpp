@@ -914,6 +914,13 @@ void CCSBot::LsPlanBuy()
 	if (LsPistolRound() || m_bHasPrimary)
 		return;
 
+	// a person called this buy ("eco", "force", "full buy") and it went along with it
+	if (m_lsCalledRound == LsRoundSerial())
+	{
+		m_lsBuyPlan = m_lsCalledPlan;
+		return;
+	}
+
 	int decent = LsDecentBuy(m_iTeam);
 	int teamPlan = LsTeamPlan(m_iTeam);
 
@@ -940,6 +947,18 @@ void CCSBot::LsPlanBuy()
 		bool spender = LsTrait(45) < 0.3f || (skill < 0.4f && LsTrait(45) < 0.55f);
 		m_lsBuyPlan = spender ? LS_BUY : LS_SAVE;
 	}
+}
+
+// A person's buy call: in freeze time it's this round's (and it changes its plan now, if it
+// hasn't a gun yet); during the round, the next one's
+void CCSBot::LsCallBuy(int plan)
+{
+	plan = Q_max(0, Q_min(2, plan));
+	bool freeze = CSGameRules() && CSGameRules()->IsFreezePeriod();
+	m_lsCalledPlan = plan;
+	m_lsCalledRound = LsRoundSerial() + (freeze ? 0 : 1);
+	if (freeze && !m_bHasPrimary && !LsPistolRound())
+		m_lsBuyPlan = plan;
 }
 
 // A save round: nothing, or a better pistol for some when there's money for it

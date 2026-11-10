@@ -683,6 +683,19 @@ bool CCSBot::LsPuppetActive() const
 // After the state machine each frame
 void CCSBot::LsPuppetUpdate()
 {
+	// a grenade a person asked for: thrown as soon as it's in hand (a fight, or too long, and
+	// it's off)
+	if (m_lsThrowUntil > 0.0f)
+	{
+		if (gpGlobals->time > m_lsThrowUntil || IsAttacking() || IsEnemyVisible())
+			m_lsThrowUntil = 0.0f;
+		else if (IsUsingGrenade() && !m_isWaitingToTossGrenade)
+		{
+			ThrowGrenade(&m_lsThrowAt);
+			m_lsThrowUntil = 0.0f;
+		}
+	}
+
 	LsPuppet &p = m_lsPuppet;
 	if (!p.any)
 		return;
@@ -925,6 +938,27 @@ void Bot_LsServerCommand()
 	const char *what = CMD_ARGV(2);
 	float now = gpGlobals->time;
 
+	// buyplan <0 buy | 1 save | 2 force>: a person's call ("eco", "force", "full buy") it
+	// went along with (gm_botchat decides that): this buy in freeze time, else the next
+	if (FStrEq(what, "buyplan"))
+	{
+		me->LsCallBuy(int(LsArg(3, 0.0f)));
+		return;
+	}
+	// throw <flash | smoke | he> <x> <y> <z>: a person asked for one there ("flash for me",
+	// "smoke mid"): one it has, not in a fight, nor busy with the bomb or a ladder
+	if (FStrEq(what, "throw"))
+	{
+		const char *kind = CMD_ARGV(3);
+		const char *item = FStrEq(kind, "flash") ? "weapon_flashbang" : FStrEq(kind, "smoke") ? "weapon_smokegrenade"
+			: FStrEq(kind, "he") ? "weapon_hegrenade" : nullptr;
+		if (!item || !me->HasNamedPlayerItem(item) || me->IsAttacking() || me->IsEnemyVisible() || me->IsOnLadder()
+			|| me->LsBusy() || me->IsThrowingGrenade())
+			return;
+		me->LsAskThrow(item, Vector(LsArg(4), LsArg(5), LsArg(6)));
+		return;
+	}
+
 	// not while it's in a fight or busy with something that matters, nor while something
 	// has startled it; a person's order (goto, follow, a chat hold) only gives way to a fight,
 	// the bomb or a ladder
@@ -952,6 +986,13 @@ void Bot_LsServerCommand()
 		return;
 
 	me->LsPuppetCommand(what, now);
+}
+
+void CCSBot::LsAskThrow(const char *item, const Vector &at)
+{
+	SelectItem(item);
+	m_lsThrowAt = at;
+	m_lsThrowUntil = gpGlobals->time + 3.0f;
 }
 
 void CCSBot::LsPuppetCommand(const char *what, float now)

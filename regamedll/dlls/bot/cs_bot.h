@@ -1100,6 +1100,8 @@ public:
 	void LsBuyExtras();								// grenades and the defuse kit (instead of the stock picks)
 	void LsSaveCheck();								// alone against many late in a lost round: hide, keep the gun
 	bool LsSavingGun() const { return m_lsSaving; }
+	void LsCallBuy(int plan);						// a person's "eco" / "force" / "full buy": this buy, or the next
+	void LsAskThrow(const char *item, const Vector &at);	// a person's "flash for me", "smoke mid": that grenade, there
 	bool LsNadeOnly() const;						// deathmatch with nothing but a knife and grenades (Gun Game's HE level)
 	static bool LsWeaponModeOn();					// a mode that hands out or limits the guns
 	bool LsBuyPistolRound();						// its own pistol-round buy (true: done)
@@ -1367,6 +1369,10 @@ private:
 	bool m_lsNadeSmokeRolled = false;				// decided about the site smoke this round
 	bool m_lsNadeCornerRolled = false;				// decided about a flash for this corner
 	Vector m_lsNadeCornerAt;
+	int m_lsCalledPlan = 0;							// a person's buy call (0 buy, 1 save, 2 force), for this round:
+	int m_lsCalledRound = -1;						//   (LsRoundSerial; -1 none)
+	float m_lsThrowUntil = 0.0f;					// a grenade a person asked for: thrown once it's in hand, until then
+	Vector m_lsThrowAt;								//   where
 	int m_lsBuyPlan = 0;							// this round: 0 the usual buy, 1 save, 2 force
 	bool m_lsSaving = false;						// alone against many late on: keeping its gun
 	bool m_lsSaveDecided = false;					// decided about that this round
