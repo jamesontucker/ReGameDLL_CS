@@ -866,6 +866,15 @@ private:
 		LSK_DEFUSE_MATH, LSK_CROSSHAIR, LSK_EXPOSURE, LSK_COUNT };
 	bool LsKnows(int fact);
 	void LsLookableSpot(Vector *spot);	// Loner-Strike: a spot behind a wall becomes the edge it'd be seen past
+	bool LsScanAngles(bool holding);	// Loner-Strike: look at the next angle an enemy could come from (map knowledge)
+	void LsBumpCheck();					// Loner-Strike: an enemy bumping into it is noticed, wherever it's looking
+	unsigned short m_lsScanArea[4] = {};	// the last angles it checked (knowledge area index + 1), and when
+	float m_lsScanAt[4] = {};
+	int m_lsScanNextSlot = 0;
+	float m_lsScanNext = 0.0f;
+	float m_lsBumpAt = 0.0f;			// noticed a bump; reacts at this time
+	int m_lsBumpBy = 0;
+	float m_lsBumpCheckAt = 0.0f;
 	float m_lsWallSince = 0.0f;			// facing a wall up close since
 	float m_lsWallNext = 0.0f;			// not checked again before
 	Vector m_lsGlanceCorner;				// the last corner it glanced at walking, and when
@@ -1534,6 +1543,10 @@ const LsAreaKnow *LsKnow(const CNavArea *a);
 CNavArea *LsKnowArea(unsigned short index);
 bool LsWallbangKnown(const CNavArea *a, const CNavArea *b, float *thick, char *mat);
 bool LsExposureReady();
+// Loner-Strike: what kind of map this is (by its name and objectives): how bots play it
+enum { LSMAP_OBJECTIVE, LSMAP_AIM, LSMAP_FY, LSMAP_AWP, LSMAP_KNIFE, LSMAP_OTHER };
+int LsMapKind();
+const Vector *LsEnemySpawn(int team);	// the middle of the other team's spawn (null if none)
 void LsExposurePoint(const CNavArea *area, int point, Vector *out);	// one of 9 across it (the outer ones by its edges), on the floor
 bool LsMatch();
 bool LsSolo();

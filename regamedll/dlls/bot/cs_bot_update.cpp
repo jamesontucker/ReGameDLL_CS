@@ -363,8 +363,17 @@ void CCSBot::Update()
 	if (LsBlindTick())
 		return;
 
-	// (Loner-Strike: and not staring at a wall with nothing going on)
+	// (Loner-Strike: and not staring at a wall with nothing going on; an enemy bumping into it
+	// is felt)
 	LsWallSanity();
+	LsBumpCheck();
+
+	// (Loner-Strike: who it's fighting, for the plugins to follow (gm_humanbots times its
+	// reaction and aim for the same one): pev->euser4, nothing else uses it)
+	{
+		CBasePlayer *pFoe = m_enemy;
+		pev->euser4 = (LsFight() && pFoe && pFoe->IsAlive() && IsEnemyVisible()) ? pFoe->edict() : nullptr;
+	}
 
 	// if we're blind, retreat!
 	if (IsBlind())

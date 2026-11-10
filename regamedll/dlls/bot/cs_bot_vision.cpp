@@ -655,6 +655,10 @@ void CCSBot::UpdateLookAround(bool updateNow)
 		if (!m_lastKnownArea)
 			return;
 
+		// (Loner-Strike: holding a spot, its angles from the map knowledge first)
+		if (LsScanAngles(true))
+			return;
+
 		if (gpGlobals->time < m_lookAroundStateTimestamp)
 			return;
 
@@ -763,6 +767,11 @@ void CCSBot::UpdateLookAround(bool updateNow)
 		SetLookAt("Approach Point (Hiding)", &spot, PRIORITY_LOW);
 		return;
 	}
+
+	// Loner-Strike: moving, the area's angles from the map knowledge (where an enemy could
+	// come from) before anything else
+	if (!IsSafe() && LsScanAngles(false))
+		return;
 
 	// Loner-Strike: and the corners it can feel out from the walls round it as it moves (before the encounter spots, whose
 	// timer returns early most frames): where
@@ -1435,6 +1444,11 @@ CBasePlayer *CCSBot::FindMostDangerousThreat()
 					score *= 0.4f;
 				if (pThreat == static_cast<CBasePlayer *>(m_enemy))
 					score *= 0.6f;
+				// an AWPer is the one to deal with first, more so one looking this way (the
+				// better players know; a newer one just shoots whoever's nearest)
+				CBasePlayerWeapon *pGun = static_cast<CBasePlayerWeapon *>(pThreat->m_pActiveItem);
+				if (pGun && pGun->m_iId == WEAPON_AWP && LsSkill() > 0.35f)
+					score *= looking ? 0.45f : 0.75f;
 				if (score < best)
 				{
 					best = score;
@@ -1460,6 +1474,10 @@ CBasePlayer *CCSBot::FindMostDangerousThreat()
 				}
 				bool shotBy = GetAttacker() == pBest && GetTimeSinceAttacked() < 0.5f;
 				if (curScore >= 0.0f && !shotBy && (gpGlobals->time - m_lsThreatSince < 0.4f + 0.4f * (1.0f - LsSkill()) || best > 0.5f * curScore))
+					return pCur;
+				// (a newer player tunnels on the one it saw first while it can still see them:
+				// the flanker gets it from the side)
+				if (curScore >= 0.0f && !shotBy && LsSkill() < 0.35f)
 					return pCur;
 			}
 			if (pBest && pBest != static_cast<CBasePlayer *>(m_enemy))

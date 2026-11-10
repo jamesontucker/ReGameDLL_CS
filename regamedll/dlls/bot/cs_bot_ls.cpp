@@ -3490,3 +3490,209 @@ bool CCSBot::LsKnows(int fact)
 	}
 	return LsTrait(200 + fact) < p;
 }
+
+
+// ---- map kind and spawns ------------------------------------------------------------------
+
+namespace
+{
+char s_kindMap[64] = {};
+int s_kind = LSMAP_OBJECTIVE;
+Vector s_spawn[2];
+bool s_hasSpawn[2] = {};
+
+void LsMapKindUpdate()
+{
+	if (!gpGlobals->mapname || Q_strcmp(s_kindMap, STRING(gpGlobals->mapname)) == 0)
+		return;
+	Q_strlcpy(s_kindMap, STRING(gpGlobals->mapname));
+	auto starts = [](const char *prefix) { return Q_strnicmp(s_kindMap, prefix, Q_strlen(prefix)) == 0; };
+	if (starts("aim_") || starts("35hp_") || starts("1v1") || starts("aim-"))
+		s_kind = LSMAP_AIM;
+	else if (starts("fy_"))
+		s_kind = LSMAP_FY;
+	else if (starts("awp_") || starts("awp-"))
+		s_kind = LSMAP_AWP;
+	else if (starts("ka_") || starts("knife"))
+		s_kind = LSMAP_KNIFE;
+	else if (TheCSBots() && TheCSBots()->GetScenario() != CCSBotManager::SCENARIO_DEATHMATCH)
+		s_kind = LSMAP_OBJECTIVE;
+	else
+		s_kind = LSMAP_OTHER;
+	// the middle of each team's spawn (Ts: info_player_deathmatch, CTs: info_player_start)
+	const char *cls[2] = { "info_player_deathmatch", "info_player_start" };
+	for (int t = 0; t < 2; t++)
+	{
+		Vector sum(0, 0, 0);
+		int n = 0;
+		CBaseEntity *pEnt = nullptr;
+		while ((pEnt = UTIL_FindEntityByClassname(pEnt, cls[t])) != nullptr && n < 64)
+		{
+			sum = sum + pEnt->pev->origin;
+			n++;
+		}
+		s_hasSpawn[t] = n > 0;
+		if (n)
+			s_spawn[t] = sum / float(n);
+	}
+}
+} // namespace
+
+int LsMapKind()
+{
+	LsMapKindUpdate();
+	return s_kind;
+}
+
+const Vector *LsEnemySpawn(int team)
+{
+	LsMapKindUpdate();
+	int other = team == TERRORIST ? 1 : 0;
+	return s_hasSpawn[other] ? &s_spawn[other] : nullptr;
+}
+
+// ---- scanning the angles -------------------------------------------------------------------
+//
+// Where a person looks moving through (or holding) a place: the ways an enemy could come in
+// (the area's angles from the map knowledge: places in sight that lead out of sight), at the
+// height they're at, the most likely first: busy ways, ways from the enemy's side of the map,
+// near a noise or where an enemy was seen; less the ones a teammate is already watching or
+// it checked a moment ago, and (moving) fewer behind it. A good player checks them in a
+// tidy order, one after another; a newer one checks fewer, later, and a bit at random.
+// Everyone for themselves in deathmatch: every way counts the same. True if it looked.
+bool CCSBot::LsScanAngles(bool holding)
+{
+	if (!LsFight() || !m_lastKnownArea)
+		return false;
+	float now = gpGlobals->time;
+	if (now < m_lsScanNext || IsLookingAtSpot(PRIORITY_LOW))
+		return false;
+	const LsAreaKnow *k = LsKnow(m_lastKnownArea);
+	if (!k || k->angleCount == 0)
+		return false;
+	float skill = LsSkill();
+	int style = LsStyle();
+	// (a newer player doesn't always check: it just looks where it's going for a bit)
+	if (!holding && RANDOM_FLOAT(0.0f, 1.0f) > 0.45f + 0.55f * skill)
+	{
+		m_lsScanNext = now + RANDOM_FLOAT(0.8f, 1.6f);
+		return false;
+	}
+	bool dm = !LsTeamGame();
+	const Vector *enemyHome = dm ? nullptr : LsEnemySpawn(m_iTeam);
+	Vector eye = GetEyePosition();
+	float heading = pev->velocity.Length2D() > 60.0f ? UTIL_VecToYaw(pev->velocity) : pev->v_angle.y;
+	bool noiseFresh = IsNoiseHeard() && now - m_noiseTimestamp < 5.0f;
+	bool sawFresh = GetTimeSinceLastSawEnemy() < 10.0f;
+
+	float bestScore = -1.0f, scores[LS_KNOW_ANGLES];
+	int bestA = -1;
+	Vector at[LS_KNOW_ANGLES];
+	for (int a = 0; a < k->angleCount; a++)
+	{
+		scores[a] = -1.0f;
+		const LsKnownAngle &an = k->angles[a];
+		CNavArea *target = LsKnowArea(an.area);
+		if (!target)
+			continue;
+		const Vector &tc = *target->GetCenter();
+		at[a] = Vector(tc.x, tc.y, tc.z + HalfHumanHeight + LsLookHeight());
+		float score = 1.0f + float(an.weight);
+		// (the enemy's side of the map first)
+		if (enemyHome)
+			score *= (tc - *enemyHome).Length2D() < (pev->origin - *enemyHome).Length2D() ? 1.5f : 0.7f;
+		// (near something heard or seen lately)
+		if ((noiseFresh && (tc - m_noisePosition).IsLengthLessThan(600.0f)) || (sawFresh && (tc - GetLastKnownEnemyPosition()).IsLengthLessThan(600.0f)))
+			score *= 2.5f;
+		// (moving: mostly ahead; a careful player still checks behind now and then)
+		float off = float(Q_abs(NormalizeAngle(UTIL_VecToYaw(tc - pev->origin) - heading)));
+		if (!holding && off > 110.0f)
+			score *= (style == LS_STYLE_CAREFUL || style == LS_STYLE_CAMPER) ? 0.6f : 0.3f;
+		// (checked a moment ago)
+		for (int r = 0; r < 4; r++)
+			if (m_lsScanArea[r] == an.area + 1 && now - m_lsScanAt[r] < 4.0f)
+				score *= 0.2f;
+		// (a teammate close by already watching it: on the radar, looking that way)
+		bool covered = false;
+		for (int m = 1; m <= gpGlobals->maxClients && !covered; m++)
+		{
+			CBasePlayer *mate = UTIL_PlayerByIndex(m);
+			if (!mate || mate == this || !mate->IsAlive() || mate->m_iTeam != m_iTeam || (mate->pev->origin - pev->origin).IsLengthGreaterThan(1200.0f))
+				continue;
+			float toYaw = UTIL_VecToYaw(tc - mate->pev->origin);
+			if (Q_abs(NormalizeAngle(toYaw - mate->pev->v_angle.y)) < 25.0f)
+				covered = true;
+		}
+		if (covered)
+			score *= 0.25f;
+		scores[a] = score;
+		if (score > bestScore)
+		{
+			bestScore = score;
+			bestA = a;
+		}
+	}
+	if (bestA < 0)
+		return false;
+	// a newer player's pick is looser: one of the top few, not always the best
+	if (RANDOM_FLOAT(0.0f, 1.0f) > 0.4f + 0.6f * skill)
+	{
+		int pick = RANDOM_LONG(0, k->angleCount - 1);
+		if (scores[pick] >= 0.0f)
+			bestA = pick;
+	}
+	Vector look = at[bestA];
+	LsLookableSpot(&look);
+	// how long on it: a good player a quick, sure check; careful ones and campers longer; holding
+	// a spot, longer still
+	float hold = RANDOM_FLOAT(0.5f, 1.0f) + 0.4f * (1.0f - skill);
+	if (style == LS_STYLE_CAREFUL || style == LS_STYLE_CAMPER)
+		hold *= 1.3f;
+	if (holding)
+		hold *= 1.8f;
+	SetLookAt("Loner-Strike: angle", &look, PRIORITY_LOW, hold, true, 8.0f);
+	m_lsScanArea[m_lsScanNextSlot] = (unsigned short)(k->angles[bestA].area + 1);
+	m_lsScanAt[m_lsScanNextSlot] = now;
+	m_lsScanNextSlot = (m_lsScanNextSlot + 1) % 4;
+	m_lsScanNext = now + hold * 0.8f + RANDOM_FLOAT(0.1f, 0.5f) * (1.0f - skill);
+	return true;
+}
+
+// An enemy bumping into it or brushing past (closer than a body's width, any direction): a
+// person feels that and turns round. A good player at once, a newer one after a moment
+void CCSBot::LsBumpCheck()
+{
+	if (!LsFight() || !IsAlive())
+		return;
+	float now = gpGlobals->time;
+	if (m_lsBumpAt > 0.0f)
+	{
+		if (now < m_lsBumpAt)
+			return;
+		m_lsBumpAt = 0.0f;
+		CBasePlayer *pFoe = UTIL_PlayerByIndex(m_lsBumpBy);
+		if (!pFoe || !pFoe->IsAlive() || !IsEnemy(pFoe))
+			return;
+		Vector at = pFoe->pev->origin + pFoe->pev->view_ofs * 0.8f;
+		SetLookAt("Loner-Strike: bumped", &at, PRIORITY_HIGH, 0.8f, false);
+		if (IsVisible(pFoe, false))
+			Attack(pFoe);
+		LsWhy("bumped");
+		return;
+	}
+	if (now < m_lsBumpCheckAt || IsAttacking())
+		return;
+	m_lsBumpCheckAt = now + 0.1f;
+	for (int m = 1; m <= gpGlobals->maxClients; m++)
+	{
+		CBasePlayer *pFoe = UTIL_PlayerByIndex(m);
+		if (!pFoe || pFoe == this || !pFoe->IsAlive() || !IsEnemy(pFoe))
+			continue;
+		Vector d = pFoe->pev->origin - pev->origin;
+		if (d.Length2D() > 44.0f || Q_abs(d.z) > 72.0f)
+			continue;
+		m_lsBumpBy = m;
+		m_lsBumpAt = now + 0.12f + 0.5f * (1.0f - LsSkill());
+		return;
+	}
+}
