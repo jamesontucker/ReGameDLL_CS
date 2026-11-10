@@ -2406,6 +2406,7 @@ struct LsSightData
 	bool tried = false;						// the file was looked for
 	char map[64] = {};
 	size_t count = 0;						// areas when it started (a change starts it over)
+	size_t navSize = 0;						// the nav's size when it was last looked at (one refused above)
 	unsigned int key = 0;					// the nav it's for
 	std::vector<CNavArea *> areas;
 	std::vector<int> index;					// area id -> index
@@ -2553,11 +2554,23 @@ void LsSightReset()
 	s_sight.tried = true;
 	Q_strlcpy(s_sight.map, STRING(gpGlobals->mapname));
 	s_sight.count = TheNavAreaList.size();
+	s_sight.navSize = s_sight.count;
 	s_sight.key = LsNavKey();
 	s_sight.areas.assign(TheNavAreaList.begin(), TheNavAreaList.end());
-	unsigned int top = 0;
+	// (area ids come from the map's .nav, which can come with a downloaded map: one far out of
+	// range, or too many areas, and the map gets no sightlines rather than a huge table)
+	size_t top = 0;
 	for (CNavArea *a : s_sight.areas)
-		top = Q_max(top, a->GetID());
+		top = Q_max(top, (size_t)a->GetID());
+	const size_t MAX_AREAS = 6000;				// (about 4.5 MB of sightlines; bigger maps go without)
+	if (s_sight.count > MAX_AREAS || top > 16 * s_sight.count + 1024)
+	{
+		s_sight.count = 0;
+		s_sight.areas.clear();
+		s_sight.index.clear();
+		s_sight.bits.clear();
+		return;
+	}
 	s_sight.index.assign(top + 1, -1);
 	for (size_t k = 0; k < s_sight.areas.size(); k++)
 		s_sight.index[s_sight.areas[k]->GetID()] = (int)k;
@@ -2581,8 +2594,9 @@ void LsSightStep()
 	if (!LsFight() || TheNavAreaList.empty() || !gpGlobals->mapname)
 		return;
 	// (the nav replaced, even with the same number of areas: its first area is a new one)
-	if (!s_sight.tried || s_sight.count != TheNavAreaList.size() || s_sight.areas.empty() || s_sight.areas.front() != TheNavAreaList.front()
-		|| Q_strcmp(s_sight.map, STRING(gpGlobals->mapname)) != 0)
+	if (!s_sight.tried || Q_strcmp(s_sight.map, STRING(gpGlobals->mapname)) != 0
+		|| (!s_sight.areas.empty() && (s_sight.count != TheNavAreaList.size() || s_sight.areas.front() != TheNavAreaList.front()))
+		|| (s_sight.areas.empty() && s_sight.navSize != TheNavAreaList.size()))
 		LsSightReset();
 	if (s_sight.ready || s_sight.count < 2)
 		return;
