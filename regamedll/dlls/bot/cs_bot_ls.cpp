@@ -2469,7 +2469,7 @@ struct LsMapKnow
 	std::vector<PairInfo> pairs;			// visible pairs, a < b
 	std::vector<BangInfo> bangs;
 	std::vector<LsAreaKnow> know;
-	std::vector<std::vector<std::pair<unsigned short, unsigned char>>> near;	// per area: (other, quality), both ways
+	std::vector<std::vector<std::pair<unsigned short, unsigned char>>> inView;	// per area: (other, quality), both ways
 	size_t i = 0, j = 1;					// next pair or area
 	double spentMs = 0.0, lastSave = 0.0;
 	float startedAt = 0.0f;
@@ -2566,6 +2566,8 @@ float Reach(const CNavArea *n)
 // (close and out of sight) whether one thin layer is all that's between them
 void Pair(size_t ia, size_t ib)
 {
+	if (ia >= s_know.count || ib >= s_know.count)
+		return;
 	const CNavArea *a = s_know.areas[ia], *b = s_know.areas[ib];
 	const Vector &ca = *a->GetCenter(), &cb = *b->GetCenter();
 	float dist = float((ca - cb).Length());
@@ -2657,6 +2659,8 @@ void AddObject(LsAreaKnow &k, unsigned char type, const Vector &pos, float top, 
 // One area: cover all round and what it's made of, low objects, the ceiling, corners
 void Area(size_t idx)
 {
+	if (idx >= s_know.count)
+		return;
 	const CNavArea *area = s_know.areas[idx];
 	LsAreaKnow &k = s_know.know[idx];
 	const Vector &c = *area->GetCenter();
@@ -2775,13 +2779,13 @@ void MapObjects()
 void BuildNear()
 {
 	size_t n = s_know.count;
-	s_know.near.assign(n, {});
+	s_know.inView.assign(n, {});
 	for (const PairInfo &p : s_know.pairs)
 	{
-		s_know.near[p.a].push_back({ p.b, p.quality });
-		s_know.near[p.b].push_back({ p.a, p.quality });
+		s_know.inView[p.a].push_back({ p.b, p.quality });
+		s_know.inView[p.b].push_back({ p.a, p.quality });
 	}
-	for (auto &list : s_know.near)
+	for (auto &list : s_know.inView)
 		std::sort(list.begin(), list.end());
 }
 
@@ -2796,6 +2800,8 @@ bool BitSees(size_t x, size_t y)
 // how much of the map it sees and whether it's above what it sees
 void Angles(size_t idx)
 {
+	if (idx >= s_know.count)
+		return;
 	LsAreaKnow &k = s_know.know[idx];
 	const CNavArea *me = s_know.areas[idx];
 	const Vector &c = *me->GetCenter();
@@ -2805,7 +2811,7 @@ void Angles(size_t idx)
 	int nearIdx[B];
 	for (int x = 0; x < B; x++) { nearest[x] = 1e9f; nearIdx[x] = -1; }
 	int lower = 0, sees = 0;
-	for (auto &seen : s_know.near[idx])
+	for (auto &seen : s_know.inView[idx])
 	{
 		size_t v = seen.first;
 		sees++;
@@ -2922,7 +2928,10 @@ bool Load()
 		// (counts from the file are checked against what fits before anything's read by them)
 		size_t want = sizeof(head) + s_know.bits.size() + (size_t)head.pairs * sizeof(PairInfo) + (size_t)head.bangs * sizeof(BangInfo) + n * sizeof(LsAreaKnow);
 		if (head.magic == LSV_MAGIC && head.version == LSV_VERSION && head.key == s_know.key && head.count == n && head.stage <= STAGE_DONE
-			&& head.pairs <= n * n && head.bangs <= n * n && (size_t)len == want && head.ci <= n && head.cj <= n)
+			&& head.pairs <= n * n && head.bangs <= n * n && (size_t)len == want
+			// (where it carries on from has to be a real place for its stage: a pair i < j < n,
+			// or finished with them; an area up to n)
+			&& (head.stage == STAGE_PAIRS ? (head.ci + 1 >= n || (head.ci < head.cj && head.cj < n)) : head.ci <= n))
 		{
 			const byte *p = data + sizeof(head);
 			Q_memcpy(s_know.bits.data(), p, s_know.bits.size());
@@ -2974,7 +2983,7 @@ bool Load()
 	return ok;
 }
 
-void Log(const char *what)
+void KnowLog(const char *what)
 {
 	char gd[64]{}, path[MAX_OSPATH];
 	GET_GAME_DIR(gd);
@@ -3001,7 +3010,7 @@ void Finish()
 		s_know.map, (int)s_know.count, (int)s_know.pairs.size(), (int)s_know.bangs.size(), (int)corners, (int)angles, (int)lows, (int)mapObjects,
 		s_know.traces, s_know.spentMs / 1000.0, gpGlobals->time - s_know.startedAt);
 	CONSOLE_ECHO("Loner-Strike: map knowledge for %s\n", line);
-	Log(line);
+	KnowLog(line);
 }
 
 // A new map, or its nav changed: start again, or carry on from the file
@@ -3017,7 +3026,7 @@ void Reset()
 	s_know.areas.assign(TheNavAreaList.begin(), TheNavAreaList.end());
 	s_know.pairs.clear();
 	s_know.bangs.clear();
-	s_know.near.clear();
+	s_know.inView.clear();
 	// (area ids come from the map's .nav, which can come with a downloaded map: one far out of
 	// range, or too many areas, and the map gets no knowledge rather than a huge table)
 	size_t top = 0;
@@ -3170,7 +3179,7 @@ int LsSightQuality(const CNavArea *a, const CNavArea *b)
 		return 0;
 	if (x == y)
 		return 255;
-	auto &list = s_know.near[x];
+	auto &list = s_know.inView[x];
 	auto it = std::lower_bound(list.begin(), list.end(), std::make_pair((unsigned short)y, (unsigned char)0));
 	return (it != list.end() && it->first == y) ? it->second : 0;
 }
