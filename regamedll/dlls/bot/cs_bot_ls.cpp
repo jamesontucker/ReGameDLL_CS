@@ -3187,6 +3187,9 @@ void LsSightStep()
 {
 	if (!LsFight() || TheNavAreaList.empty() || !gpGlobals->mapname)
 		return;
+	// (bots learning the map: its nav is still being built; the knowledge waits for the finished one)
+	if (TheCSBots() && (TheCSBots()->IsLearningMap() || TheCSBots()->IsAnalysisRequested()))
+		return;
 	// (the nav replaced, even with the same number of areas: its first area is a new one)
 	if (!s_know.tried || Q_strcmp(s_know.map, STRING(gpGlobals->mapname)) != 0
 		|| (!s_know.areas.empty() && (s_know.count != TheNavAreaList.size() || s_know.areas.front() != TheNavAreaList.front()))
