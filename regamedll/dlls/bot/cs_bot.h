@@ -869,6 +869,10 @@ private:
 	bool LsScanAngles(bool holding);	// Loner-Strike: look at the next angle an enemy could come from (map knowledge)
 	float LsSafeSide(const CNavArea *area, NavDirType dir);	// Loner-Strike: -1..1, the less exposed side walking in
 	void LsCrouchWalk();				// Loner-Strike: crouch past a low wall that hides it from an angle
+	void LsDoorButton();				// Loner-Strike: a door that only opens from its button: press the button
+	EntityHandle<CBaseEntity> m_lsButton;	// the button it's going to press, and until when it tries
+	float m_lsButtonUntil = 0.0f;
+	float m_lsButtonCheckAt = 0.0f;
 	bool m_lsCrouchWalking = false;
 	float m_lsCrouchWalkSince = 0.0f;
 	float m_lsCrouchWalkNext = 0.0f;		// not again before (a cooldown after a few steps)

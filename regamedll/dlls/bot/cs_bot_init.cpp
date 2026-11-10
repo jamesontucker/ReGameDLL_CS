@@ -185,6 +185,8 @@ void CCSBot::ResetValues()
 	m_lsCrouchWalking = false;
 	m_lsCrouchWalkNext = 0.0f;
 	m_lsScanNext = 0.0f;
+	m_lsButton = nullptr;
+	m_lsButtonUntil = 0.0f;
 	for (int r = 0; r < 4; r++)
 	{
 		m_lsScanArea[r] = 0;

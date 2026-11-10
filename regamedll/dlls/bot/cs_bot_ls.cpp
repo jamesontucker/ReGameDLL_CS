@@ -3849,3 +3849,135 @@ void CCSBot::LsCrouchWalk()
 	else
 		stop();
 }
+
+
+// ---- doors worked by a button ----------------------------------------------------------------
+//
+// A door that opens from a button on the wall beside it (the map links them: the button's
+// target is the door's name) doesn't open by walking into it: the game plays the "locked"
+// buzzer. A bot held up at one like that finds the button wired to it, walks over, looks at it
+// and presses it. One press at a time per button (a toggle pressed twice closes the door again).
+
+namespace
+{
+float s_buttonPressedAt[MAX_EDICTS] = {};		// by entity index, when a bot last pressed it
+
+float &ButtonPressed(int index)
+{
+	static float none = 0.0f;
+	return (index > 0 && index < int(sizeof(s_buttonPressedAt) / sizeof(s_buttonPressedAt[0]))) ? s_buttonPressedAt[index] : none;
+}
+
+Vector BrushCenter(CBaseEntity *pEnt)
+{
+	return (pEnt->pev->absmin + pEnt->pev->absmax) * 0.5f;
+}
+} // namespace
+
+void CCSBot::LsDoorButton()
+{
+	if (!LsFight() || !IsAlive() || IsAttacking() || IsUsingLadder())
+		return;
+	float now = gpGlobals->time;
+
+	// on its way to a button
+	CBaseEntity *pButton = m_lsButton;
+	if (pButton)
+	{
+		if (now > m_lsButtonUntil || GetTimeSinceLastSawEnemy() < 2.0f)
+		{
+			m_lsButton = nullptr;
+			return;
+		}
+		Vector at = BrushCenter(pButton);
+		Vector eye = GetEyePosition();
+		SetLookAt("Loner-Strike: button", &at, PRIORITY_HIGH, 0.5f);
+		if ((at - eye).IsLengthLessThan(80.0f))
+		{
+			if (IsLookingAtPosition(&at, 20.0f))
+			{
+				UseEnvironment();
+				ButtonPressed(pButton->entindex()) = now;
+				m_lsButton = nullptr;
+				LsWhy("pressed the door's button");
+				// (on with what it was doing once the door's open)
+				ResetStuckMonitor();
+			}
+		}
+		else if (!IsMovingTo())
+		{
+			CNavArea *area = TheNavAreaGrid.GetNearestNavArea(&at);
+			if (area)
+			{
+				Vector stand = *area->GetCenter();
+				MoveTo(&stand, FASTEST_ROUTE);
+			}
+		}
+		return;
+	}
+
+	// held up? (stuck, or barely moving on a path) - a few times a second at most
+	if (now < m_lsButtonCheckAt)
+		return;
+	m_lsButtonCheckAt = now + 0.3f;
+	if (!m_isStuck && !(HasPath() && pev->velocity.Length2D() < 40.0f))
+		return;
+
+	// a closed door just in front (the way it's looking, or the way its path goes), one opened
+	// by something else (it has a name)
+	Vector eye = GetEyePosition();
+	Vector dirs[2];
+	int nd = 0;
+	UTIL_MakeVectors(pev->v_angle);
+	dirs[nd++] = gpGlobals->v_forward;
+	if (HasPath() && m_pathIndex >= 0 && m_pathIndex < m_pathLength)
+		dirs[nd++] = m_path[m_pathIndex].pos - pev->origin;
+	CBaseEntity *pDoor = nullptr;
+	for (int i = 0; i < nd && !pDoor; i++)
+	{
+		Vector ahead = dirs[i];
+		ahead.z = 0.0f;
+		if (ahead.Length2D() < 1.0f)
+			continue;
+		ahead.NormalizeInPlace();
+		TraceResult tr;
+		UTIL_TraceLine(pev->origin, pev->origin + ahead * 72.0f, ignore_monsters, ENT(pev), &tr);
+		CBaseEntity *pHit = (tr.flFraction < 1.0f && tr.pHit) ? CBaseEntity::Instance(tr.pHit) : nullptr;
+		if (pHit && (FClassnameIs(pHit->pev, "func_door") || FClassnameIs(pHit->pev, "func_door_rotating")) && !FStringNull(pHit->pev->targetname))
+			pDoor = pHit;
+	}
+	if (!pDoor)
+		return;
+	CBaseToggle *pToggle = static_cast<CBaseToggle *>(pDoor);
+	if (pToggle->m_toggle_state != TS_AT_BOTTOM)
+		return;
+	const char *name = STRING(pDoor->pev->targetname);
+
+	// the button wired to it, close by and in reach
+	static const char *cls[] = { "func_button", "func_rot_button", "button_target" };
+	CBaseEntity *pBest = nullptr;
+	float bestD = 600.0f;
+	for (const char *c : cls)
+	{
+		CBaseEntity *pEnt = nullptr;
+		while ((pEnt = UTIL_FindEntityByClassname(pEnt, c)) != nullptr)
+		{
+			if (FStringNull(pEnt->pev->target) || Q_strcmp(STRING(pEnt->pev->target), name) != 0)
+				continue;
+			if (now - ButtonPressed(pEnt->entindex()) < 3.0f)
+				continue;
+			Vector at = BrushCenter(pEnt);
+			float d = float((at - eye).Length());
+			if (d < bestD)
+			{
+				bestD = d;
+				pBest = pEnt;
+			}
+		}
+	}
+	if (!pBest)
+		return;
+	m_lsButton = pBest;
+	m_lsButtonUntil = now + 8.0f;
+	LsWhy("going to the door's button");
+}
