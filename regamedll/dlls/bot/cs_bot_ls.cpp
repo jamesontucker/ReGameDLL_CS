@@ -2175,11 +2175,11 @@ bool CCSBot::LsBangThrough(const Vector &target)
 	float thick;
 	switch (pWeapon->m_iId)
 	{
-	case WEAPON_AWP: thick = 64.0f; break;
-	case WEAPON_M249: case WEAPON_G3SG1: case WEAPON_SG550: thick = 48.0f; break;
-	case WEAPON_AK47: thick = 40.0f; break;
-	case WEAPON_DEAGLE: case WEAPON_SCOUT: thick = 26.0f; break;
-	default: thick = 34.0f; break;
+	case WEAPON_AWP: thick = 52.0f; break;
+	case WEAPON_M249: case WEAPON_G3SG1: case WEAPON_SG550: thick = 36.0f; break;
+	case WEAPON_AK47: thick = 31.0f; break;
+	case WEAPON_DEAGLE: case WEAPON_SCOUT: thick = 24.0f; break;
+	default: thick = 28.0f; break;
 	}
 	if ((in.vecEndPos - out.vecEndPos).IsLengthGreaterThan(thick))
 		return false;
@@ -2217,7 +2217,7 @@ bool CCSBot::LsWallbang(float notSeenEnemyTime)
 	m_lsBangRolledAt = GetLastSawEnemyTimestamp();
 	float skill = LsSkill();
 	// (the habit: most of the strong ones have it, few new players; and how often they act on it)
-	if (LsTrait(32) > 0.15f + 0.75f * skill || RANDOM_FLOAT(0.0f, 1.0f) > 0.35f + 0.55f * skill)
+	if (LsTrait(32) > 0.175f + 0.575f * skill || RANDOM_FLOAT(0.0f, 1.0f) > 0.475f + 0.275f * skill)
 		return false;
 	// where they'd be by now, not where they were: a good player leads the spray along the way
 	// they were going (a little, a newer player not at all)
@@ -2227,7 +2227,7 @@ bool CCSBot::LsWallbang(float notSeenEnemyTime)
 	{
 		Vector lead = pEnemy->pev->origin - at;
 		lead.z = 0.0f;
-		float most = 90.0f * skill;
+		float most = 45.0f * skill;
 		float len = float(lead.Length());
 		if (len > most && len > 0.0f)
 			lead = lead * (most / len);
@@ -2316,7 +2316,7 @@ void CCSBot::LsHeard(GameEventType event, CBasePlayer *pPlayer, float dist)
 	}
 
 	// the good ones spray a thin wall they know someone's behind
-	if (dist < 750.0f && skill > 0.6f && LsTrait(33) < skill - 0.3f && now - m_lsBangHeardAt > 5.0f && RANDOM_FLOAT(0.0f, 1.0f) < 0.3f + 0.6f * (skill - 0.6f))
+	if (dist < 700.0f && skill > 0.63f && LsTrait(33) < skill - 0.33f && now - m_lsBangHeardAt > 5.5f && RANDOM_FLOAT(0.0f, 1.0f) < 0.32f + 0.3f * (skill - 0.63f))
 	{
 		m_lsBangHeardAt = now;
 		if (LsBangThrough(heard + Vector(0, 0, 10.0f)))
