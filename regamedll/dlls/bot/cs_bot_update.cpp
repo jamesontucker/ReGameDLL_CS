@@ -595,6 +595,9 @@ void CCSBot::Update()
 		LsNadeUpdate();
 		LsSaveCheck();
 	}
+	// (every style: the bomb is the game, solo pub players included)
+	if (LsFight())
+		LsPostPlantAware();
 	else if (IsEndOfSafeTime() && IsUsingGrenade() && (IsWellPastSafe() || !IsUsingHEGrenade()) && !m_isWaitingToTossGrenade)
 	{
 		Vector target;

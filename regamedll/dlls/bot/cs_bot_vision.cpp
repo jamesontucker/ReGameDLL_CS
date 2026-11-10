@@ -761,6 +761,39 @@ void CCSBot::UpdateLookAround(bool updateNow)
 		return;
 	}
 
+	// Loner-Strike: and the corners it can feel out from the walls round it as it moves (before the encounter spots, whose
+	// timer returns early most frames): where
+	// a near surface (a box, a doorway's side, a tunnel's bend) gives way to open space beyond,
+	// someone could be just past the edge. A flat wall has no edge and is never looked at
+	if (LsFight() && !IsNotMoving() && !IsSafe() && !IsLookingAtSpot(PRIORITY_LOW) && gpGlobals->time >= m_lsCornerCheckAt)
+	{
+		// how often: the careful and campers check more, rushers less, newer players less
+		float skill = LsSkill(), aggro = LsAggro();
+		int style = LsStyle();
+		float gap = RANDOM_FLOAT(0.8f, 1.5f) + 1.2f * (1.0f - skill);
+		if (style == LS_STYLE_CAREFUL || style == LS_STYLE_CAMPER || style == LS_STYLE_NINJA)
+			gap *= 0.7f;
+		else if (style == LS_STYLE_RUSHER || aggro > 0.75f)
+			gap *= 1.35f;
+		m_lsCornerCheckAt = gpGlobals->time + gap;
+		// (a newer player misses checks; a good one rarely does)
+		Vector corner;
+		if (RANDOM_FLOAT(0.0f, 1.0f) < 0.35f + 0.65f * skill && LsCornerAhead(&corner))
+		{
+			// a newer player's eyes land roughly on it (low, off to a side); a good one's crosshair
+			// sits on the edge at head height, and stays there while it walks past (slicing the pie)
+			float sloppy = 1.0f - skill;
+			corner.x += RANDOM_FLOAT(-50.0f, 50.0f) * sloppy;
+			corner.y += RANDOM_FLOAT(-50.0f, 50.0f) * sloppy;
+			corner.z = pev->origin.z + LsLookHeight();	// (chest for a newer player, head for a good one)
+			float hold = 0.25f + 0.7f * skill;
+			if (style == LS_STYLE_CAREFUL || style == LS_STYLE_NINJA)
+				hold *= 1.3f;
+			SetLookAt("Loner-Strike: corner", &corner, PRIORITY_LOW, hold, true, 10.0f);
+			return;
+		}
+	}
+
 	// Glance at "encouter spots" as we move past them
 	if (m_spotEncounter)
 	{
@@ -897,36 +930,6 @@ void CCSBot::UpdateLookAround(bool updateNow)
 		}
 	}
 
-	// Loner-Strike: and the corners it can feel out from the walls round it as it moves: where
-	// a near surface (a box, a doorway's side, a tunnel's bend) gives way to open space beyond,
-	// someone could be just past the edge. A flat wall has no edge and is never looked at
-	if (LsFight() && !IsNotMoving() && !IsSafe() && !IsLookingAtSpot(PRIORITY_LOW) && gpGlobals->time >= m_lsCornerCheckAt)
-	{
-		// how often: the careful and campers check more, rushers less, newer players less
-		float skill = LsSkill(), aggro = LsAggro();
-		int style = LsStyle();
-		float gap = RANDOM_FLOAT(0.8f, 1.5f) + 1.2f * (1.0f - skill);
-		if (style == LS_STYLE_CAREFUL || style == LS_STYLE_CAMPER || style == LS_STYLE_NINJA)
-			gap *= 0.7f;
-		else if (style == LS_STYLE_RUSHER || aggro > 0.75f)
-			gap *= 1.35f;
-		m_lsCornerCheckAt = gpGlobals->time + gap;
-		// (a newer player misses checks; a good one rarely does)
-		Vector corner;
-		if (RANDOM_FLOAT(0.0f, 1.0f) < 0.35f + 0.65f * skill && LsCornerAhead(&corner))
-		{
-			// a newer player's eyes land roughly on it (low, off to a side); a good one's crosshair
-			// sits on the edge at head height, and stays there while it walks past (slicing the pie)
-			float sloppy = 1.0f - skill;
-			corner.x += RANDOM_FLOAT(-50.0f, 50.0f) * sloppy;
-			corner.y += RANDOM_FLOAT(-50.0f, 50.0f) * sloppy;
-			corner.z = pev->origin.z + LsLookHeight();	// (chest for a newer player, head for a good one)
-			float hold = 0.25f + 0.7f * skill;
-			if (style == LS_STYLE_CAREFUL || style == LS_STYLE_NINJA)
-				hold *= 1.3f;
-			SetLookAt("Loner-Strike: corner", &corner, PRIORITY_LOW, hold, true, 10.0f);
-		}
-	}
 }
 
 // Loner-Strike: the nearest edge ahead (within about 100 degrees of where it's going) with

@@ -73,6 +73,7 @@ void CCSBot::LsNadeReset()
 	m_lsNadeCornerRolled = false;
 	m_lsSaving = false;
 	m_lsSaveDecided = false;
+	m_lsPlantHideSince = 0.0f;
 	m_lsSmokeUntil = 0.0f;
 }
 
@@ -1175,6 +1176,22 @@ void CCSBot::LsSaveCheck()
 	float chance = LsMatch() ? 0.9f : 0.25f + 0.6f * skill;
 	if (LsTrait(48) > 0.85f)
 		chance *= 0.15f;
+	// a CT with the bomb down: a good player saves when the retake isn't on (no time to get there
+	// and defuse, four or more Ts, or three without a kit and little time to spare), and goes for
+	// it when it is; the newer ones decide more by feel either way
+	if (planted && m_iTeam == CT)
+	{
+		const Vector *bomb = GetGameState()->GetBombPosition();
+		float dist = bomb ? float((*bomb - pev->origin).Length2D()) : 1500.0f;
+		float need = dist / 230.0f + (m_bHasDefuser ? 5.0f : 10.0f) + 1.0f;
+		float left = TheCSBots()->GetBombTimeLeft();
+		int foes = GetEnemiesRemaining();
+		bool on = need < left && (foes <= 3) && (m_bHasDefuser || need + 6.0f < left);
+		if (on)
+			chance *= 0.6f * (1.0f - skill) + 0.05f;
+		else if (need >= left)
+			chance = Q_max(chance, 0.4f + 0.55f * skill);
+	}
 	if (RANDOM_FLOAT(0.0f, 1.0f) >= chance)
 		return;
 
@@ -1232,4 +1249,40 @@ bool CCSBot::LsBuyPistolRound()
 	}
 	PrintIfWatched("Pistol round buy.\n");
 	return true;
+}
+
+// A CT hiding with the bomb down and time to retake it: not one that's saving its gun, or covering
+// a teammate who's on the bomb. People who know the game don't sit there: a good player goes after
+// a few seconds; newer players and campers wait longer (and some never make it in time)
+void CCSBot::LsPostPlantAware()
+{
+	if (m_iTeam != CT || !TheCSBots()->IsBombPlanted() || m_lsSaving || IsDefusingBomb() || IsAttacking() || !IsHiding()
+		|| LsWeaponMode() || LsOrderActive())
+	{
+		m_lsPlantHideSince = 0.0f;
+		return;
+	}
+	CBasePlayer *pDefuser = TheCSBots()->GetBombDefuser();
+	if ((pDefuser && pDefuser != this) || !LsRetakeRush())
+	{
+		m_lsPlantHideSince = 0.0f;
+		return;
+	}
+	float now = gpGlobals->time;
+	if (m_lsPlantHideSince <= 0.0f)
+	{
+		m_lsPlantHideSince = now;
+		return;
+	}
+	float unskilled = 1.0f - LsSkill();
+	float patience = 3.0f + 9.0f * unskilled;
+	int style = LsStyle();
+	if (style == LS_STYLE_CAMPER || style == LS_STYLE_AWPER)
+		patience += 8.0f * unskilled;
+	if (now - m_lsPlantHideSince > patience)
+	{
+		m_lsPlantHideSince = 0.0f;
+		LsWhy("post-plant: going for the bomb");
+		Idle();
+	}
 }
