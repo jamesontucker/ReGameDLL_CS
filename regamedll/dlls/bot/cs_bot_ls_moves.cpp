@@ -1261,3 +1261,19 @@ void CCSBot::LsHandUpdate(float goalYaw, float goalPitch, float dt)
 	m_lookYawVel = NormalizeAngle(pev->v_angle.y - oldY) / Q_max(0.001f, dt);
 	m_lookPitchVel = (pev->v_angle.x - oldP) / Q_max(0.001f, dt);
 }
+
+// An area to keep out of for a while, now (a door in the way it can't open: no button for it,
+// or one it couldn't get to): the next path goes round
+void CCSBot::LsForceBadArea(const CNavArea *area, float secs)
+{
+	if (!area)
+		return;
+	int slot = 0;
+	for (int i = 1; i < 4; i++)
+	{
+		if (m_lsBadAreaUntil[i] < m_lsBadAreaUntil[slot])
+			slot = i;
+	}
+	m_lsBadAreas[slot] = area;
+	m_lsBadAreaUntil[slot] = gpGlobals->time + secs;
+}

@@ -870,9 +870,15 @@ private:
 	float LsSafeSide(const CNavArea *area, NavDirType dir);	// Loner-Strike: -1..1, the less exposed side walking in
 	void LsCrouchWalk();				// Loner-Strike: crouch past a low wall that hides it from an angle
 	void LsDoorButton();				// Loner-Strike: a door that only opens from its button: press the button
-	EntityHandle<CBaseEntity> m_lsButton;	// the button it's going to press, and until when it tries
+	EntityHandle<CBaseEntity> m_lsButton;	// the button (or use-only door) it's going to press, and until when it tries
 	float m_lsButtonUntil = 0.0f;
 	float m_lsButtonCheckAt = 0.0f;
+	const CNavArea *m_lsButtonBehind = nullptr;	// the area past the door it's opening (avoided if it can't)
+	EntityHandle<CBaseEntity> m_lsBreak;	// something breakable in its way it's breaking, and until when
+	float m_lsBreakUntil = 0.0f;
+	float m_lsBreakStartAt = 0.0f;			// starts breaking it then (a newer player takes a moment)
+	float m_lsDoorBackUntil = 0.0f;		// stepping back out of a door's swing
+	void LsForceBadArea(const CNavArea *area, float secs);	// Loner-Strike: avoid an area for a while (a door it can't open)
 	bool m_lsCrouchWalking = false;
 	float m_lsCrouchWalkSince = 0.0f;
 	float m_lsCrouchWalkNext = 0.0f;		// not again before (a cooldown after a few steps)

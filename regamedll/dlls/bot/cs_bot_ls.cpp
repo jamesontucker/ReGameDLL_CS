@@ -3879,14 +3879,53 @@ void CCSBot::LsDoorButton()
 	if (!LsFight() || !IsAlive() || IsAttacking() || IsUsingLadder())
 		return;
 	float now = gpGlobals->time;
+	auto giveUp = [&]() {
+		// (a door it couldn't open: round it for a minute)
+		if (m_lsButtonBehind)
+		{
+			LsForceBadArea(m_lsButtonBehind, 60.0f);
+			m_lsButtonBehind = nullptr;
+			DestroyPath();
+			Idle();
+		}
+	};
 
-	// on its way to a button
+	// stepping back out of a door's swing
+	if (now < m_lsDoorBackUntil)
+	{
+		MoveBackward();
+		return;
+	}
+
+	// breaking something in the way (a grate, a board, a window on its path)
+	CBaseEntity *pBreak = m_lsBreak;
+	if (pBreak)
+	{
+		if (now > m_lsBreakUntil || pBreak->pev->health <= 0.0f || pBreak->pev->solid == SOLID_NOT || GetTimeSinceLastSawEnemy() < 2.0f)
+		{
+			m_lsBreak = nullptr;
+			ResetStuckMonitor();
+			return;
+		}
+		// (a newer player stands there a moment before it clicks, and its shots are sloppier)
+		if (now < m_lsBreakStartAt)
+			return;
+		Vector at = BrushCenter(pBreak);
+		SetLookAt("Loner-Strike: breaking it", &at, PRIORITY_HIGH, 0.4f);
+		if (IsLookingAtPosition(&at, 6.0f + 14.0f * (1.0f - LsSkill())) && !IsActiveWeaponReloading())
+			PrimaryAttack();
+		return;
+	}
+
+	// on its way to a button (or pressing a use-only door)
 	CBaseEntity *pButton = m_lsButton;
 	if (pButton)
 	{
 		if (now > m_lsButtonUntil || GetTimeSinceLastSawEnemy() < 2.0f)
 		{
 			m_lsButton = nullptr;
+			if (now > m_lsButtonUntil)
+				giveUp();
 			return;
 		}
 		Vector at = BrushCenter(pButton);
@@ -3899,8 +3938,8 @@ void CCSBot::LsDoorButton()
 				UseEnvironment();
 				ButtonPressed(pButton->entindex()) = now;
 				m_lsButton = nullptr;
-				LsWhy("pressed the door's button");
-				// (on with what it was doing once the door's open)
+				m_lsButtonBehind = nullptr;
+				LsWhy("opened the door");
 				ResetStuckMonitor();
 			}
 		}
@@ -3923,8 +3962,7 @@ void CCSBot::LsDoorButton()
 	if (!m_isStuck && !(HasPath() && pev->velocity.Length2D() < 40.0f))
 		return;
 
-	// a closed door just in front (the way it's looking, or the way its path goes), one opened
-	// by something else (it has a name)
+	// what's just in front (the way it's looking, or the way its path goes)
 	Vector eye = GetEyePosition();
 	Vector dirs[2];
 	int nd = 0;
@@ -3932,28 +3970,73 @@ void CCSBot::LsDoorButton()
 	dirs[nd++] = gpGlobals->v_forward;
 	if (HasPath() && m_pathIndex >= 0 && m_pathIndex < m_pathLength)
 		dirs[nd++] = m_path[m_pathIndex].pos - pev->origin;
-	CBaseEntity *pDoor = nullptr;
-	for (int i = 0; i < nd && !pDoor; i++)
+	CBaseEntity *pHit = nullptr;
+	Vector ahead;
+	for (int i = 0; i < nd && !pHit; i++)
 	{
-		Vector ahead = dirs[i];
+		ahead = dirs[i];
 		ahead.z = 0.0f;
 		if (ahead.Length2D() < 1.0f)
 			continue;
 		ahead.NormalizeInPlace();
 		TraceResult tr;
-		UTIL_TraceLine(pev->origin, pev->origin + ahead * 72.0f, ignore_monsters, ENT(pev), &tr);
-		CBaseEntity *pHit = (tr.flFraction < 1.0f && tr.pHit) ? CBaseEntity::Instance(tr.pHit) : nullptr;
-		if (pHit && (FClassnameIs(pHit->pev, "func_door") || FClassnameIs(pHit->pev, "func_door_rotating")) && !FStringNull(pHit->pev->targetname))
-			pDoor = pHit;
+		UTIL_TraceLine(pev->origin, pev->origin + ahead * 72.0f, ignore_monsters, dont_ignore_glass, ENT(pev), &tr);
+		if (tr.flFraction < 1.0f && tr.pHit && !FNullEnt(tr.pHit))
+			pHit = CBaseEntity::Instance(tr.pHit);
 	}
-	if (!pDoor)
+	if (!pHit)
 		return;
-	CBaseToggle *pToggle = static_cast<CBaseToggle *>(pDoor);
-	if (pToggle->m_toggle_state != TS_AT_BOTTOM)
-		return;
-	const char *name = STRING(pDoor->pev->targetname);
 
-	// the button wired to it, close by and in reach
+	// something breakable on its way (not one only the map can break)
+	if (FClassnameIs(pHit->pev, "func_breakable"))
+	{
+		if (pHit->pev->takedamage != DAMAGE_NO && !(pHit->pev->spawnflags & SF_BREAK_TRIGGER_ONLY) && pHit->pev->health > 0.0f)
+		{
+			float hesitate = RANDOM_FLOAT(0.3f, 1.4f) * (1.0f - LsSkill());
+			m_lsBreak = pHit;
+			m_lsBreakStartAt = now + hesitate;
+			m_lsBreakUntil = now + hesitate + 4.0f;
+			LsWhy("breaking what's in the way");
+		}
+		return;
+	}
+
+	bool rotating = FClassnameIs(pHit->pev, "func_door_rotating");
+	if (!rotating && !FClassnameIs(pHit->pev, "func_door"))
+		return;
+	CBaseToggle *pDoor = static_cast<CBaseToggle *>(pHit);
+
+	// a swinging door it's standing in the way of: a step back so it can open
+	if (rotating && (pDoor->m_toggle_state == TS_GOING_UP || pDoor->m_toggle_state == TS_GOING_DOWN))
+	{
+		m_lsDoorBackUntil = now + 0.6f;
+		LsWhy("out of the door's way");
+		return;
+	}
+	if (pDoor->m_toggle_state != TS_AT_BOTTOM)
+		return;
+	Vector doorAt = BrushCenter(pHit);
+	Vector behind = doorAt + ahead * 64.0f;
+	m_lsButtonBehind = TheNavAreaGrid.GetNearestNavArea(&behind);
+
+	// a door opened by pressing use on it
+	if (pHit->pev->spawnflags & SF_DOOR_USE_ONLY)
+	{
+		if (now - ButtonPressed(pHit->entindex()) < 3.0f)
+			return;
+		m_lsButton = pHit;
+		m_lsButtonUntil = now + 4.0f;
+		LsWhy("opening the door");
+		return;
+	}
+
+	// a door opened by something else (it has a name): the button wired to it, close by
+	if (FStringNull(pHit->pev->targetname))
+	{
+		m_lsButtonBehind = nullptr;
+		return;
+	}
+	const char *name = STRING(pHit->pev->targetname);
 	static const char *cls[] = { "func_button", "func_rot_button", "button_target" };
 	CBaseEntity *pBest = nullptr;
 	float bestD = 600.0f;
@@ -3966,8 +4049,7 @@ void CCSBot::LsDoorButton()
 				continue;
 			if (now - ButtonPressed(pEnt->entindex()) < 3.0f)
 				continue;
-			Vector at = BrushCenter(pEnt);
-			float d = float((at - eye).Length());
+			float d = float((BrushCenter(pEnt) - eye).Length());
 			if (d < bestD)
 			{
 				bestD = d;
@@ -3976,7 +4058,12 @@ void CCSBot::LsDoorButton()
 		}
 	}
 	if (!pBest)
+	{
+		// (locked for good, or opened from somewhere it can't get to: another way round)
+		giveUp();
+		LsWhy("door won't open: another way");
 		return;
+	}
 	m_lsButton = pBest;
 	m_lsButtonUntil = now + 8.0f;
 	LsWhy("going to the door's button");

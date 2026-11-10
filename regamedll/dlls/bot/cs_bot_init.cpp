@@ -187,6 +187,10 @@ void CCSBot::ResetValues()
 	m_lsScanNext = 0.0f;
 	m_lsButton = nullptr;
 	m_lsButtonUntil = 0.0f;
+	m_lsButtonBehind = nullptr;
+	m_lsBreak = nullptr;
+	m_lsBreakUntil = 0.0f;
+	m_lsDoorBackUntil = 0.0f;
 	for (int r = 0; r < 4; r++)
 	{
 		m_lsScanArea[r] = 0;
