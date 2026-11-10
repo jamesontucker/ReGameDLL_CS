@@ -779,6 +779,10 @@ void CCSBot::UpdateLookAround(bool updateNow)
 			asleep *= asleep;
 
 			m_spotCheckTimestamp = gpGlobals->time + asleep * RANDOM_FLOAT(10.0f, 30.0f);
+			// (Loner-Strike: even the sharpest player gives each check a moment, and looks where
+			// they're going in between, not a flick from wall to wall every frame)
+			if (LsFight())
+				m_spotCheckTimestamp = Q_max(m_spotCheckTimestamp, gpGlobals->time + RANDOM_FLOAT(0.7f, 1.4f));
 
 			// figure out how far along the path segment we are
 			Vector delta = m_spotEncounter->path.to - m_spotEncounter->path.from;
@@ -823,6 +827,23 @@ void CCSBot::UpdateLookAround(bool updateNow)
 
 				if (spotOrder.t > t)
 					break;
+
+				// (Loner-Strike: only a spot someone could really be in that it can see from here,
+				// not right beside it, and roughly ahead or to the side of where it's going; a
+				// nook in the wall it's walking past, or one behind a wall, is nobody's check)
+				if (LsFight())
+				{
+					Vector eye = GetEyePosition();
+					Vector pos = *spotOrder.spot->GetPosition() + Vector(0, 0, HalfHumanHeight);
+					Vector to = pos - eye;
+					if (to.Length2D() < 160.0f)
+						continue;
+					Vector ahead = m_spotEncounter->path.to - m_spotEncounter->path.from;
+					if (ahead.Length2D() > 1.0f && Q_abs(NormalizeAngle(UTIL_VecToYaw(to) - UTIL_VecToYaw(ahead))) > 110.0f)
+						continue;
+					if (LsClearTo(eye, pos, ENT(pev)) < 0.95f)
+						continue;
+				}
 
 				dangerSpot[dangerIndex++] = spotOrder.spot;
 				if (dangerIndex >= MAX_DANGER_SPOTS)
