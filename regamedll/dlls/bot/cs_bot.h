@@ -1487,6 +1487,9 @@ extern cvar_t cv_bot_ls_trace;
 extern const char LS_PEEK[];					// the look-at of a corner peek
 bool LsFight();
 bool LsSpotCrowded(CBaseEntity *me, const Vector *pos);	// a teammate at or heading to somewhere right by it
+void LsSightStep();						// Loner-Strike: the map's sightlines, a little each frame
+bool LsSightReady();
+bool LsSees(const CNavArea *a, const CNavArea *b);	// someone in one area could see into the other
 bool LsMatch();
 bool LsSolo();
 bool LsOwnMemory();

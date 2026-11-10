@@ -146,6 +146,10 @@ void CCSBotManager::StartFrame()
 	CBotManager::StartFrame();
 	MonitorBotCVars();
 
+	// (Loner-Strike: the map's sightlines, worked out a little at a time)
+	if (UTIL_BotsInGame() > 0)
+		LsSightStep();
+
 	// debug zone extent visualization
 	if (cv_bot_debug.value == 5.0f)
 	{

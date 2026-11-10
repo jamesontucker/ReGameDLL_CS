@@ -41,6 +41,9 @@
 */
 
 #include "precompiled.h"
+#include <vector>
+#include <chrono>
+#include <cstdio>
 
 cvar_t cv_bot_ls_own_memory = { "bot_ls_own_memory", "1", FCVAR_SERVER, 0.0f, nullptr };
 cvar_t cv_bot_ls_routes     = { "bot_ls_routes", "1.0", FCVAR_SERVER, 0.0f, nullptr };
@@ -2380,4 +2383,259 @@ void CCSBot::LsCheckBeforeDefuse()
 	SetLookAt("Loner-Strike: checking", &look, PRIORITY_HIGH, secs);
 	m_lsCheckUntil = gpGlobals->time + secs;
 	m_lsObjUseAt = m_lsCheckUntil;
+}
+
+
+// ---- sightlines --------------------------------------------------------------------------
+//
+// Which walkable areas of the map can see which: from standing eye height in one to head or
+// chest height in the other (doors and breakable windows count as open: they open). Worked
+// out in the background, a little each frame (LsSightStep), then saved next to the map
+// (maps/<map>.lsv) and loaded at once from then on. Until it's ready, nothing asks it.
+// It's what lets a bot look only where someone could actually be, at any height.
+
+namespace
+{
+const unsigned int LSV_MAGIC = 0x3156534C;	// "LSV1"
+const float LSV_RANGE = 3500.0f;			// farther than this counts as not in sight
+const double LSV_BUDGET_MS = 0.3;			// per frame
+
+struct LsSightData
+{
+	bool ready = false;
+	bool tried = false;						// the file was looked for
+	char map[64] = {};
+	size_t count = 0;						// areas when it started (a change starts it over)
+	unsigned int key = 0;					// the nav it's for
+	std::vector<CNavArea *> areas;
+	std::vector<int> index;					// area id -> index
+	std::vector<unsigned char> bits;		// count * count, row-major
+	size_t i = 0, j = 1;					// next pair to work out
+	double spentMs = 0.0;
+	float startedAt = 0.0f;
+	unsigned int traces = 0;
+};
+LsSightData s_sight;
+
+// The nav it was worked out for: the areas and where they are
+unsigned int LsNavKey()
+{
+	unsigned int h = 2166136261u;
+	auto mix = [&h](unsigned int v) { h ^= v; h *= 16777619u; };
+	mix((unsigned int)TheNavAreaList.size());
+	for (NavAreaList::iterator it = TheNavAreaList.begin(); it != TheNavAreaList.end(); it++)
+	{
+		const CNavArea *a = *it;
+		mix(a->GetID());
+		mix((unsigned int)(int)a->GetCenter()->x);
+		mix((unsigned int)(int)a->GetCenter()->y);
+		mix((unsigned int)(int)a->GetCenter()->z);
+	}
+	return h;
+}
+
+// Whether a person could see from one point to the other: only solid walls block (glass, a
+// door or a breakable window don't)
+bool LsSightClear(const Vector &from, const Vector &to)
+{
+	Vector start = from;
+	edict_t *skip = nullptr;
+	for (int step = 0; step < 4; step++)
+	{
+		TraceResult tr;
+		UTIL_TraceLine(start, to, ignore_monsters, ignore_glass, skip, &tr);
+		s_sight.traces++;
+		if (tr.flFraction >= 1.0f)
+			return true;
+		if (tr.fStartSolid)
+			return false;
+		CBaseEntity *pHit = tr.pHit ? CBaseEntity::Instance(tr.pHit) : nullptr;
+		if (!pHit || !(FClassnameIs(pHit->pev, "func_door") || FClassnameIs(pHit->pev, "func_door_rotating") || FClassnameIs(pHit->pev, "func_breakable")))
+			return false;
+		start = tr.vecEndPos;
+		skip = tr.pHit;
+	}
+	return true;
+}
+
+// One pair: standing eyes in one to head or chest height in the other, from the middle; a
+// big area from points toward the other too (its middle may be behind a pillar)
+bool LsPairSees(const CNavArea *a, const CNavArea *b)
+{
+	const Vector &ca = *a->GetCenter(), &cb = *b->GetCenter();
+	if ((ca - cb).IsLengthGreaterThan(LSV_RANGE))
+		return false;
+	const float eye = 56.0f, chest = HalfHumanHeight;
+	Vector ea(ca.x, ca.y, ca.z + eye), eb(cb.x, cb.y, cb.z + eye);
+	if (LsSightClear(ea, eb) || LsSightClear(ea, Vector(cb.x, cb.y, cb.z + chest)))
+		return true;
+	auto big = [](const CNavArea *n) {
+		const Extent *e = n->GetExtent();
+		return (e->hi.x - e->lo.x) > 160.0f || (e->hi.y - e->lo.y) > 160.0f;
+	};
+	if (!big(a) && !big(b))
+		return false;
+	// toward each other, and to either side, a third of the way to the edge
+	Vector2D d(cb.x - ca.x, cb.y - ca.y);
+	float len = d.Length();
+	if (len < 1.0f)
+		return true;
+	d = d / len;
+	Vector2D side(-d.y, d.x);
+	const Extent *xa = a->GetExtent(), *xb = b->GetExtent();
+	float ra = 0.33f * Q_min(xa->hi.x - xa->lo.x, xa->hi.y - xa->lo.y), rb = 0.33f * Q_min(xb->hi.x - xb->lo.x, xb->hi.y - xb->lo.y);
+	for (int k = -1; k <= 1; k += 2)
+	{
+		Vector pa(ca.x + side.x * ra * k, ca.y + side.y * ra * k, ca.z + eye);
+		Vector pb(cb.x + side.x * rb * k, cb.y + side.y * rb * k, cb.z + eye);
+		if (LsSightClear(pa, pb))
+			return true;
+	}
+	return false;
+}
+
+void LsSightSet(size_t i, size_t j)
+{
+	size_t n = s_sight.count;
+	s_sight.bits[(i * n + j) >> 3] |= (unsigned char)(1 << ((i * n + j) & 7));
+	s_sight.bits[(j * n + i) >> 3] |= (unsigned char)(1 << ((j * n + i) & 7));
+}
+
+void LsSightPath(char *out, size_t len)
+{
+	char gd[64]{};
+	GET_GAME_DIR(gd);
+	Q_snprintf(out, len, "%s/maps/%s.lsv", gd, s_sight.map);
+}
+
+void LsSightSave()
+{
+	char path[MAX_OSPATH];
+	LsSightPath(path, sizeof(path));
+	FILE *f = fopen(path, "wb");
+	if (!f)
+		return;
+	unsigned int head[3] = { LSV_MAGIC, s_sight.key, (unsigned int)s_sight.count };
+	bool ok = fwrite(head, sizeof(head), 1, f) == 1 && fwrite(s_sight.bits.data(), 1, s_sight.bits.size(), f) == s_sight.bits.size();
+	fclose(f);
+	if (!ok)
+		remove(path);
+}
+
+bool LsSightLoad()
+{
+	char rel[128];
+	Q_snprintf(rel, sizeof(rel), "maps/%s.lsv", s_sight.map);
+	int len = 0;
+	byte *data = LOAD_FILE_FOR_ME(rel, &len);
+	if (!data)
+		return false;
+	bool ok = false;
+	size_t want = 12 + s_sight.bits.size();
+	if ((size_t)len == want)
+	{
+		unsigned int head[3];
+		Q_memcpy(head, data, sizeof(head));
+		if (head[0] == LSV_MAGIC && head[1] == s_sight.key && head[2] == (unsigned int)s_sight.count)
+		{
+			Q_memcpy(s_sight.bits.data(), data + 12, s_sight.bits.size());
+			ok = true;
+		}
+	}
+	FREE_FILE(data);
+	return ok;
+}
+
+// A new map, or its nav changed (learned, or a new one): start again, from the file if it's there
+void LsSightReset()
+{
+	s_sight.ready = false;
+	s_sight.tried = true;
+	Q_strlcpy(s_sight.map, STRING(gpGlobals->mapname));
+	s_sight.count = TheNavAreaList.size();
+	s_sight.key = LsNavKey();
+	s_sight.areas.assign(TheNavAreaList.begin(), TheNavAreaList.end());
+	unsigned int top = 0;
+	for (CNavArea *a : s_sight.areas)
+		top = Q_max(top, a->GetID());
+	s_sight.index.assign(top + 1, -1);
+	for (size_t k = 0; k < s_sight.areas.size(); k++)
+		s_sight.index[s_sight.areas[k]->GetID()] = (int)k;
+	s_sight.bits.assign((s_sight.count * s_sight.count + 7) / 8, 0);
+	s_sight.i = 0;
+	s_sight.j = 1;
+	s_sight.spentMs = 0.0;
+	s_sight.traces = 0;
+	s_sight.startedAt = gpGlobals->time;
+	if (s_sight.count > 1 && LsSightLoad())
+	{
+		s_sight.ready = true;
+		CONSOLE_ECHO("Loner-Strike: sightlines for %s loaded (%d areas).\n", s_sight.map, (int)s_sight.count);
+	}
+}
+} // namespace
+
+// A little more of the map's sightlines, within this frame's budget (CCSBotManager::StartFrame)
+void LsSightStep()
+{
+	if (!LsFight() || TheNavAreaList.empty() || !gpGlobals->mapname)
+		return;
+	// (the nav replaced, even with the same number of areas: its first area is a new one)
+	if (!s_sight.tried || s_sight.count != TheNavAreaList.size() || s_sight.areas.empty() || s_sight.areas.front() != TheNavAreaList.front()
+		|| Q_strcmp(s_sight.map, STRING(gpGlobals->mapname)) != 0)
+		LsSightReset();
+	if (s_sight.ready || s_sight.count < 2)
+		return;
+
+	auto start = std::chrono::steady_clock::now();
+	size_t n = s_sight.count;
+	int sinceCheck = 0;
+	while (s_sight.i + 1 < n)
+	{
+		if (LsPairSees(s_sight.areas[s_sight.i], s_sight.areas[s_sight.j]))
+			LsSightSet(s_sight.i, s_sight.j);
+		if (++s_sight.j >= n)
+		{
+			s_sight.i++;
+			s_sight.j = s_sight.i + 1;
+		}
+		if (++sinceCheck >= 8)
+		{
+			sinceCheck = 0;
+			double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+			if (ms >= LSV_BUDGET_MS)
+			{
+				s_sight.spentMs += ms;
+				return;
+			}
+		}
+	}
+	s_sight.spentMs += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+	// (each area sees itself)
+	for (size_t k = 0; k < n; k++)
+		s_sight.bits[(k * n + k) >> 3] |= (unsigned char)(1 << ((k * n + k) & 7));
+	s_sight.ready = true;
+	LsSightSave();
+	CONSOLE_ECHO("Loner-Strike: sightlines for %s worked out: %d areas, %u traces, %.1f s of work over %.0f s of play.\n",
+		s_sight.map, (int)n, s_sight.traces, s_sight.spentMs / 1000.0, gpGlobals->time - s_sight.startedAt);
+}
+
+bool LsSightReady()
+{
+	return s_sight.ready;
+}
+
+// Whether someone in one area could see into the other (false until the map's are ready)
+bool LsSees(const CNavArea *a, const CNavArea *b)
+{
+	if (!s_sight.ready || !a || !b)
+		return false;
+	unsigned int ia = a->GetID(), ib = b->GetID();
+	if (ia >= s_sight.index.size() || ib >= s_sight.index.size())
+		return false;
+	int x = s_sight.index[ia], y = s_sight.index[ib];
+	if (x < 0 || y < 0)
+		return false;
+	size_t bit = (size_t)x * s_sight.count + (size_t)y;
+	return (s_sight.bits[bit >> 3] >> (bit & 7)) & 1;
 }
