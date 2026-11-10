@@ -597,7 +597,7 @@ void CCSBot::UpdateLookAround(bool updateNow)
 		// (Loner-Strike: only ways in it can actually see from here, not a wall in its face or
 		// one round a corner it can't see past (people don't stare at a wall); mostly the one
 		// nearest to where it's looking, a small move, now and then a bigger check. None in
-		// view: the stock pick)
+		// view: down the longest open line from here instead, never a wall)
 		if (LsFight())
 		{
 			int seen[MAX_APPROACH_POINTS];
@@ -626,6 +626,32 @@ void CCSBot::UpdateLookAround(bool updateNow)
 					int other = seen[RANDOM_LONG(0, count - 1)];
 					if (turn(other) < turn(which))
 						which = other;
+				}
+			}
+			else
+			{
+				// (the longest clear line of the eight round it, the ones nearer where it's
+				// already looking counting a little longer: a corridor, a doorway, across a site)
+				float best = -1.0f;
+				Vector bestAt = eye;
+				for (int k = 0; k < 8; k++)
+				{
+					float yaw = pev->v_angle.y + 45.0f * float(k);
+					Vector dir(BotCOS(yaw), BotSIN(yaw), 0.0f);
+					TraceResult tr;
+					UTIL_TraceLine(eye, eye + dir * 2000.0f, ignore_monsters, ENT(pev), &tr);
+					float open = 2000.0f * tr.flFraction;
+					float score = open - 150.0f * Q_abs(NormalizeAngle(yaw - pev->v_angle.y)) / 45.0f;
+					if (score > best)
+					{
+						best = score;
+						bestAt = eye + dir * Q_min(open, 600.0f);
+					}
+				}
+				if (best > 250.0f)
+				{
+					SetLookAt("Approach Point (Hiding)", &bestAt, PRIORITY_LOW);
+					return;
 				}
 			}
 		}
