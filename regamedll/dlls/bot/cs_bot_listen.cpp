@@ -189,6 +189,8 @@ bool CCSBot::UpdateLookAtNoise()
 	{
 		// TODO: adjust noise Z to keep consistent with current height while fighting
 		spot = m_noisePosition + Vector(0, 0, HalfHumanHeight);
+		// (Loner-Strike: heard through a wall: the edge they'd come round, not the wall)
+		LsLookableSpot(&spot);
 	}
 	else
 	{

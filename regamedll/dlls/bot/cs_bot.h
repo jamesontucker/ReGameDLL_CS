@@ -859,6 +859,7 @@ private:
 	bool BendLineOfSight(const Vector *eye, const Vector *point, Vector *bend) const;	// "bend" our line of sight until we can see the target point. Return bend point, false if cant bend.
 	bool LsCornerAhead(Vector *out);		// Loner-Strike: an edge ahead someone could be just past
 	void LsWallSanity();				// Loner-Strike: catching itself staring at a wall, and looking away
+	void LsLookableSpot(Vector *spot);	// Loner-Strike: a spot behind a wall becomes the edge it'd be seen past
 	float m_lsWallSince = 0.0f;			// facing a wall up close since
 	float m_lsWallNext = 0.0f;			// not checked again before
 	Vector m_lsGlanceCorner;				// the last corner it glanced at walking, and when
@@ -1487,6 +1488,7 @@ extern cvar_t cv_bot_ls_trace;
 extern const char LS_PEEK[];					// the look-at of a corner peek
 bool LsFight();
 bool LsSpotCrowded(CBaseEntity *me, const Vector *pos);	// a teammate at or heading to somewhere right by it
+bool LsBulletGetsThrough(CBasePlayer *shooter, int weaponId, const Vector &from, const Vector &to, TraceResult *first);	// by the game's penetration rule
 // Loner-Strike: what's known about each map (cs_bot_ls.cpp, "map knowledge"), worked out a
 // little each frame and saved next to the map
 enum { LS_KNOW_DIRS = 16, LS_KNOW_CORNERS = 8, LS_KNOW_ANGLES = 8, LS_KNOW_OBJECTS = 8 };

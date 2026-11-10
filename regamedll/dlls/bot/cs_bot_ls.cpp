@@ -2162,6 +2162,87 @@ bool CCSBot::LsBangGun(CBasePlayerWeapon *pWeapon) const
 	return false;
 }
 
+// The surface a line hits is made of (CHAR_TEX_*), as the game reads it for bullets: the
+// server's own list for the map's texture names, whatever players have on their screens
+static char LsSurfaceAt(const Vector &from, const Vector &to, edict_t *hit)
+{
+	float v1[3] = { from.x, from.y, from.z }, v2[3] = { to.x, to.y, to.z };
+	const char *name = TRACE_TEXTURE(hit ? hit : ENT(0), v1, v2);
+	if (!name)
+		return CHAR_TEX_CONCRETE;
+	if (*name == '-' || *name == '+')
+		name += 2;
+	if (*name == '{' || *name == '!' || *name == '~' || *name == ' ')
+		name++;
+	char buf[64];
+	Q_strlcpy(buf, name);
+	return TEXTURETYPE_Find(buf);
+}
+
+// Whether a shot from `from` at `to` with this gun reaches it through what's in between, by the
+// game's penetration rule; `first` is where it first hits. Only worth it when there's damage
+// left at the far side (a bullet through metal has a fifth of it)
+bool LsBulletGetsThrough(CBasePlayer *shooter, int weaponId, const Vector &from, const Vector &to, TraceResult *first)
+{
+	float power;
+	int pens;
+	switch (weaponId)
+	{
+	case WEAPON_AWP: power = 45.0f; pens = 3; break;
+	case WEAPON_SCOUT: case WEAPON_G3SG1: power = 39.0f; pens = 3; break;
+	case WEAPON_AK47: power = 39.0f; pens = 2; break;
+	case WEAPON_M4A1: case WEAPON_FAMAS: case WEAPON_GALIL: case WEAPON_SG552: case WEAPON_AUG: case WEAPON_SG550: case WEAPON_M249: power = 35.0f; pens = 2; break;
+	case WEAPON_DEAGLE: power = 30.0f; pens = 2; break;
+	default: return false;					// one penetration: it stops at the first wall
+	}
+	Vector dir = (to - from).Normalize();
+	Vector src = from;
+	float damage = 1.0f;
+	edict_t *skip = ENT(shooter->pev);
+	for (int wall = 0; wall < 3; wall++)
+	{
+		TraceResult tr;
+		UTIL_TraceLine(src, to, ignore_monsters, skip, &tr);
+		if (wall == 0 && first)
+			*first = tr;
+		if (tr.flFraction >= 1.0f && !tr.fStartSolid)
+			return wall > 0 && damage >= 0.3f;
+		if (tr.fStartSolid || pens <= 1)
+			return false;
+		pens--;
+		float reach = power, mod = 0.5f;
+		switch (LsSurfaceAt(src, to, tr.pHit))
+		{
+		case CHAR_TEX_METAL: reach *= 0.15f; mod = 0.2f; break;
+		case CHAR_TEX_CONCRETE: reach *= 0.25f; break;
+		case CHAR_TEX_GRATE: reach *= 0.5f; mod = 0.4f; break;
+		case CHAR_TEX_VENT: reach *= 0.5f; mod = 0.45f; break;
+		case CHAR_TEX_TILE: reach *= 0.65f; mod = 0.3f; break;
+		case CHAR_TEX_COMPUTER: reach *= 0.4f; mod = 0.45f; break;
+		case CHAR_TEX_WOOD: mod = 0.6f; break;
+		default: break;
+		}
+		// (a door, a breakable or a box that isn't part of the map's walls: the game's 42)
+		if (tr.pHit && VARS(tr.pHit)->solid != SOLID_BSP)
+		{
+			reach = 42.0f;
+			mod = 0.75f;
+		}
+		Vector past = tr.vecEndPos + dir * reach;
+		// (it jumps to there: still inside the wall, and that's where it stops)
+		TraceResult inside;
+		UTIL_TraceLine(past, past + dir * 1.0f, ignore_monsters, skip, &inside);
+		if (inside.fStartSolid || inside.fAllSolid)
+			return false;
+		// (and not past the target)
+		if (DotProduct(to - past, dir) < 0.0f)
+			return damage * mod >= 0.3f;
+		damage *= mod;
+		src = past;
+	}
+	return false;
+}
+
 // Starts spraying at a spot behind one thin thing (a door, a box, a thin wall: where the
 // bullet goes in and where it comes out are close) with no teammate in the way. False if
 // it can't be shot through from here.
@@ -2173,25 +2254,11 @@ bool CCSBot::LsBangThrough(const Vector &target)
 	Vector eye = pev->origin + pev->view_ofs;
 	if ((target - eye).IsLengthGreaterThan(1500.0f))
 		return false;
-	TraceResult in, out, mates;
-	UTIL_TraceLine(eye, target, ignore_monsters, ENT(pev), &in);
-	if (in.flFraction >= 1.0f || in.fStartSolid)
-		return false;
-	UTIL_TraceLine(target, eye, ignore_monsters, ENT(pev), &out);
-	if (out.fStartSolid || out.flFraction >= 1.0f)
-		return false;
-	// (how much a bullet still gets through usefully: the AWP and the Para most, the AK and the
-	// other rifles a crate's side or a door, the Deagle and the scout a thin one)
-	float thick;
-	switch (pWeapon->m_iId)
-	{
-	case WEAPON_AWP: thick = 52.0f; break;
-	case WEAPON_M249: case WEAPON_G3SG1: case WEAPON_SG550: thick = 36.0f; break;
-	case WEAPON_AK47: thick = 31.0f; break;
-	case WEAPON_DEAGLE: case WEAPON_SCOUT: thick = 24.0f; break;
-	default: thick = 28.0f; break;
-	}
-	if ((in.vecEndPos - out.vecEndPos).IsLengthGreaterThan(thick))
+	// (the game's own rule, CBaseEntity::FireBullets3: the bullet jumps on past where it hits by
+	// its power, cut by what the surface is made of, and stops if that's still inside something;
+	// each wall uses up one of the gun's penetrations and cuts the damage)
+	TraceResult in, mates;
+	if (!LsBulletGetsThrough(this, pWeapon->m_iId, eye, target, &in))
 		return false;
 	// nobody on this side of the wall in the way, nor one of ours just past it
 	UTIL_TraceLine(eye, in.vecEndPos, dont_ignore_monsters, ENT(pev), &mates);
@@ -2692,12 +2759,18 @@ void Area(size_t idx)
 	// could be just round it); the nearest first
 	const int N = 48;
 	float dEye[N], dWaist[N];
+	// (how square on each ray met what it hit: one glancing along a wall runs on much further
+	// than its neighbour, which looks like a gap but isn't)
+	float gEye[N], gWaist[N];
 	for (int r = 0; r < N; r++)
 	{
 		float yaw = 360.0f / N * r;
 		Vector dir(BotCOS(yaw), BotSIN(yaw), 0.0f);
-		dEye[r] = Open(eye, dir, 1500.0f);
-		dWaist[r] = Open(Vector(c.x, c.y, c.z + WAIST), dir, 1500.0f);
+		TraceResult te, tw;
+		dEye[r] = Open(eye, dir, 1500.0f, &te);
+		dWaist[r] = Open(Vector(c.x, c.y, c.z + WAIST), dir, 1500.0f, &tw);
+		gEye[r] = te.flFraction < 1.0f ? (float)Q_abs(DotProduct(te.vecPlaneNormal, dir)) : 1.0f;
+		gWaist[r] = tw.flFraction < 1.0f ? (float)Q_abs(DotProduct(tw.vecPlaneNormal, dir)) : 1.0f;
 	}
 	struct Cand { float dist; Vector at; float yaw; };
 	Cand cand[2 * N];
@@ -2705,11 +2778,17 @@ void Area(size_t idx)
 	for (int h = 0; h < 2; h++)
 	{
 		float *d = h ? dWaist : dEye;
+		float *g = h ? gWaist : gEye;
 		for (int r = 0; r < N; r++)
 		{
-			float n0 = d[r], n1 = d[(r + 1) % N];
+			int r1 = (r + 1) % N;
+			float n0 = d[r], n1 = d[r1];
 			float nearD = Q_min(n0, n1), farD = Q_max(n0, n1);
 			if (farD - nearD < 200.0f || nearD < 100.0f || nearD > 1200.0f)
+				continue;
+			// (the far one only glancing along a wall: the same wall, no gap; a real edge has the
+			// far ray going on past it into the open, or meeting something square on)
+			if ((n0 > n1 ? g[r] : g[r1]) < 0.3f)
 				continue;
 			float yaw = 360.0f / N * (r + 0.5f);
 			Vector dir(BotCOS(yaw), BotSIN(yaw), 0.0f);

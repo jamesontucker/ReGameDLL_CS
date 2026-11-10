@@ -599,6 +599,7 @@ void CCSBot::UpdateLookAround(bool updateNow)
 		{
 			Vector spot = m_noisePosition;
 			spot.z += HalfHumanHeight + (LsFight() ? LsLookHeight() : 0.0f);	// (Loner-Strike: head height for good players)
+			LsLookableSpot(&spot);
 
 			SetLookAt("Check dangerous noise", &spot, PRIORITY_HIGH, recentThreatTime);
 			InhibitLookAround(RANDOM_FLOAT(2.0f, 4.0f));
@@ -618,6 +619,8 @@ void CCSBot::UpdateLookAround(bool updateNow)
 		if (GetSimpleGroundHeight(&m_lastEnemyPosition, &spot.z))
 		{
 			spot.z += HalfHumanHeight + (LsFight() ? LsLookHeight() : 0.0f);	// (Loner-Strike: head height for good players)
+			// (gone behind cover: the edge they went round, not the wall in front of them)
+			LsLookableSpot(&spot);
 			SetLookAt("Last Enemy Position", &spot, PRIORITY_MEDIUM, RANDOM_FLOAT(2.0f, 3.0f), true);
 			return;
 		}
@@ -1812,11 +1815,11 @@ void CCSBot::LsWallSanity()
 	UTIL_MakeVectors(pev->v_angle);
 	Vector fwd = gpGlobals->v_forward;
 	TraceResult tr;
-	UTIL_TraceLine(eye, eye + fwd * 140.0f, ignore_monsters, ignore_glass, ENT(pev), &tr);
+	UTIL_TraceLine(eye, eye + fwd * 300.0f, ignore_monsters, ignore_glass, ENT(pev), &tr);
 	CBaseEntity *pHit = tr.pHit ? CBaseEntity::Instance(tr.pHit) : nullptr;
 	bool seeThrough = pHit && (FClassnameIs(pHit->pev, "func_door") || FClassnameIs(pHit->pev, "func_door_rotating") || FClassnameIs(pHit->pev, "func_breakable"));
-	// (a surface a step away, more or less square on: not a doorway's edge it's checking)
-	bool wall = tr.flFraction < 0.8f && !tr.fStartSolid && !seeThrough && DotProduct(tr.vecPlaneNormal, -fwd) > 0.6f;
+	// (a surface a few steps away, more or less square on: not a doorway's edge it's checking)
+	bool wall = tr.flFraction < 0.8f && !tr.fStartSolid && !seeThrough && DotProduct(tr.vecPlaneNormal, -fwd) > 0.55f;
 	if (!wall)
 	{
 		m_lsWallSince = 0.0f;
@@ -1863,4 +1866,26 @@ void CCSBot::LsWallSanity()
 	SetLookAt("Loner-Strike: off the wall", &bestAt, PRIORITY_MEDIUM, RANDOM_FLOAT(0.8f, 1.6f), true);
 	m_lsWallNext = now + 1.0f;
 	LsWhy("off the wall");
+}
+
+// Loner-Strike (bot_ls_fight): a spot to look at that's behind a wall from here (an enemy gone
+// behind cover, a noise through a wall) becomes the edge it would be seen past: a person
+// watches the corner someone went round, not the wall in front of them. Left as it is when it's
+// in view, or there's no way round
+void CCSBot::LsLookableSpot(Vector *spot)
+{
+	if (!LsFight() || !spot)
+		return;
+	Vector eye = GetEyePosition();
+	if (LsClearTo(eye, *spot, ENT(pev)) >= 0.95f)
+		return;
+	// (it bends toward a point on the floor, and looks at it from chest height)
+	Vector floor(spot->x, spot->y, spot->z - HalfHumanHeight), bend;
+	if (!BendLineOfSight(&eye, &floor, &bend))
+		return;
+	// (the bend point is on the floor: at the spot's height, and only if it's not right here)
+	if ((bend - eye).Length2D() < 64.0f)
+		return;
+	bend.z = spot->z;
+	*spot = bend;
 }
