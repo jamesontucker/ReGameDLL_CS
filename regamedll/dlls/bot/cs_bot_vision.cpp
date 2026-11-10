@@ -607,7 +607,9 @@ void CCSBot::UpdateLookAround(bool updateNow)
 			{
 				Vector spot = m_approachPoint[i] + Vector(0, 0, HalfHumanHeight);
 				float dist = float((spot - eye).Length());
-				if (dist < 150.0f)
+				// (a doorway right beside a tight hold counts: the line-of-sight test is what
+				// keeps walls out)
+				if (dist < 64.0f)
 					continue;
 				TraceResult tr;
 				UTIL_TraceLine(eye, spot, ignore_monsters, ENT(pev), &tr);
