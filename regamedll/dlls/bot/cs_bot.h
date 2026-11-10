@@ -1229,6 +1229,7 @@ private:
 	float m_lsMapCheckedAt = -1.0f;						// the frame the map was last checked (once a frame is enough)
 	float m_lsDiedAt = -100.0f;						// when it was last killed
 	float m_lsBombCallAt = 0.0f;
+	int m_lsLastApproach = -1;						// the opening it watched last while holding (not again straight away)
 	float m_lsBehindSince = 0.0f;					// when the view went over its shoulder while running (0: it isn't)
 	float m_lsBehindNext = 0.0f;					// the next over-the-shoulder glance allowed					// next look for a teammate's "bomb's at A" (after a plant)
 	bool m_lsWasBlind = false;

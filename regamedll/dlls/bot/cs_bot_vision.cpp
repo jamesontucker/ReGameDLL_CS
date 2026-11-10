@@ -608,9 +608,10 @@ void CCSBot::UpdateLookAround(bool updateNow)
 		// if we're sniping, switch look-at spots less often
 		if (IsUsingSniperRifle())
 			m_lookAroundStateTimestamp = gpGlobals->time + RANDOM_FLOAT(5.0f, 10.0f);
-		// (Loner-Strike: a person holds an angle a few seconds, longer the more patient they are)
+		// (Loner-Strike: a person holding a spot checks the openings in turn, a couple of seconds
+		// each, a little longer the more patient they are)
 		else if (LsFight())
-			m_lookAroundStateTimestamp = gpGlobals->time + RANDOM_FLOAT(2.5f, 6.0f) + 2.0f * LsTrait(90);
+			m_lookAroundStateTimestamp = gpGlobals->time + RANDOM_FLOAT(1.8f, 4.0f) + 1.2f * LsTrait(90);
 		else
 			m_lookAroundStateTimestamp = gpGlobals->time + RANDOM_FLOAT(1.0f, 2.0f);
 
@@ -647,13 +648,22 @@ void CCSBot::UpdateLookAround(bool updateNow)
 					Vector to = m_approachPoint[i] - pev->origin;
 					return Q_abs(NormalizeAngle(UTIL_VecToYaw(to) - pev->v_angle.y));
 				};
-				which = seen[RANDOM_LONG(0, count - 1)];
-				if (count > 1 && RANDOM_FLOAT(0.0f, 1.0f) < 0.75f)
+				// (never the one it just watched, when there are others: checking them in turn)
+				int pick[MAX_APPROACH_POINTS];
+				int picks = 0;
+				for (int k = 0; k < count; k++)
 				{
-					int other = seen[RANDOM_LONG(0, count - 1)];
+					if (seen[k] != m_lsLastApproach || count == 1)
+						pick[picks++] = seen[k];
+				}
+				which = pick[RANDOM_LONG(0, picks - 1)];
+				if (picks > 1 && RANDOM_FLOAT(0.0f, 1.0f) < 0.7f)
+				{
+					int other = pick[RANDOM_LONG(0, picks - 1)];
 					if (turn(other) < turn(which))
 						which = other;
 				}
+				m_lsLastApproach = which;
 			}
 			else
 			{
