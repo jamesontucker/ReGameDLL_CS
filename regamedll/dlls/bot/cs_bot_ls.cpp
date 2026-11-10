@@ -779,8 +779,13 @@ void CCSBot::LsOrderTick()
 	{
 		CBasePlayer *pTo = m_lsGiveTo;
 		float now = gpGlobals->time;
-		if (!IsCarryingBomb() || !pTo->IsAlive() || now > m_lsGiveUntil || TheCSBots()->IsBombPlanted())
+		bool gun = m_lsGiveItem[0] != '\0';
+		if ((gun ? !HasNamedPlayerItem(m_lsGiveItem) : !IsCarryingBomb()) || !pTo->IsAlive() || now > m_lsGiveUntil
+			|| (!gun && TheCSBots()->IsBombPlanted()))
+		{
 			m_lsGiveTo = nullptr;
+			m_lsGiveItem[0] = '\0';
+		}
 		else if (!IsAttacking())
 		{
 			Vector to = pTo->pev->origin - pev->origin;
@@ -791,10 +796,24 @@ void CCSBot::LsOrderTick()
 				float off = NormalizeAngle(UTIL_VecToYaw(to) - pev->v_angle.y);
 				if (off > -35.0f && off < 35.0f)
 				{
-					SelectItem("weapon_c4");
-					DropPlayerItem("weapon_c4");
+					const char *item = gun ? m_lsGiveItem : "weapon_c4";
+					SelectItem(item);
+					DropPlayerItem(item);
 					m_lsGiveTo = nullptr;
-					Idle();
+					m_lsGiveItem[0] = '\0';
+					// (a gun bought for them: back for its own, dropped when it bought that
+					// one; with none, a rifle of its own if it still can)
+					if (gun && m_lsGivePickup)
+					{
+						m_lsGivePickup = false;
+						MoveTo(&m_lsGivePickupAt, FASTEST_ROUTE);
+					}
+					else
+					{
+						if (gun && CanPlayerBuy(false))
+							BuyWeaponByWeaponID(this, m_iTeam == CT ? WEAPON_M4A1 : WEAPON_AK47);
+						Idle();
+					}
 				}
 			}
 			else if (now >= m_lsGiveMoveAt)
@@ -1153,6 +1172,32 @@ void CCSBot::LsPuppetCommand(const char *what, float now)
 		MoveTo(&to, FASTEST_ROUTE);
 		pev->fuser4 = now; m_lsOrderFields = true;	// (taken)
 		LsWhy("plant-order");
+		return;
+	}
+	else if (FStrEq(what, "buyfor"))
+	{
+		// buyfor <player> <weapon id>: a gun bought for a teammate and handed over ("someone
+		// buy me an awp"); in the buy zone with the money, one at a time. Its own gun, if it
+		// had one, drops where it stands (as buying does): it comes back for it
+		int index = Q_atoi(CMD_ARGV(3));
+		CBasePlayer *pTo = (index >= 1 && index <= gpGlobals->maxClients) ? UTIL_PlayerByIndex(index) : nullptr;
+		if (!pTo || !pTo->IsAlive() || pTo == this || pTo->m_iTeam != m_iTeam || m_lsGiveTo.IsValid() || !CanPlayerBuy(false))
+			return;
+		bool had = m_bHasPrimary;
+		Vector at = pev->origin;
+		CBaseEntity *pGot = BuyWeaponByWeaponID(this, WeaponIdType(Q_atoi(CMD_ARGV(4))));
+		if (!pGot)
+			return;
+		Q_strlcpy(m_lsGiveItem, STRING(pGot->pev->classname));
+		m_lsGivePickup = had;
+		m_lsGivePickupAt = at;
+		m_lsGiveTo = pTo;
+		m_lsGiveUntil = now + 25.0f;
+		m_lsGiveMoveAt = 0.0f;
+		if (IsFollowing())
+			StopFollowing();
+		pev->fuser4 = now; m_lsOrderFields = true;	// (taken)
+		LsWhy("buy-for");
 		return;
 	}
 	else if (FStrEq(what, "dropbomb"))

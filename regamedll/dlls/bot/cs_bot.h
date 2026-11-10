@@ -1333,7 +1333,10 @@ private:
 	int m_lsPlantOrderRound = -1;
 	EntityHandle<CBasePlayer> m_lsGiveTo;			// a person asked for the bomb: handing it over
 	float m_lsGiveUntil = 0.0f;
-	float m_lsGiveMoveAt = 0.0f;				// the round the carrier went along with a teammate
+	float m_lsGiveMoveAt = 0.0f;
+	char m_lsGiveItem[24] = "";						// handing over a gun it bought for them (empty: the bomb)
+	bool m_lsGivePickup = false;					// its own gun dropped when it bought that one: picked up after
+	Vector m_lsGivePickupAt;				// the round the carrier went along with a teammate
 	float m_lsCarrierFollowUntil = 0.0f;
 	EntityHandle<CBasePlayer> m_lsCarrierLeader;					// a T elsewhere: next look at a dropped bomb
 	float m_lsDefuseCheckAt = 0.0f;					// (looked at four times a second, not every frame)
