@@ -1487,9 +1487,36 @@ extern cvar_t cv_bot_ls_trace;
 extern const char LS_PEEK[];					// the look-at of a corner peek
 bool LsFight();
 bool LsSpotCrowded(CBaseEntity *me, const Vector *pos);	// a teammate at or heading to somewhere right by it
-void LsSightStep();						// Loner-Strike: the map's sightlines, a little each frame
+// Loner-Strike: what's known about each map (cs_bot_ls.cpp, "map knowledge"), worked out a
+// little each frame and saved next to the map
+enum { LS_KNOW_DIRS = 16, LS_KNOW_CORNERS = 8, LS_KNOW_ANGLES = 8, LS_KNOW_OBJECTS = 8 };
+enum { LSO_LOW = 1, LSO_DOOR, LSO_BREAKABLE, LSO_BOX, LSO_LADDER };	// object types
+enum { LSP_CROUCHED = 1 };				// pair flags: a crouched head is in view too
+#pragma pack(push, 1)
+struct LsKnownCorner { short x, y, z; unsigned char yaw; };	// where, and which way it opens (0-255 round)
+struct LsKnownAngle { unsigned char yaw; signed char pitch; unsigned short dist; unsigned char weight; unsigned short area; };
+struct LsKnownObject { unsigned char type; short x, y, z, top; unsigned char mat; };
+struct LsAreaKnow
+{
+	unsigned char coverLow[LS_KNOW_DIRS];	// open distance / 8 at a crouched head, all round
+	unsigned char coverHigh[LS_KNOW_DIRS];	// ... at standing eyes
+	unsigned char mat[LS_KNOW_DIRS];		// what's there close by (CHAR_TEX_*, 0 none)
+	unsigned char ceiling;					// / 4
+	unsigned short sees;					// areas in sight
+	unsigned char high;						// share (0-255) of those that are lower: high ground
+	unsigned char cornerCount, angleCount, objectCount;
+	LsKnownCorner corners[LS_KNOW_CORNERS];
+	LsKnownAngle angles[LS_KNOW_ANGLES];	// where enemies appear from, the busiest first
+	LsKnownObject objects[LS_KNOW_OBJECTS];
+};
+#pragma pack(pop)
+void LsSightStep();
 bool LsSightReady();
 bool LsSees(const CNavArea *a, const CNavArea *b);	// someone in one area could see into the other
+int LsSightQuality(const CNavArea *a, const CNavArea *b);	// 0-255, how much
+const LsAreaKnow *LsKnow(const CNavArea *a);
+CNavArea *LsKnowArea(unsigned short index);
+bool LsWallbangKnown(const CNavArea *a, const CNavArea *b, float *thick, char *mat);
 bool LsMatch();
 bool LsSolo();
 bool LsOwnMemory();

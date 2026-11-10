@@ -42,6 +42,9 @@
 
 #include "precompiled.h"
 #include <vector>
+#include <algorithm>
+#include <utility>
+#include <cmath>
 #include <cstdio>
 #ifdef _WIN32
 #include <chrono>
@@ -2390,13 +2393,22 @@ void CCSBot::LsCheckBeforeDefuse()
 }
 
 
-// ---- sightlines --------------------------------------------------------------------------
+// ---- map knowledge ------------------------------------------------------------------------
 //
-// Which walkable areas of the map can see which: from standing eye height in one to head or
-// chest height in the other (doors and breakable windows count as open: they open). Worked
-// out in the background, a little each frame (LsSightStep), then saved next to the map
-// (maps/<map>.lsv) and loaded at once from then on. Until it's ready, nothing asks it.
-// It's what lets a bot look only where someone could actually be, at any height.
+// What a person learns about a map by playing it, worked out once per map in the background
+// (a little each frame: LsSightStep) and saved next to it (maps/<map>.lsv), loaded at once
+// after. Built on the nav mesh's walkable areas:
+//  - sightlines: which areas can see which (standing eyes to standing or crouched heads, at
+//    any height), and how much: a sliver of a doorway or wide open
+//  - wallbang spots: close pairs that can't see each other through one thin layer, its
+//    thickness and what it's made of
+//  - for each area: cover all round (how far to something solid at crouched and standing head
+//    height, and what it's made of), the ceiling, the corners someone could be just past, the
+//    angles enemies can appear from (places in sight that lead to places out of it), objects
+//    (low boxes and walls found by the cover scan; doors, breakables, ladders and brush boxes
+//    from the map), how much of the map it sees and whether it's high ground
+// Stages, each saved as it goes so a big map can finish over several visits: pairs, areas,
+// angles. Until a stage is done, nothing asks for what it makes.
 
 namespace
 {
@@ -2413,29 +2425,58 @@ double LsNowMs()
 #endif
 }
 
-const unsigned int LSV_MAGIC = 0x3156534C;	// "LSV1"
+const unsigned int LSV_MAGIC = 0x3256534C;	// "LSV2"
+const unsigned int LSV_VERSION = 2;
 const float LSV_RANGE = 3500.0f;			// farther than this counts as not in sight
-const double LSV_BUDGET_MS = 0.3;			// per frame
+const float LSV_BANG_RANGE = 1000.0f;		// wallbang spots looked for this close
+const double LSV_BUDGET_MS = 0.4;			// per frame
+const double LSV_SAVE_EVERY_MS = 20000.0;	// progress saved this often while it works
+const float EYE = 60.0f, CROUCH_HEAD = 34.0f, WAIST = 24.0f;
+enum { STAGE_PAIRS, STAGE_AREAS, STAGE_ANGLES, STAGE_DONE };
 
-struct LsSightData
+#pragma pack(push, 1)
+struct PairInfo
 {
-	bool ready = false;
-	bool tried = false;						// the file was looked for
+	unsigned short a, b;
+	unsigned char quality;					// 0-255: how much of one is in view from the other
+	unsigned char flags;					// LSP_*
+};
+struct BangInfo
+{
+	unsigned short a, b;
+	unsigned char thick;					// units
+	unsigned char mat;						// CHAR_TEX_*
+};
+struct FileHead
+{
+	unsigned int magic, version, key, count, stage, ci, cj, pairs, bangs;
+	unsigned int traces;
+	float spentMs;
+};
+#pragma pack(pop)
+
+struct LsMapKnow
+{
+	bool ready = false;						// pairs done: LsSees works
+	bool tried = false;
+	int stage = STAGE_PAIRS;
 	char map[64] = {};
-	size_t count = 0;						// areas when it started (a change starts it over)
-	size_t navSize = 0;						// the nav's size when it was last looked at (one refused above)
-	unsigned int key = 0;					// the nav it's for
+	size_t count = 0, navSize = 0;
+	unsigned int key = 0;
 	std::vector<CNavArea *> areas;
 	std::vector<int> index;					// area id -> index
 	std::vector<unsigned char> bits;		// count * count, row-major
-	size_t i = 0, j = 1;					// next pair to work out
-	double spentMs = 0.0;
+	std::vector<PairInfo> pairs;			// visible pairs, a < b
+	std::vector<BangInfo> bangs;
+	std::vector<LsAreaKnow> know;
+	std::vector<std::vector<std::pair<unsigned short, unsigned char>>> near;	// per area: (other, quality), both ways
+	size_t i = 0, j = 1;					// next pair or area
+	double spentMs = 0.0, lastSave = 0.0;
 	float startedAt = 0.0f;
 	unsigned int traces = 0;
 };
-LsSightData s_sight;
+LsMapKnow s_know;
 
-// The nav it was worked out for: the areas and where they are
 unsigned int LsNavKey()
 {
 	unsigned int h = 2166136261u;
@@ -2452,9 +2493,15 @@ unsigned int LsNavKey()
 	return h;
 }
 
+bool SeeThrough(edict_t *hit)
+{
+	CBaseEntity *pHit = hit ? CBaseEntity::Instance(hit) : nullptr;
+	return pHit && (FClassnameIs(pHit->pev, "func_door") || FClassnameIs(pHit->pev, "func_door_rotating") || FClassnameIs(pHit->pev, "func_breakable"));
+}
+
 // Whether a person could see from one point to the other: only solid walls block (glass, a
 // door or a breakable window don't)
-bool LsSightClear(const Vector &from, const Vector &to)
+bool Clear(const Vector &from, const Vector &to)
 {
 	Vector start = from;
 	edict_t *skip = nullptr;
@@ -2462,13 +2509,10 @@ bool LsSightClear(const Vector &from, const Vector &to)
 	{
 		TraceResult tr;
 		UTIL_TraceLine(start, to, ignore_monsters, ignore_glass, skip, &tr);
-		s_sight.traces++;
+		s_know.traces++;
 		if (tr.flFraction >= 1.0f)
 			return true;
-		if (tr.fStartSolid)
-			return false;
-		CBaseEntity *pHit = tr.pHit ? CBaseEntity::Instance(tr.pHit) : nullptr;
-		if (!pHit || !(FClassnameIs(pHit->pev, "func_door") || FClassnameIs(pHit->pev, "func_door_rotating") || FClassnameIs(pHit->pev, "func_breakable")))
+		if (tr.fStartSolid || !SeeThrough(tr.pHit))
 			return false;
 		start = tr.vecEndPos;
 		skip = tr.pHit;
@@ -2476,197 +2520,693 @@ bool LsSightClear(const Vector &from, const Vector &to)
 	return true;
 }
 
-// One pair: standing eyes in one to head or chest height in the other, from the middle; a
-// big area from points toward the other too (its middle may be behind a pillar)
-bool LsPairSees(const CNavArea *a, const CNavArea *b)
+// How far it is to something solid that way (a door or window counts: it's in the way now)
+float Open(const Vector &from, const Vector &dir, float range, TraceResult *out = nullptr)
 {
-	const Vector &ca = *a->GetCenter(), &cb = *b->GetCenter();
-	if ((ca - cb).IsLengthGreaterThan(LSV_RANGE))
-		return false;
-	const float eye = 56.0f, chest = HalfHumanHeight;
-	Vector ea(ca.x, ca.y, ca.z + eye), eb(cb.x, cb.y, cb.z + eye);
-	if (LsSightClear(ea, eb) || LsSightClear(ea, Vector(cb.x, cb.y, cb.z + chest)))
-		return true;
-	auto big = [](const CNavArea *n) {
-		const Extent *e = n->GetExtent();
-		return (e->hi.x - e->lo.x) > 160.0f || (e->hi.y - e->lo.y) > 160.0f;
-	};
-	if (!big(a) && !big(b))
-		return false;
-	// toward each other, and to either side, a third of the way to the edge
-	Vector2D d(cb.x - ca.x, cb.y - ca.y);
+	TraceResult tr;
+	UTIL_TraceLine(from, from + dir * range, ignore_monsters, dont_ignore_glass, nullptr, &tr);
+	s_know.traces++;
+	if (out)
+		*out = tr;
+	return tr.fStartSolid ? 0.0f : range * tr.flFraction;
+}
+
+// The material of the surface a line hits (CHAR_TEX_*; 0 for none)
+unsigned char Material(const Vector &from, const Vector &to, edict_t *hit)
+{
+	float v1[3] = { from.x, from.y, from.z }, v2[3] = { to.x, to.y, to.z };
+	const char *name = TRACE_TEXTURE(hit ? hit : ENT(0), v1, v2);
+	if (!name)
+		return 0;
+	if (*name == '-' || *name == '+')
+		name += 2;
+	if (*name == '{' || *name == '!' || *name == '~' || *name == ' ')
+		name++;
+	char buf[64];
+	Q_strlcpy(buf, name);
+	return (unsigned char)TEXTURETYPE_Find(buf);
+}
+
+Vector2D Side(const CNavArea *a, const CNavArea *b)
+{
+	Vector2D d(b->GetCenter()->x - a->GetCenter()->x, b->GetCenter()->y - a->GetCenter()->y);
 	float len = d.Length();
 	if (len < 1.0f)
-		return true;
-	d = d / len;
-	Vector2D side(-d.y, d.x);
-	const Extent *xa = a->GetExtent(), *xb = b->GetExtent();
-	float ra = 0.33f * Q_min(xa->hi.x - xa->lo.x, xa->hi.y - xa->lo.y), rb = 0.33f * Q_min(xb->hi.x - xb->lo.x, xb->hi.y - xb->lo.y);
-	for (int k = -1; k <= 1; k += 2)
-	{
-		Vector pa(ca.x + side.x * ra * k, ca.y + side.y * ra * k, ca.z + eye);
-		Vector pb(cb.x + side.x * rb * k, cb.y + side.y * rb * k, cb.z + eye);
-		if (LsSightClear(pa, pb))
-			return true;
-	}
-	return false;
+		return Vector2D(1.0f, 0.0f);
+	return Vector2D(-d.y / len, d.x / len);
 }
 
-void LsSightSet(size_t i, size_t j)
+float Reach(const CNavArea *n)
 {
-	size_t n = s_sight.count;
-	s_sight.bits[(i * n + j) >> 3] |= (unsigned char)(1 << ((i * n + j) & 7));
-	s_sight.bits[(j * n + i) >> 3] |= (unsigned char)(1 << ((j * n + i) & 7));
+	const Extent *e = n->GetExtent();
+	return 0.35f * Q_min(e->hi.x - e->lo.x, e->hi.y - e->lo.y);
 }
 
-void LsSightPath(char *out, size_t len)
+// One pair: whether they can see each other, how much, whether a crouched head is in view, and
+// (close and out of sight) whether one thin layer is all that's between them
+void Pair(size_t ia, size_t ib)
+{
+	const CNavArea *a = s_know.areas[ia], *b = s_know.areas[ib];
+	const Vector &ca = *a->GetCenter(), &cb = *b->GetCenter();
+	float dist = float((ca - cb).Length());
+	if (dist > LSV_RANGE)
+		return;
+	Vector ea(ca.x, ca.y, ca.z + EYE), eb(cb.x, cb.y, cb.z + EYE);
+	bool seen = Clear(ea, eb) || Clear(ea, Vector(cb.x, cb.y, cb.z + CROUCH_HEAD)) || Clear(eb, Vector(ca.x, ca.y, ca.z + CROUCH_HEAD));
+	Vector2D side = Side(a, b);
+	float ra = Reach(a), rb = Reach(b);
+	if (!seen && (ra > 50.0f || rb > 50.0f))
+	{
+		for (int k = -1; k <= 1 && !seen; k += 2)
+			seen = Clear(Vector(ca.x + side.x * ra * k, ca.y + side.y * ra * k, ca.z + EYE), Vector(cb.x + side.x * rb * k, cb.y + side.y * rb * k, cb.z + EYE));
+	}
+	if (!seen)
+	{
+		// a wallbang spot: one thin layer between eyes and head, nothing after it
+		if (dist > LSV_BANG_RANGE)
+			return;
+		TraceResult in, out;
+		UTIL_TraceLine(ea, eb, ignore_monsters, ignore_glass, nullptr, &in);
+		UTIL_TraceLine(eb, ea, ignore_monsters, ignore_glass, nullptr, &out);
+		s_know.traces += 2;
+		if (in.fStartSolid || out.fStartSolid || in.flFraction >= 1.0f || out.flFraction >= 1.0f)
+			return;
+		float thick = float((out.vecEndPos - in.vecEndPos).Length());
+		if (thick > 64.0f)
+			return;
+		Vector dir = (eb - ea).Normalize();
+		// (past the layer, clear the rest of the way)
+		if (!Clear(out.vecEndPos + dir * 2.0f, eb))
+			return;
+		BangInfo bang;
+		bang.a = (unsigned short)ia;
+		bang.b = (unsigned short)ib;
+		bang.thick = (unsigned char)Q_min(255.0f, thick + 0.5f);
+		bang.mat = Material(ea, eb, in.pHit);
+		s_know.bangs.push_back(bang);
+		return;
+	}
+	// how much: three points in each (the middle and either side), to standing and crouched
+	// heads: the share of those lines that are clear
+	int clear = 0, crouched = 0;
+	for (int x = -1; x <= 1; x++)
+	{
+		Vector pa(ca.x + side.x * ra * x, ca.y + side.y * ra * x, ca.z + EYE);
+		for (int y = -1; y <= 1; y++)
+		{
+			Vector2D at(cb.x + side.x * rb * y, cb.y + side.y * rb * y);
+			if (Clear(pa, Vector(at.x, at.y, cb.z + EYE)))
+				clear++;
+			if (Clear(pa, Vector(at.x, at.y, cb.z + CROUCH_HEAD)))
+			{
+				clear++;
+				crouched++;
+			}
+		}
+	}
+	PairInfo info;
+	info.a = (unsigned short)ia;
+	info.b = (unsigned short)ib;
+	info.quality = (unsigned char)Q_max(1, clear * 255 / 18);
+	info.flags = (unsigned char)(crouched ? LSP_CROUCHED : 0);
+	s_know.pairs.push_back(info);
+	size_t n = s_know.count;
+	s_know.bits[(ia * n + ib) >> 3] |= (unsigned char)(1 << ((ia * n + ib) & 7));
+	s_know.bits[(ib * n + ia) >> 3] |= (unsigned char)(1 << ((ib * n + ia) & 7));
+}
+
+void AddObject(LsAreaKnow &k, unsigned char type, const Vector &pos, float top, unsigned char mat)
+{
+	for (int o = 0; o < k.objectCount; o++)
+	{
+		LsKnownObject &ob = k.objects[o];
+		if (Q_abs(ob.x - pos.x) < 48.0f && Q_abs(ob.y - pos.y) < 48.0f && Q_abs(ob.z - pos.z) < 64.0f && ob.type == type)
+			return;
+	}
+	if (k.objectCount >= LS_KNOW_OBJECTS)
+		return;
+	LsKnownObject &ob = k.objects[k.objectCount++];
+	ob.type = type;
+	ob.x = (short)pos.x;
+	ob.y = (short)pos.y;
+	ob.z = (short)pos.z;
+	ob.top = (short)top;
+	ob.mat = mat;
+}
+
+// One area: cover all round and what it's made of, low objects, the ceiling, corners
+void Area(size_t idx)
+{
+	const CNavArea *area = s_know.areas[idx];
+	LsAreaKnow &k = s_know.know[idx];
+	const Vector &c = *area->GetCenter();
+	Vector eye(c.x, c.y, c.z + EYE), low(c.x, c.y, c.z + CROUCH_HEAD);
+	for (int d = 0; d < LS_KNOW_DIRS; d++)
+	{
+		float yaw = 360.0f / LS_KNOW_DIRS * d;
+		Vector dir(BotCOS(yaw), BotSIN(yaw), 0.0f);
+		TraceResult trLow, trHigh;
+		float openLow = Open(low, dir, 2000.0f, &trLow), openHigh = Open(eye, dir, 2000.0f, &trHigh);
+		k.coverLow[d] = (unsigned char)Q_min(255.0f, openLow / 8.0f);
+		k.coverHigh[d] = (unsigned char)Q_min(255.0f, openHigh / 8.0f);
+		k.mat[d] = openHigh < 300.0f ? Material(eye, eye + dir * 2000.0f, trHigh.pHit) : (openLow < 300.0f ? Material(low, low + dir * 2000.0f, trLow.pHit) : 0);
+		// something low there (a box, a low wall): solid at a crouched head, open over it
+		if (openLow < 120.0f && openHigh > openLow + 48.0f)
+		{
+			Vector edge = low + dir * (openLow + 8.0f);
+			TraceResult down;
+			UTIL_TraceLine(Vector(edge.x, edge.y, c.z + EYE + 20.0f), Vector(edge.x, edge.y, c.z - 8.0f), ignore_monsters, nullptr, &down);
+			s_know.traces++;
+			float top = down.fStartSolid ? c.z + EYE : down.vecEndPos.z;
+			AddObject(k, LSO_LOW, Vector(edge.x, edge.y, c.z), top, Material(low, low + dir * 2000.0f, trLow.pHit));
+		}
+	}
+	// the ceiling
+	k.ceiling = (unsigned char)Q_min(255.0f, Open(Vector(c.x, c.y, c.z + 40.0f), Vector(0, 0, 1), 1000.0f) / 4.0f);
+
+	// corners: all round, at eye and waist height, an edge with open space past it (someone
+	// could be just round it); the nearest first
+	const int N = 48;
+	float dEye[N], dWaist[N];
+	for (int r = 0; r < N; r++)
+	{
+		float yaw = 360.0f / N * r;
+		Vector dir(BotCOS(yaw), BotSIN(yaw), 0.0f);
+		dEye[r] = Open(eye, dir, 1500.0f);
+		dWaist[r] = Open(Vector(c.x, c.y, c.z + WAIST), dir, 1500.0f);
+	}
+	struct Cand { float dist; Vector at; float yaw; };
+	Cand cand[2 * N];
+	int nc = 0;
+	for (int h = 0; h < 2; h++)
+	{
+		float *d = h ? dWaist : dEye;
+		for (int r = 0; r < N; r++)
+		{
+			float n0 = d[r], n1 = d[(r + 1) % N];
+			float nearD = Q_min(n0, n1), farD = Q_max(n0, n1);
+			if (farD - nearD < 200.0f || nearD < 100.0f || nearD > 1200.0f)
+				continue;
+			float yaw = 360.0f / N * (r + 0.5f);
+			Vector dir(BotCOS(yaw), BotSIN(yaw), 0.0f);
+			cand[nc].dist = nearD;
+			cand[nc].at = eye + dir * (nearD + 24.0f);
+			// which way it opens: toward the far side
+			cand[nc].yaw = n0 > n1 ? 360.0f / N * r : 360.0f / N * (r + 1);
+			nc++;
+		}
+	}
+	for (int x = 0; x < nc; x++)
+		for (int y = x + 1; y < nc; y++)
+			if (cand[y].dist < cand[x].dist)
+				std::swap(cand[x], cand[y]);
+	k.cornerCount = 0;
+	for (int x = 0; x < nc && k.cornerCount < LS_KNOW_CORNERS; x++)
+	{
+		bool dup = false;
+		for (int y = 0; y < k.cornerCount; y++)
+			if (Q_abs(k.corners[y].x - cand[x].at.x) < 64.0f && Q_abs(k.corners[y].y - cand[x].at.y) < 64.0f)
+				dup = true;
+		if (dup)
+			continue;
+		LsKnownCorner &cn = k.corners[k.cornerCount++];
+		cn.x = (short)cand[x].at.x;
+		cn.y = (short)cand[x].at.y;
+		cn.z = (short)cand[x].at.z;
+		cn.yaw = (unsigned char)(cand[x].yaw / 360.0f * 256.0f);
+	}
+}
+
+// The map's own objects next to the areas they're in: doors, breakables, brush boxes, ladders
+void MapObjects()
+{
+	static const struct { const char *cls; unsigned char type; } kinds[] = {
+		{ "func_door", LSO_DOOR }, { "func_door_rotating", LSO_DOOR }, { "func_breakable", LSO_BREAKABLE },
+		{ "func_wall", LSO_BOX }, { "func_pushable", LSO_BOX }, { "func_illusionary", LSO_BOX },
+	};
+	for (auto &kind : kinds)
+	{
+		CBaseEntity *pEnt = nullptr;
+		while ((pEnt = UTIL_FindEntityByClassname(pEnt, kind.cls)) != nullptr)
+		{
+			Vector mid = (pEnt->pev->absmin + pEnt->pev->absmax) * 0.5f;
+			Vector feet(mid.x, mid.y, pEnt->pev->absmin.z + 1.0f);
+			CNavArea *area = TheNavAreaGrid.GetNearestNavArea(&feet);
+			if (!area || (*area->GetCenter() - feet).IsLengthGreaterThan(400.0f) || area->GetID() >= s_know.index.size())
+				continue;
+			int idx = s_know.index[area->GetID()];
+			if (idx < 0)
+				continue;
+			// (a func_illusionary is see-through scenery, not a box: only the big solid ones)
+			if (kind.type == LSO_BOX && (pEnt->pev->solid == SOLID_NOT || (pEnt->pev->size.x < 16.0f && pEnt->pev->size.y < 16.0f)))
+				continue;
+			AddObject(s_know.know[idx], kind.type, feet, pEnt->pev->absmax.z, 0);
+		}
+	}
+	for (CNavLadder *ladder : TheNavLadderList)
+	{
+		CNavArea *area = ladder->m_bottomArea;
+		if (!area || area->GetID() >= s_know.index.size() || s_know.index[area->GetID()] < 0)
+			continue;
+		AddObject(s_know.know[s_know.index[area->GetID()]], LSO_LADDER, ladder->m_bottom, ladder->m_top.z, 0);
+	}
+}
+
+void BuildNear()
+{
+	size_t n = s_know.count;
+	s_know.near.assign(n, {});
+	for (const PairInfo &p : s_know.pairs)
+	{
+		s_know.near[p.a].push_back({ p.b, p.quality });
+		s_know.near[p.b].push_back({ p.a, p.quality });
+	}
+	for (auto &list : s_know.near)
+		std::sort(list.begin(), list.end());
+}
+
+bool BitSees(size_t x, size_t y)
+{
+	size_t bit = x * s_know.count + y;
+	return (s_know.bits[bit >> 3] >> (bit & 7)) & 1;
+}
+
+// One area's angles: the places in its sight that lead somewhere out of it (where someone
+// appears), grouped by direction; the most-used ways first, each at its nearest point. Also
+// how much of the map it sees and whether it's above what it sees
+void Angles(size_t idx)
+{
+	LsAreaKnow &k = s_know.know[idx];
+	const CNavArea *me = s_know.areas[idx];
+	const Vector &c = *me->GetCenter();
+	const int B = 16;
+	int weight[B] = {};
+	float nearest[B];
+	int nearIdx[B];
+	for (int x = 0; x < B; x++) { nearest[x] = 1e9f; nearIdx[x] = -1; }
+	int lower = 0, sees = 0;
+	for (auto &seen : s_know.near[idx])
+	{
+		size_t v = seen.first;
+		sees++;
+		const CNavArea *va = s_know.areas[v];
+		if (va->GetCenter()->z < c.z - 64.0f)
+			lower++;
+		bool reveals = false;
+		for (int d = 0; d < NUM_DIRECTIONS && !reveals; d++)
+		{
+			for (int i = 0; i < va->GetAdjacentCount((NavDirType)d); i++)
+			{
+				CNavArea *w = va->GetAdjacentArea((NavDirType)d, i);
+				if (!w || w->GetID() >= s_know.index.size())
+					continue;
+				int wi = s_know.index[w->GetID()];
+				if (wi >= 0 && (size_t)wi != idx && !BitSees(idx, wi))
+				{
+					reveals = true;
+					break;
+				}
+			}
+		}
+		if (!reveals)
+			continue;
+		Vector to = *va->GetCenter() - c;
+		float yaw = UTIL_VecToYaw(to);
+		if (yaw < 0.0f)
+			yaw += 360.0f;
+		int bucket = int(yaw / (360.0f / B)) % B;
+		weight[bucket]++;
+		float dist = float(to.Length());
+		if (dist < nearest[bucket])
+		{
+			nearest[bucket] = dist;
+			nearIdx[bucket] = (int)v;
+		}
+	}
+	k.sees = (unsigned short)Q_min(65535, sees);
+	k.high = (unsigned char)(sees ? lower * 255 / sees : 0);
+	k.angleCount = 0;
+	for (int pick = 0; pick < LS_KNOW_ANGLES; pick++)
+	{
+		int best = -1;
+		for (int x = 0; x < B; x++)
+			if (weight[x] > 0 && (best < 0 || weight[x] > weight[best]))
+				best = x;
+		if (best < 0)
+			break;
+		const CNavArea *va = s_know.areas[nearIdx[best]];
+		Vector to = Vector(va->GetCenter()->x, va->GetCenter()->y, va->GetCenter()->z + EYE) - Vector(c.x, c.y, c.z + EYE);
+		LsKnownAngle &an = k.angles[k.angleCount++];
+		float yaw = UTIL_VecToYaw(to);
+		if (yaw < 0.0f)
+			yaw += 360.0f;
+		an.yaw = (unsigned char)(yaw / 360.0f * 256.0f);
+		float flat = to.Length2D();
+		an.pitch = (signed char)Q_max(-90.0f, Q_min(90.0f, float(atan2(to.z, flat) * 57.29578)));
+		an.dist = (unsigned short)Q_min(65535.0f, float(to.Length()));
+		an.weight = (unsigned char)Q_min(255, weight[best]);
+		an.area = (unsigned short)nearIdx[best];
+		weight[best] = 0;
+	}
+}
+
+void Path(char *out, size_t len)
 {
 	char gd[64]{};
 	GET_GAME_DIR(gd);
-	Q_snprintf(out, len, "%s/maps/%s.lsv", gd, s_sight.map);
+	Q_snprintf(out, len, "%s/maps/%s.lsv", gd, s_know.map);
 }
 
-void LsSightSave()
+void Save()
 {
-	char path[MAX_OSPATH];
-	LsSightPath(path, sizeof(path));
-	FILE *f = fopen(path, "wb");
+	char path[MAX_OSPATH], tmp[MAX_OSPATH];
+	Path(path, sizeof(path));
+	Q_snprintf(tmp, sizeof(tmp), "%s.part", path);
+	FILE *f = fopen(tmp, "wb");
 	if (!f)
 		return;
-	unsigned int head[3] = { LSV_MAGIC, s_sight.key, (unsigned int)s_sight.count };
-	bool ok = fwrite(head, sizeof(head), 1, f) == 1 && fwrite(s_sight.bits.data(), 1, s_sight.bits.size(), f) == s_sight.bits.size();
+	FileHead head = { LSV_MAGIC, LSV_VERSION, s_know.key, (unsigned int)s_know.count, (unsigned int)s_know.stage,
+		(unsigned int)s_know.i, (unsigned int)s_know.j, (unsigned int)s_know.pairs.size(), (unsigned int)s_know.bangs.size(),
+		s_know.traces, (float)s_know.spentMs };
+	bool ok = fwrite(&head, sizeof(head), 1, f) == 1
+		&& fwrite(s_know.bits.data(), 1, s_know.bits.size(), f) == s_know.bits.size()
+		&& (s_know.pairs.empty() || fwrite(s_know.pairs.data(), sizeof(PairInfo), s_know.pairs.size(), f) == s_know.pairs.size())
+		&& (s_know.bangs.empty() || fwrite(s_know.bangs.data(), sizeof(BangInfo), s_know.bangs.size(), f) == s_know.bangs.size())
+		&& fwrite(s_know.know.data(), sizeof(LsAreaKnow), s_know.know.size(), f) == s_know.know.size();
 	fclose(f);
 	if (!ok)
-		remove(path);
+	{
+		remove(tmp);
+		return;
+	}
+	remove(path);
+	if (rename(tmp, path) != 0)
+		remove(tmp);
 }
 
-bool LsSightLoad()
+// What's saved for this map, if it's for this nav: done, or how far it got
+bool Load()
 {
 	char rel[128];
-	Q_snprintf(rel, sizeof(rel), "maps/%s.lsv", s_sight.map);
+	Q_snprintf(rel, sizeof(rel), "maps/%s.lsv", s_know.map);
 	int len = 0;
 	byte *data = LOAD_FILE_FOR_ME(rel, &len);
 	if (!data)
 		return false;
 	bool ok = false;
-	size_t want = 12 + s_sight.bits.size();
-	if ((size_t)len == want)
+	FileHead head;
+	size_t n = s_know.count;
+	if ((size_t)len >= sizeof(head))
 	{
-		unsigned int head[3];
-		Q_memcpy(head, data, sizeof(head));
-		if (head[0] == LSV_MAGIC && head[1] == s_sight.key && head[2] == (unsigned int)s_sight.count)
+		Q_memcpy(&head, data, sizeof(head));
+		// (counts from the file are checked against what fits before anything's read by them)
+		size_t want = sizeof(head) + s_know.bits.size() + (size_t)head.pairs * sizeof(PairInfo) + (size_t)head.bangs * sizeof(BangInfo) + n * sizeof(LsAreaKnow);
+		if (head.magic == LSV_MAGIC && head.version == LSV_VERSION && head.key == s_know.key && head.count == n && head.stage <= STAGE_DONE
+			&& head.pairs <= n * n && head.bangs <= n * n && (size_t)len == want && head.ci <= n && head.cj <= n)
 		{
-			Q_memcpy(s_sight.bits.data(), data + 12, s_sight.bits.size());
+			const byte *p = data + sizeof(head);
+			Q_memcpy(s_know.bits.data(), p, s_know.bits.size());
+			p += s_know.bits.size();
+			s_know.pairs.resize(head.pairs);
+			if (head.pairs)
+				Q_memcpy(s_know.pairs.data(), p, head.pairs * sizeof(PairInfo));
+			p += head.pairs * sizeof(PairInfo);
+			s_know.bangs.resize(head.bangs);
+			if (head.bangs)
+				Q_memcpy(s_know.bangs.data(), p, head.bangs * sizeof(BangInfo));
+			p += head.bangs * sizeof(BangInfo);
+			Q_memcpy(s_know.know.data(), p, n * sizeof(LsAreaKnow));
+			// (indices in it are checked too: a damaged file isn't trusted)
 			ok = true;
+			for (const PairInfo &pi : s_know.pairs)
+				if (pi.a >= n || pi.b >= n)
+					ok = false;
+			for (const BangInfo &bi : s_know.bangs)
+				if (bi.a >= n || bi.b >= n)
+					ok = false;
+			for (LsAreaKnow &k : s_know.know)
+			{
+				k.cornerCount = Q_min(k.cornerCount, (unsigned char)LS_KNOW_CORNERS);
+				k.angleCount = Q_min(k.angleCount, (unsigned char)LS_KNOW_ANGLES);
+				k.objectCount = Q_min(k.objectCount, (unsigned char)LS_KNOW_OBJECTS);
+				for (int a = 0; a < k.angleCount; a++)
+					if (k.angles[a].area >= n)
+						k.angleCount = (unsigned char)a;
+			}
+			if (ok)
+			{
+				s_know.stage = (int)head.stage;
+				s_know.i = head.ci;
+				s_know.j = head.cj;
+				s_know.traces = head.traces;
+				s_know.spentMs = head.spentMs;
+			}
 		}
 	}
 	FREE_FILE(data);
+	if (!ok)
+	{
+		s_know.pairs.clear();
+		s_know.bangs.clear();
+		std::fill(s_know.bits.begin(), s_know.bits.end(), 0);
+		s_know.know.assign(n, LsAreaKnow());
+	}
 	return ok;
 }
 
-// A new map, or its nav changed (learned, or a new one): start again, from the file if it's there
-void LsSightReset()
+void Log(const char *what)
 {
-	s_sight.ready = false;
-	s_sight.tried = true;
-	Q_strlcpy(s_sight.map, STRING(gpGlobals->mapname));
-	s_sight.count = TheNavAreaList.size();
-	s_sight.navSize = s_sight.count;
-	s_sight.key = LsNavKey();
-	s_sight.areas.assign(TheNavAreaList.begin(), TheNavAreaList.end());
+	char gd[64]{}, path[MAX_OSPATH];
+	GET_GAME_DIR(gd);
+	Q_snprintf(path, sizeof(path), "%s/lonerstrike_mapknow.log", gd);
+	FILE *f = fopen(path, "a");
+	if (!f)
+		return;
+	fprintf(f, "%s\n", what);
+	fclose(f);
+}
+
+void Finish()
+{
+	size_t lows = 0, mapObjects = 0, corners = 0, angles = 0;
+	for (const LsAreaKnow &k : s_know.know)
+	{
+		corners += k.cornerCount;
+		angles += k.angleCount;
+		for (int o = 0; o < k.objectCount; o++)
+			(k.objects[o].type == LSO_LOW ? lows : mapObjects)++;
+	}
+	char line[512];
+	Q_snprintf(line, sizeof(line), "%s: %d areas, %d pairs in sight, %d wallbang spots, %d corners, %d angles, %d low objects, %d map objects; %u traces, %.1f s of work, done %.0f s after it started on this visit",
+		s_know.map, (int)s_know.count, (int)s_know.pairs.size(), (int)s_know.bangs.size(), (int)corners, (int)angles, (int)lows, (int)mapObjects,
+		s_know.traces, s_know.spentMs / 1000.0, gpGlobals->time - s_know.startedAt);
+	CONSOLE_ECHO("Loner-Strike: map knowledge for %s\n", line);
+	Log(line);
+}
+
+// A new map, or its nav changed: start again, or carry on from the file
+void Reset()
+{
+	s_know.ready = false;
+	s_know.tried = true;
+	s_know.stage = STAGE_PAIRS;
+	Q_strlcpy(s_know.map, STRING(gpGlobals->mapname));
+	s_know.count = TheNavAreaList.size();
+	s_know.navSize = s_know.count;
+	s_know.key = LsNavKey();
+	s_know.areas.assign(TheNavAreaList.begin(), TheNavAreaList.end());
+	s_know.pairs.clear();
+	s_know.bangs.clear();
+	s_know.near.clear();
 	// (area ids come from the map's .nav, which can come with a downloaded map: one far out of
-	// range, or too many areas, and the map gets no sightlines rather than a huge table)
+	// range, or too many areas, and the map gets no knowledge rather than a huge table)
 	size_t top = 0;
-	for (CNavArea *a : s_sight.areas)
+	for (CNavArea *a : s_know.areas)
 		top = Q_max(top, (size_t)a->GetID());
 	const size_t MAX_AREAS = 6000;				// (about 4.5 MB of sightlines; bigger maps go without)
-	if (s_sight.count > MAX_AREAS || top > 16 * s_sight.count + 1024)
+	if (s_know.count > MAX_AREAS || top > 16 * s_know.count + 1024)
 	{
-		s_sight.count = 0;
-		s_sight.areas.clear();
-		s_sight.index.clear();
-		s_sight.bits.clear();
+		s_know.count = 0;
+		s_know.areas.clear();
+		s_know.index.clear();
+		s_know.bits.clear();
+		s_know.know.clear();
 		return;
 	}
-	s_sight.index.assign(top + 1, -1);
-	for (size_t k = 0; k < s_sight.areas.size(); k++)
-		s_sight.index[s_sight.areas[k]->GetID()] = (int)k;
-	s_sight.bits.assign((s_sight.count * s_sight.count + 7) / 8, 0);
-	s_sight.i = 0;
-	s_sight.j = 1;
-	s_sight.spentMs = 0.0;
-	s_sight.traces = 0;
-	s_sight.startedAt = gpGlobals->time;
-	if (s_sight.count > 1 && LsSightLoad())
+	s_know.index.assign(top + 1, -1);
+	for (size_t k = 0; k < s_know.areas.size(); k++)
+		s_know.index[s_know.areas[k]->GetID()] = (int)k;
+	s_know.bits.assign((s_know.count * s_know.count + 7) / 8, 0);
+	s_know.know.assign(s_know.count, LsAreaKnow());
+	s_know.i = 0;
+	s_know.j = 1;
+	s_know.spentMs = 0.0;
+	s_know.traces = 0;
+	s_know.startedAt = gpGlobals->time;
+	s_know.lastSave = LsNowMs();
+	if (s_know.count < 2)
+		return;
+	if (Load())
 	{
-		s_sight.ready = true;
-		CONSOLE_ECHO("Loner-Strike: sightlines for %s loaded (%d areas).\n", s_sight.map, (int)s_sight.count);
+		if (s_know.stage > STAGE_PAIRS)
+		{
+			BuildNear();
+			s_know.ready = true;
+		}
+		if (s_know.stage == STAGE_DONE)
+			CONSOLE_ECHO("Loner-Strike: map knowledge for %s loaded (%d areas).\n", s_know.map, (int)s_know.count);
 	}
 }
 } // namespace
 
-// A little more of the map's sightlines, within this frame's budget (CCSBotManager::StartFrame)
+// A little more of the map's knowledge, within this frame's budget (CCSBotManager::StartFrame)
 void LsSightStep()
 {
 	if (!LsFight() || TheNavAreaList.empty() || !gpGlobals->mapname)
 		return;
 	// (the nav replaced, even with the same number of areas: its first area is a new one)
-	if (!s_sight.tried || Q_strcmp(s_sight.map, STRING(gpGlobals->mapname)) != 0
-		|| (!s_sight.areas.empty() && (s_sight.count != TheNavAreaList.size() || s_sight.areas.front() != TheNavAreaList.front()))
-		|| (s_sight.areas.empty() && s_sight.navSize != TheNavAreaList.size()))
-		LsSightReset();
-	if (s_sight.ready || s_sight.count < 2)
+	if (!s_know.tried || Q_strcmp(s_know.map, STRING(gpGlobals->mapname)) != 0
+		|| (!s_know.areas.empty() && (s_know.count != TheNavAreaList.size() || s_know.areas.front() != TheNavAreaList.front()))
+		|| (s_know.areas.empty() && s_know.navSize != TheNavAreaList.size()))
+		Reset();
+	if (s_know.stage == STAGE_DONE || s_know.count < 2)
 		return;
 
 	double start = LsNowMs();
-	size_t n = s_sight.count;
+	size_t n = s_know.count;
 	int sinceCheck = 0;
-	while (s_sight.i + 1 < n)
+	auto out = [&]() {
+		if (++sinceCheck < 4)
+			return false;
+		sinceCheck = 0;
+		return LsNowMs() - start >= LSV_BUDGET_MS;
+	};
+	while (s_know.stage != STAGE_DONE)
 	{
-		if (LsPairSees(s_sight.areas[s_sight.i], s_sight.areas[s_sight.j]))
-			LsSightSet(s_sight.i, s_sight.j);
-		if (++s_sight.j >= n)
+		if (s_know.stage == STAGE_PAIRS)
 		{
-			s_sight.i++;
-			s_sight.j = s_sight.i + 1;
-		}
-		if (++sinceCheck >= 8)
-		{
-			sinceCheck = 0;
-			double ms = LsNowMs() - start;
-			if (ms >= LSV_BUDGET_MS)
+			if (s_know.i + 1 >= n)
 			{
-				s_sight.spentMs += ms;
-				return;
+				s_know.stage = STAGE_AREAS;
+				s_know.i = 0;
+				BuildNear();
+				s_know.ready = true;
+				Save();
+				continue;
+			}
+			Pair(s_know.i, s_know.j);
+			if (++s_know.j >= n)
+			{
+				s_know.i++;
+				s_know.j = s_know.i + 1;
 			}
 		}
+		else if (s_know.stage == STAGE_AREAS)
+		{
+			if (s_know.i >= n)
+			{
+				MapObjects();
+				s_know.stage = STAGE_ANGLES;
+				s_know.i = 0;
+				Save();
+				continue;
+			}
+			Area(s_know.i++);
+		}
+		else
+		{
+			if (s_know.i >= n)
+			{
+				s_know.stage = STAGE_DONE;
+				s_know.spentMs += LsNowMs() - start;
+				Save();
+				Finish();
+				return;
+			}
+			Angles(s_know.i++);
+		}
+		if (out())
+			break;
 	}
-	s_sight.spentMs += LsNowMs() - start;
-	// (each area sees itself)
-	for (size_t k = 0; k < n; k++)
-		s_sight.bits[(k * n + k) >> 3] |= (unsigned char)(1 << ((k * n + k) & 7));
-	s_sight.ready = true;
-	LsSightSave();
-	CONSOLE_ECHO("Loner-Strike: sightlines for %s worked out: %d areas, %u traces, %.1f s of work over %.0f s of play.\n",
-		s_sight.map, (int)n, s_sight.traces, s_sight.spentMs / 1000.0, gpGlobals->time - s_sight.startedAt);
+	double now = LsNowMs();
+	s_know.spentMs += now - start;
+	if (now - s_know.lastSave >= LSV_SAVE_EVERY_MS)
+	{
+		s_know.lastSave = now;
+		Save();
+	}
 }
 
 bool LsSightReady()
 {
-	return s_sight.ready;
+	return s_know.ready;
+}
+
+static int LsKnowIndex(const CNavArea *a)
+{
+	if (!a || s_know.index.empty() || a->GetID() >= s_know.index.size())
+		return -1;
+	return s_know.index[a->GetID()];
 }
 
 // Whether someone in one area could see into the other (false until the map's are ready)
 bool LsSees(const CNavArea *a, const CNavArea *b)
 {
-	if (!s_sight.ready || !a || !b)
+	if (!s_know.ready)
 		return false;
-	unsigned int ia = a->GetID(), ib = b->GetID();
-	if (ia >= s_sight.index.size() || ib >= s_sight.index.size())
-		return false;
-	int x = s_sight.index[ia], y = s_sight.index[ib];
+	int x = LsKnowIndex(a), y = LsKnowIndex(b);
 	if (x < 0 || y < 0)
 		return false;
-	size_t bit = (size_t)x * s_sight.count + (size_t)y;
-	return (s_sight.bits[bit >> 3] >> (bit & 7)) & 1;
+	return x == y || BitSees((size_t)x, (size_t)y);
+}
+
+// How much of one area is in view from the other: 0 (none) to 255 (wide open)
+int LsSightQuality(const CNavArea *a, const CNavArea *b)
+{
+	if (!s_know.ready)
+		return 0;
+	int x = LsKnowIndex(a), y = LsKnowIndex(b);
+	if (x < 0 || y < 0)
+		return 0;
+	if (x == y)
+		return 255;
+	auto &list = s_know.near[x];
+	auto it = std::lower_bound(list.begin(), list.end(), std::make_pair((unsigned short)y, (unsigned char)0));
+	return (it != list.end() && it->first == y) ? it->second : 0;
+}
+
+// What's known about an area (cover, corners, angles, objects); null until that's worked out
+const LsAreaKnow *LsKnow(const CNavArea *a)
+{
+	if (s_know.stage < STAGE_ANGLES)
+		return nullptr;
+	int x = LsKnowIndex(a);
+	return x < 0 ? nullptr : &s_know.know[x];
+}
+
+// The area an angle looks at
+CNavArea *LsKnowArea(unsigned short index)
+{
+	return index < s_know.areas.size() ? s_know.areas[index] : nullptr;
+}
+
+// A wallbang spot between the two (one thin layer): its thickness and material
+bool LsWallbangKnown(const CNavArea *a, const CNavArea *b, float *thick, char *mat)
+{
+	if (s_know.stage < STAGE_AREAS)
+		return false;
+	int x = LsKnowIndex(a), y = LsKnowIndex(b);
+	if (x < 0 || y < 0)
+		return false;
+	unsigned short lo = (unsigned short)Q_min(x, y), hi = (unsigned short)Q_max(x, y);
+	for (const BangInfo &bi : s_know.bangs)
+	{
+		if (bi.a == lo && bi.b == hi)
+		{
+			if (thick) *thick = bi.thick;
+			if (mat) *mat = (char)bi.mat;
+			return true;
+		}
+	}
+	return false;
 }
