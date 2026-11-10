@@ -858,6 +858,9 @@ private:
 
 	bool BendLineOfSight(const Vector *eye, const Vector *point, Vector *bend) const;	// "bend" our line of sight until we can see the target point. Return bend point, false if cant bend.
 	bool LsCornerAhead(Vector *out);		// Loner-Strike: an edge ahead someone could be just past
+	void LsWallSanity();				// Loner-Strike: catching itself staring at a wall, and looking away
+	float m_lsWallSince = 0.0f;			// facing a wall up close since
+	float m_lsWallNext = 0.0f;			// not checked again before
 	Vector m_lsGlanceCorner;				// the last corner it glanced at walking, and when
 	float m_lsGlanceCornerAt = 0.0f;
 	float m_lsCornerCheckAt = 0.0f;

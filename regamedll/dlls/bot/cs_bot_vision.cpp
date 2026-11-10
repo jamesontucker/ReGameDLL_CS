@@ -1785,3 +1785,82 @@ bool CCSBot::IsNoticable(const CBasePlayer *pPlayer, unsigned char visibleParts)
 	return (RANDOM_FLOAT(0.0f, 100.0f) < noticeChance);
 }
 #endif
+
+// Loner-Strike (bot_ls_fight): a person who finds their crosshair on a wall a step away, with
+// nothing going on, looks somewhere that makes sense. Only out of a fight (an enemy up against
+// that wall is still watched), not while something else has it looking there on purpose (a
+// noise, a plugin, planting or defusing, a ladder). A good player notices at once; a newer one
+// takes a moment, and now and then doesn't notice at all. Where to: down the way it's going if
+// that's open, else the longest open line near where it was looking.
+void CCSBot::LsWallSanity()
+{
+	if (!LsFight() || !IsAlive())
+		return;
+	float now = gpGlobals->time;
+	if (now < m_lsWallNext)
+		return;
+	m_lsWallNext = now + 0.15f;
+	if (CSGameRules()->IsFreezePeriod() || IsAttacking() || IsEnemyVisible() || GetTimeSinceLastSawEnemy() < 2.5f || IsBlind()
+		|| IsUsingLadder() || IsLookingAtSpot(PRIORITY_MEDIUM) || LsPuppetLooking() || LsPuppetActive() || LsOrderActive()
+		|| m_state == &m_plantBombState || m_state == &m_defuseBombState)
+	{
+		m_lsWallSince = 0.0f;
+		return;
+	}
+
+	Vector eye = GetEyePosition();
+	UTIL_MakeVectors(pev->v_angle);
+	Vector fwd = gpGlobals->v_forward;
+	TraceResult tr;
+	UTIL_TraceLine(eye, eye + fwd * 140.0f, ignore_monsters, ignore_glass, ENT(pev), &tr);
+	CBaseEntity *pHit = tr.pHit ? CBaseEntity::Instance(tr.pHit) : nullptr;
+	bool seeThrough = pHit && (FClassnameIs(pHit->pev, "func_door") || FClassnameIs(pHit->pev, "func_door_rotating") || FClassnameIs(pHit->pev, "func_breakable"));
+	// (a surface a step away, more or less square on: not a doorway's edge it's checking)
+	bool wall = tr.flFraction < 0.8f && !tr.fStartSolid && !seeThrough && DotProduct(tr.vecPlaneNormal, -fwd) > 0.6f;
+	if (!wall)
+	{
+		m_lsWallSince = 0.0f;
+		return;
+	}
+	if (m_lsWallSince <= 0.0f)
+	{
+		m_lsWallSince = now;
+		return;
+	}
+	float skill = LsSkill();
+	if (now - m_lsWallSince < 0.25f + 0.8f * (1.0f - skill))
+		return;
+	m_lsWallSince = 0.0f;
+	// (a newer player doesn't always notice)
+	if (RANDOM_FLOAT(0.0f, 1.0f) < 0.4f * (1.0f - skill))
+	{
+		m_lsWallNext = now + RANDOM_FLOAT(1.0f, 2.5f);
+		return;
+	}
+
+	float moving = pev->velocity.Length2D();
+	float goYaw = moving > 60.0f ? UTIL_VecToYaw(pev->velocity) : pev->v_angle.y;
+	float best = -1.0f;
+	Vector bestAt = eye;
+	for (int k = 0; k < 12; k++)
+	{
+		float yaw = pev->v_angle.y + 30.0f * float(k <= 6 ? k : k - 12);
+		Vector dir(BotCOS(yaw), BotSIN(yaw), 0.0f);
+		float open = 1500.0f * LsClearTo(eye, eye + dir * 1500.0f, ENT(pev));
+		if (open < 300.0f)
+			continue;
+		float score = open - 2.0f * float(Q_abs(NormalizeAngle(yaw - pev->v_angle.y)));
+		if (moving > 60.0f && Q_abs(NormalizeAngle(yaw - goYaw)) < 35.0f)
+			score += 400.0f;
+		if (score > best)
+		{
+			best = score;
+			bestAt = eye + dir * Q_min(open, 600.0f);
+		}
+	}
+	if (best < 0.0f)
+		return;
+	SetLookAt("Loner-Strike: off the wall", &bestAt, PRIORITY_MEDIUM, RANDOM_FLOAT(0.8f, 1.6f), true);
+	m_lsWallNext = now + 1.0f;
+	LsWhy("off the wall");
+}

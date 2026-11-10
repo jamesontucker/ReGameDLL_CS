@@ -363,6 +363,9 @@ void CCSBot::Update()
 	if (LsBlindTick())
 		return;
 
+	// (Loner-Strike: and not staring at a wall with nothing going on)
+	LsWallSanity();
+
 	// if we're blind, retreat!
 	if (IsBlind())
 	{
