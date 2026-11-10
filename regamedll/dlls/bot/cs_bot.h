@@ -867,6 +867,11 @@ private:
 	bool LsKnows(int fact);
 	void LsLookableSpot(Vector *spot);	// Loner-Strike: a spot behind a wall becomes the edge it'd be seen past
 	bool LsScanAngles(bool holding);	// Loner-Strike: look at the next angle an enemy could come from (map knowledge)
+	int LsCrowdAreas(CNavArea **out, int max, float *cost);	// Loner-Strike: where teammates are (for paths)
+	float LsSafeSide(const CNavArea *area, NavDirType dir);	// Loner-Strike: -1..1, the less exposed side walking in
+	void LsCrouchWalk();				// Loner-Strike: crouch past a low wall that hides it from an angle
+	bool m_lsCrouchWalking = false;
+	float m_lsCrouchWalkSince = 0.0f;
 	void LsBumpCheck();					// Loner-Strike: an enemy bumping into it is noticed, wherever it's looking
 	unsigned short m_lsScanArea[4] = {};	// the last angles it checked (knowledge area index + 1), and when
 	float m_lsScanAt[4] = {};
@@ -2120,6 +2125,11 @@ public:
 		// Loner-Strike: taste in routes only for the path the bot walks (not for "how far is
 		// it" checks, whose ranges were tuned for plain distances)
 		m_lsTaste = lsTaste && pBot->LsRouteTaste(route, &m_lsRoute);
+		// Loner-Strike: where teammates are now, so the bot doesn't walk in a line behind one
+		// down the same corridor (in team play a little; every bot for itself, more)
+		m_lsCrowdCount = 0;
+		if (m_lsTaste)
+			m_lsCrowdCount = pBot->LsCrowdAreas(m_lsCrowd, 32, &m_lsCrowdCost);
 	}
 	float operator()(CNavArea *area, CNavArea *fromArea, const CNavLadder *ladder)
 	{
@@ -2169,6 +2179,10 @@ public:
 			// Loner-Strike: this bot's favourite (and not so favourite) parts of the map
 			if (m_lsTaste)
 				dist *= LsRouteFactor(m_lsRoute, area);
+			// Loner-Strike: a teammate already there: a bit further round instead
+			for (int c = 0; c < m_lsCrowdCount; c++)
+				if (m_lsCrowd[c] == area)
+					dist += m_lsCrowdCost;
 
 			// compute distance travelled along path so far
 			float cost = dist + fromArea->GetCostSoFar();
@@ -2271,6 +2285,9 @@ private:
 	RouteType m_route;
 	bool m_lsTaste;
 	LsRoute m_lsRoute;
+	CNavArea *m_lsCrowd[32];
+	int m_lsCrowdCount;
+	float m_lsCrowdCost;
 };
 
 class FollowTargetCollector

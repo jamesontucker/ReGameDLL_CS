@@ -367,6 +367,7 @@ void CCSBot::Update()
 	// is felt)
 	LsWallSanity();
 	LsBumpCheck();
+	LsCrouchWalk();
 
 	// (Loner-Strike: who it's fighting, for the plugins to follow (gm_humanbots times its
 	// reaction and aim for the same one): pev->euser4, nothing else uses it)

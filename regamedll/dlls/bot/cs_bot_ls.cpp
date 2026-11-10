@@ -596,6 +596,14 @@ void CCSBot::LsShiftPortalPoint(const CNavArea *from, const CNavArea *to, NavDir
 	float habit = 2.0f * LsTrait(1) - 1.0f;
 	float jitter = RANDOM_FLOAT(-0.35f, 0.35f);
 	float side = Q_max(-1.0f, Q_min(1.0f, habit + jitter));
+	// (one who knows to stay out of sight leans to the side the dangerous angles can't see:
+	// the left wall of a catwalk away from the doors; in deathmatch nobody bothers)
+	if (LsFight() && LsTeamGame() && LsKnows(LSK_EXPOSURE))
+	{
+		float safe = LsSafeSide(to, dir);
+		float lean = 0.5f + 0.4f * LsSkill();
+		side = Q_max(-1.0f, Q_min(1.0f, side * (1.0f - lean) + safe * lean));
+	}
 
 	// its left going north (-y) is +x, south -x, east +y, west -y
 	bool alongX = (dir == NORTH || dir == SOUTH);
@@ -3695,4 +3703,137 @@ void CCSBot::LsBumpCheck()
 		m_lsBumpAt = now + 0.12f + 0.5f * (1.0f - LsSkill());
 		return;
 	}
+}
+
+
+// ---- moving out of sight ---------------------------------------------------------------------
+
+// Teammates' areas now (for the path cost: not following one down the same corridor), and
+// what a teammate there adds to the way (every bot for itself: more; team play: a little)
+int CCSBot::LsCrowdAreas(CNavArea **out, int max, float *cost)
+{
+	*cost = LsSolo() ? 400.0f : 120.0f;
+	if (!LsFight())
+		return 0;
+	int n = 0;
+	for (int m = 1; m <= gpGlobals->maxClients && n < max; m++)
+	{
+		CBasePlayer *mate = UTIL_PlayerByIndex(m);
+		if (!mate || mate == this || !mate->IsAlive() || mate->m_iTeam != m_iTeam)
+			continue;
+		CNavArea *area = mate->IsBot() ? static_cast<CCSBot *>(mate)->GetLastKnownArea() : TheNavAreaGrid.GetNavArea(&mate->pev->origin);
+		if (area)
+			out[n++] = area;
+	}
+	return n;
+}
+
+// Walking into `area` across its `dir` side: which side (1 its left, -1 its right) is less
+// seen from the area's angles on the enemy's side of the map (the exposure grid); 0 when it's
+// the same or not known yet
+float CCSBot::LsSafeSide(const CNavArea *area, NavDirType dir)
+{
+	if (!LsExposureReady() || !area)
+		return 0.0f;
+	const LsAreaKnow *k = LsKnow(area);
+	if (!k || k->angleCount == 0)
+		return 0.0f;
+	const Vector *enemyHome = LsEnemySpawn(m_iTeam);
+	// its left: going north (-y) +x, east +y, south -x, west -y (as LsShiftPortalPoint)
+	Vector2D left = dir == NORTH ? Vector2D(1, 0) : dir == EAST ? Vector2D(0, 1) : dir == SOUTH ? Vector2D(-1, 0) : Vector2D(0, -1);
+	const Vector &c = *area->GetCenter();
+	float onLeft = 0.0f, onRight = 0.0f;
+	for (int p = 0; p < 9; p++)
+	{
+		Vector pt;
+		LsExposurePoint(area, p, &pt);
+		float lateral = (pt.x - c.x) * left.x + (pt.y - c.y) * left.y;
+		if (Q_abs(lateral) < 8.0f)
+			continue;
+		float seen = 0.0f;
+		for (int a = 0; a < k->angleCount; a++)
+		{
+			if (!(k->exposedStand[a] >> p & 1))
+				continue;
+			CNavArea *from = LsKnowArea(k->angles[a].area);
+			float w = 1.0f;
+			if (enemyHome && from)
+				w = (*from->GetCenter() - *enemyHome).Length2D() < (c - *enemyHome).Length2D() ? 1.5f : 0.5f;
+			seen += w;
+		}
+		(lateral > 0.0f ? onLeft : onRight) += seen;
+	}
+	float total = onLeft + onRight;
+	if (total < 0.5f)
+		return 0.0f;
+	return Q_max(-1.0f, Q_min(1.0f, (onRight - onLeft) / total));
+}
+
+// Walking past a low wall that hides a crouched player from an angle on the enemy's side (and
+// not a standing one): the ones who know crouch past it, a few steps; up again after, or as
+// soon as anything happens. Never in deathmatch, never in a hurry
+void CCSBot::LsCrouchWalk()
+{
+	auto stop = [this]() {
+		if (m_lsCrouchWalking)
+		{
+			m_lsCrouchWalking = false;
+			StandUp();
+		}
+	};
+	if (!LsFight() || !LsTeamGame() || !LsExposureReady() || IsAttacking() || IsHurrying() || IsNotMoving() || GetTimeSinceLastSawEnemy() < 3.0f
+		|| TheCSBots()->IsBombPlanted() || IsCarryingBomb() || IsUsingLadder() || !m_lastKnownArea || LsStyle() == LS_STYLE_RUSHER || !LsKnows(LSK_EXPOSURE))
+	{
+		stop();
+		return;
+	}
+	float now = gpGlobals->time;
+	// (a few steps at most: then up and on)
+	if (m_lsCrouchWalking && now - m_lsCrouchWalkSince > 3.5f)
+	{
+		stop();
+		return;
+	}
+	const LsAreaKnow *k = LsKnow(m_lastKnownArea);
+	if (!k || k->angleCount == 0)
+	{
+		stop();
+		return;
+	}
+	// the nearest of the area's points
+	int nearest = 0;
+	float bestD = 1e9f;
+	for (int p = 0; p < 9; p++)
+	{
+		Vector pt;
+		LsExposurePoint(m_lastKnownArea, p, &pt);
+		float d = (pt - pev->origin).Length2D();
+		if (d < bestD)
+		{
+			bestD = d;
+			nearest = p;
+		}
+	}
+	const Vector *enemyHome = LsEnemySpawn(m_iTeam);
+	bool hides = false;
+	for (int a = 0; a < k->angleCount && !hides; a++)
+	{
+		if ((k->exposedStand[a] >> nearest & 1) && !(k->exposedCrouch[a] >> nearest & 1))
+		{
+			CNavArea *from = LsKnowArea(k->angles[a].area);
+			if (!enemyHome || !from || (*from->GetCenter() - *enemyHome).Length2D() < (pev->origin - *enemyHome).Length2D())
+				hides = true;
+		}
+	}
+	if (hides)
+	{
+		if (!m_lsCrouchWalking)
+		{
+			m_lsCrouchWalking = true;
+			m_lsCrouchWalkSince = now;
+		}
+		Crouch();
+	}
+	else
+		stop();
 }
