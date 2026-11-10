@@ -505,6 +505,33 @@ void CCSBot::UpdatePeripheralVision()
 }
 
 // Update the "looking around" behavior.
+// Loner-Strike: whether a person could see from `from` to `to`: glass is looked through, and a
+// door or a breakable window doesn't count as a wall (an angle on a door is held); only solid
+// walls block. How far it got: 1 all the way.
+static float LsClearTo(const Vector &from, const Vector &to, edict_t *self)
+{
+	Vector start = from;
+	edict_t *skip = self;
+	for (int step = 0; step < 4; step++)
+	{
+		TraceResult tr;
+		UTIL_TraceLine(start, to, ignore_monsters, ignore_glass, skip, &tr);
+		if (tr.flFraction >= 1.0f)
+			return 1.0f;
+		CBaseEntity *pHit = tr.pHit ? CBaseEntity::Instance(tr.pHit) : nullptr;
+		bool seeThrough = pHit && (FClassnameIs(pHit->pev, "func_door") || FClassnameIs(pHit->pev, "func_door_rotating") || FClassnameIs(pHit->pev, "func_breakable"));
+		if (!seeThrough)
+		{
+			float total = float((to - from).Length());
+			return total > 1.0f ? float((tr.vecEndPos - from).Length()) / total : 1.0f;
+		}
+		// (on from where it hit, that door or window left out)
+		start = tr.vecEndPos;
+		skip = tr.pHit;
+	}
+	return 1.0f;
+}
+
 void CCSBot::UpdateLookAround(bool updateNow)
 {
 	// check if looking around has been inhibited
@@ -611,9 +638,7 @@ void CCSBot::UpdateLookAround(bool updateNow)
 				// keeps walls out)
 				if (dist < 64.0f)
 					continue;
-				TraceResult tr;
-				UTIL_TraceLine(eye, spot, ignore_monsters, ENT(pev), &tr);
-				if (tr.flFraction >= 0.95f)
+				if (LsClearTo(eye, spot, ENT(pev)) >= 0.95f)
 					seen[count++] = i;
 			}
 			if (count > 0)
@@ -640,9 +665,7 @@ void CCSBot::UpdateLookAround(bool updateNow)
 				{
 					float yaw = pev->v_angle.y + 45.0f * float(k);
 					Vector dir(BotCOS(yaw), BotSIN(yaw), 0.0f);
-					TraceResult tr;
-					UTIL_TraceLine(eye, eye + dir * 2000.0f, ignore_monsters, ENT(pev), &tr);
-					float open = 2000.0f * tr.flFraction;
+					float open = 2000.0f * LsClearTo(eye, eye + dir * 2000.0f, ENT(pev));
 					float score = open - 150.0f * Q_abs(NormalizeAngle(yaw - pev->v_angle.y)) / 45.0f;
 					if (score > best)
 					{
