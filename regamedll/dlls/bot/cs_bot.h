@@ -867,7 +867,6 @@ private:
 	bool LsKnows(int fact);
 	void LsLookableSpot(Vector *spot);	// Loner-Strike: a spot behind a wall becomes the edge it'd be seen past
 	bool LsScanAngles(bool holding);	// Loner-Strike: look at the next angle an enemy could come from (map knowledge)
-	int LsCrowdAreas(CNavArea **out, int max, float *cost);	// Loner-Strike: where teammates are (for paths)
 	float LsSafeSide(const CNavArea *area, NavDirType dir);	// Loner-Strike: -1..1, the less exposed side walking in
 	void LsCrouchWalk();				// Loner-Strike: crouch past a low wall that hides it from an angle
 	bool m_lsCrouchWalking = false;
@@ -1172,6 +1171,7 @@ public:
 	void LsAddDangerNearby(float amount, CNavArea *startArea, const Vector *pos, float maxRadius);
 	void LsSawTeammateDie(CBasePlayer *pVictim);
 	bool LsRouteTaste(RouteType route, struct LsRoute *out);	// false: no taste in routes now
+	int LsCrowdAreas(CNavArea **out, int max, float *cost);	// Loner-Strike: where teammates are (for paths)
 	void LsShiftPortalPoint(const CNavArea *from, const CNavArea *to, NavDirType dir, Vector *pos);
 	bool LsUpdatePause();
 	void LsPuppetCommand(const char *what, float now);	// ls_bot (a plugin's short say over this bot)
