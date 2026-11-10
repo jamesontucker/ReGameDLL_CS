@@ -220,8 +220,10 @@ void CCSBot::UpdateLookAngles()
 	if (LsFight() && !IsUsingLadder())
 	{
 		// (on the move and not fighting, the view stays within 90 degrees of where it's
-		// going: people check as they go, they don't run backwards at a site. A quick
-		// deliberate look back, or a real threat, still turns it all the way)
+		// going: people check as they go, they don't run backwards at a site. Over the
+		// shoulder (to 140) only as a glance, under half a second and not straight after
+		// another, about as often as the person in the playtest (10% of running time past
+		// 100 degrees). A deliberate look back, or a real threat, still turns it all the way)
 		float speed = float(pev->velocity.Length2D());
 		bool lookBack = m_lookAtDesc && Q_strcmp(m_lookAtDesc, "Loner-Strike: looking back") == 0;
 		if (speed > 150.0f && !IsAttacking() && !IsEnemyVisible() && !lookBack
@@ -229,11 +231,26 @@ void CCSBot::UpdateLookAngles()
 		{
 			float heading = UTIL_VecToYaw(pev->velocity);
 			float off = NormalizeAngle(useYaw - heading);
-			if (off > 90.0f)
-				useYaw = heading + 90.0f;
-			else if (off < -90.0f)
-				useYaw = heading - 90.0f;
+			float now = gpGlobals->time;
+			if (Q_abs(off) <= 90.0f)
+				m_lsBehindSince = 0.0f;
+			else
+			{
+				if (m_lsBehindSince <= 0.0f && now >= m_lsBehindNext)
+				{
+					m_lsBehindSince = now;
+					m_lsBehindNext = now + RANDOM_FLOAT(1.5f, 3.0f);
+				}
+				bool glance = m_lsBehindSince > 0.0f && now - m_lsBehindSince < 0.45f;
+				float limit = glance ? 140.0f : 90.0f;
+				if (off > limit)
+					useYaw = heading + limit;
+				else if (off < -limit)
+					useYaw = heading - limit;
+			}
 		}
+		else
+			m_lsBehindSince = 0.0f;
 		LsHandUpdate(useYaw, usePitch, deltaT);
 		return;
 	}
