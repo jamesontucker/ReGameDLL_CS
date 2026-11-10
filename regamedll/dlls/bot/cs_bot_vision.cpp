@@ -229,8 +229,13 @@ void CCSBot::UpdateLookAngles()
 		// they're a glance; it stops for a long one)
 		bool lookBack = m_lookAtDesc && Q_strcmp(m_lookAtDesc, "Loner-Strike: looking back") == 0;
 		bool checking = m_lookAtDesc && Q_strcmp(m_lookAtDesc, "Loner-Strike: checking") == 0;
+		// (a noise behind: one right on it, 500 units or less, turns it all the way; one
+		// further off is a look over the shoulder, as a person running somewhere would. The
+		// stock look held the view on it 1-2 s while it ran on: running backwards)
+		bool farNoise = m_lookAtDesc && Q_strcmp(m_lookAtDesc, "Noise") == 0
+			&& (m_noisePosition - pev->origin).Make2D().IsLengthGreaterThan(500.0f);
 		if (speed > 150.0f && !IsAttacking() && !IsEnemyVisible() && !lookBack
-			&& !(m_lookAtSpotState != NOT_LOOKING_AT_SPOT && m_lookAtSpotPriority >= PRIORITY_HIGH && !checking))
+			&& !(m_lookAtSpotState != NOT_LOOKING_AT_SPOT && m_lookAtSpotPriority >= PRIORITY_HIGH && !checking && !farNoise))
 		{
 			float heading = UTIL_VecToYaw(pev->velocity);
 			float off = NormalizeAngle(useYaw - heading);
