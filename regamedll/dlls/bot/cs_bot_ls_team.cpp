@@ -528,6 +528,11 @@ void CCSBot::LsExecuteTick()
 	if (!LsFight() || !LsTeamGame() || m_iTeam != TERRORIST || !IsAlive() || TheCSBots()->GetScenario() != CCSBotManager::SCENARIO_DEFUSE_BOMB
 		|| TheCSBots()->IsBombPlanted() || CSGameRules()->IsFreezePeriod() || LsOrderActive())
 		return;
+	// (one on its way to a dropped bomb gets it first: the go, or a wait at the stage, pulled
+	// it off the bomb, the fetch check sent it back, and it went to and fro till the time ran
+	// out; with the bomb in hand it joins the push)
+	if (m_state == &m_fetchBombState)
+		return;
 	int round = LsRoundSerial();
 	float now = gpGlobals->time;
 	const CCSBotManager::Zone *site = LsTSite();
