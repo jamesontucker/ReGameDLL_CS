@@ -2502,7 +2502,7 @@ double LsNowMs()
 }
 
 const unsigned int LSV_MAGIC = 0x3256534C;	// "LSV2"
-const unsigned int LSV_VERSION = 4;
+const unsigned int LSV_VERSION = 5;
 const float LSV_RANGE = 3500.0f;			// farther than this counts as not in sight
 const float LSV_BANG_RANGE = 1000.0f;		// wallbang spots looked for this close
 const double LSV_BUDGET_MS = 0.4;			// per frame
@@ -2676,11 +2676,29 @@ void Pair(size_t ia, size_t ib)
 		// (past the layer, clear the rest of the way)
 		if (!Clear(out.vecEndPos + dir * 2.0f, eb))
 			return;
+		// (only where some gun really gets through it by the game's rule: the AWP's reach in
+		// that material, 42 for anything that isn't part of the map's walls)
+		unsigned char mat = Material(ea, eb, in.pHit);
+		float reach = 45.0f;
+		switch (mat)
+		{
+		case CHAR_TEX_METAL: reach *= 0.15f; break;
+		case CHAR_TEX_CONCRETE: reach *= 0.25f; break;
+		case CHAR_TEX_GRATE: case CHAR_TEX_VENT: reach *= 0.5f; break;
+		case CHAR_TEX_TILE: reach *= 0.65f; break;
+		case CHAR_TEX_COMPUTER: reach *= 0.4f; break;
+		case CHAR_TEX_WOOD: break;
+		default: reach *= 0.25f; break;
+		}
+		if (in.pHit && VARS(in.pHit)->solid != SOLID_BSP)
+			reach = 42.0f;
+		if (thick > reach)
+			return;
 		BangInfo bang;
 		bang.a = (unsigned short)ia;
 		bang.b = (unsigned short)ib;
 		bang.thick = (unsigned char)Q_min(255.0f, thick + 0.5f);
-		bang.mat = Material(ea, eb, in.pHit);
+		bang.mat = mat;
 		s_know.bangs.push_back(bang);
 		return;
 	}
@@ -2732,6 +2750,29 @@ void AddObject(LsAreaKnow &k, unsigned char type, const Vector &pos, float top, 
 	ob.mat = mat;
 }
 
+// Something low in front (solid at a crouched head `dist` away, open above): real low cover
+// (a crate, a low wall) or just stairs, a ramp or a step? Cover stands at least 30 units
+// above the floor, and past its top the floor doesn't keep rising. Its top in `top`
+bool LowCover(const Vector &floor, const Vector &dir, float dist, float *top)
+{
+	auto surface = [&](float along) {
+		Vector at = floor + dir * along;
+		TraceResult down;
+		UTIL_TraceLine(Vector(at.x, at.y, floor.z + EYE + 20.0f), Vector(at.x, at.y, floor.z - 8.0f), ignore_monsters, nullptr, &down);
+		s_know.traces++;
+		return down.fStartSolid ? floor.z + EYE : down.vecEndPos.z;
+	};
+	float a = surface(dist + 8.0f);
+	if (a - floor.z < 30.0f)
+		return false;
+	// (stairs and ramps: further on it's higher again)
+	if (surface(dist + 40.0f) > a + 12.0f)
+		return false;
+	if (top)
+		*top = a;
+	return true;
+}
+
 // One area: cover all round and what it's made of, low objects, the ceiling, corners
 void Area(size_t idx)
 {
@@ -2751,15 +2792,15 @@ void Area(size_t idx)
 		k.coverHigh[d] = (unsigned char)Q_min(255.0f, openHigh / 8.0f);
 		k.mat[d] = openHigh < 300.0f ? Material(eye, eye + dir * 2000.0f, trHigh.pHit) : (openLow < 300.0f ? Material(low, low + dir * 2000.0f, trLow.pHit) : 0);
 		// something low there (a box, a low wall): solid at a crouched head, open over it
-		if (openLow < 120.0f && openHigh > openLow + 48.0f)
+		float top;
+		if (openLow < 120.0f && openHigh > openLow + 48.0f && LowCover(c, dir, openLow, &top))
 		{
 			Vector edge = low + dir * (openLow + 8.0f);
-			TraceResult down;
-			UTIL_TraceLine(Vector(edge.x, edge.y, c.z + EYE + 20.0f), Vector(edge.x, edge.y, c.z - 8.0f), ignore_monsters, nullptr, &down);
-			s_know.traces++;
-			float top = down.fStartSolid ? c.z + EYE : down.vecEndPos.z;
 			AddObject(k, LSO_LOW, Vector(edge.x, edge.y, c.z), top, Material(low, low + dir * 2000.0f, trLow.pHit));
 		}
+		// (stairs or a ramp ahead isn't low cover)
+		else if (openLow < openHigh && openLow < 300.0f && !LowCover(c, dir, openLow, nullptr))
+			k.coverLow[d] = k.coverHigh[d];
 	}
 	// the ceiling
 	k.ceiling = (unsigned char)Q_min(255.0f, Open(Vector(c.x, c.y, c.z + 40.0f), Vector(0, 0, 1), 1000.0f) / 4.0f);
@@ -2826,7 +2867,8 @@ void Area(size_t idx)
 		for (int y = 0; y < k.cornerCount; y++)
 			if (Q_abs(k.corners[y].x - cand[x].at.x) < 64.0f && Q_abs(k.corners[y].y - cand[x].at.y) < 64.0f)
 				dup = true;
-		if (dup)
+		// (in view from here: not past a window or gap out of the map)
+		if (dup || !Clear(eye, cand[x].at))
 			continue;
 		LsKnownCorner &cn = k.corners[k.cornerCount++];
 		cn.x = (short)cand[x].at.x;
@@ -2851,8 +2893,17 @@ void MapObjects()
 			Vector mid = (pEnt->pev->absmin + pEnt->pev->absmax) * 0.5f;
 			Vector feet(mid.x, mid.y, pEnt->pev->absmin.z + 1.0f);
 			CNavArea *area = TheNavAreaGrid.GetNearestNavArea(&feet);
-			if (!area || (*area->GetCenter() - feet).IsLengthGreaterThan(400.0f) || area->GetID() >= s_know.index.size())
+			if (!area || (*area->GetCenter() - feet).Make2D().IsLengthGreaterThan(250.0f) || area->GetID() >= s_know.index.size())
 				continue;
+			// (in view from that area, not decoration behind a wall or outside the map)
+			{
+				const Vector &ac = *area->GetCenter();
+				TraceResult tr;
+				UTIL_TraceLine(Vector(ac.x, ac.y, ac.z + EYE), mid, ignore_monsters, ENT(pEnt->pev), &tr);
+				s_know.traces++;
+				if (tr.flFraction < 0.95f || tr.fStartSolid)
+					continue;
+			}
 			int idx = s_know.index[area->GetID()];
 			if (idx < 0)
 				continue;
@@ -2991,9 +3042,12 @@ void Exposure(size_t idx)
 		{
 			float yaw = 360.0f / LS_KNOW_DIRS * d;
 			Vector dir(BotCOS(yaw), BotSIN(yaw), 0.0f);
-			if (Open(lowAt, dir, 64.0f) < 64.0f)
+			float lowD = Open(lowAt, dir, 64.0f);
+			bool high = Open(highAt, dir, 64.0f) < 64.0f;
+			// (low only: real low cover, not the first steps of a staircase)
+			if (lowD < 64.0f && (high || LowCover(pts[p], dir, lowD, nullptr)))
 				k.pointCoverLow[p] |= (unsigned short)(1 << d);
-			if (Open(highAt, dir, 64.0f) < 64.0f)
+			if (high)
 				k.pointCoverHigh[p] |= (unsigned short)(1 << d);
 		}
 	}
@@ -3223,11 +3277,29 @@ void LsSightStep()
 	double start = LsNowMs();
 	size_t n = s_know.count;
 	int sinceCheck = 0;
+	// (more while nobody's playing: freeze time, everyone dead, or no people at all)
+	double budget = LSV_BUDGET_MS;
+	{
+		int alive = 0, humans = 0;
+		for (int p = 1; p <= gpGlobals->maxClients; p++)
+		{
+			CBasePlayer *pl = UTIL_PlayerByIndex(p);
+			if (!pl || pl->IsBot() || FNullEnt(pl->edict()) || pl->has_disconnected)
+				continue;
+			humans++;
+			if (pl->IsAlive())
+				alive++;
+		}
+		if (humans == 0)
+			budget = 4.0;
+		else if (alive == 0 || (CSGameRules() && CSGameRules()->IsFreezePeriod()))
+			budget = 2.0;
+	}
 	auto out = [&]() {
 		if (++sinceCheck < 4)
 			return false;
 		sinceCheck = 0;
-		return LsNowMs() - start >= LSV_BUDGET_MS;
+		return LsNowMs() - start >= budget;
 	};
 	while (s_know.stage != STAGE_DONE)
 	{
