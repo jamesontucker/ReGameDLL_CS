@@ -1760,7 +1760,8 @@ float CCSBot::LsChaseExtra()
 
 // Testing (bot_ls_trace): twice a second, what each bot is doing and why, so a recording
 // of where the bots went can be explained (time,id,team,state,task,enemy,leader,goal x,y,
-// noise x,y,why,seconds since why)
+// noise x,y,why,seconds since why, then speed, view off its heading, attacking, what it's
+// looking at)
 void CCSBot::LsTrace()
 {
 	if (cv_bot_ls_trace.value <= 0.0f || !IsAlive() || gpGlobals->time < m_lsTraceAt)
@@ -1787,11 +1788,15 @@ void CCSBot::LsTrace()
 	CBasePlayer *pLeader = IsFollowing() ? GetFollowLeader() : nullptr;
 	Vector goal = HasPath() ? GetPathEndpoint() : Vector(0, 0, 0);
 	const Vector *noise = IsNoiseHeard() ? &m_noisePosition : nullptr;
-	fprintf(s_file, "%.2f,%d,%d,%s,%d,%d,%d,%.0f,%.0f,%.0f,%.0f,%s,%.1f\n",
+	float speed = float(pev->velocity.Length2D());
+	float off = speed > 1.0f ? NormalizeAngle(pev->v_angle.y - UTIL_VecToYaw(pev->velocity)) : 0.0f;
+	const char *look = (m_lookAtSpotState != NOT_LOOKING_AT_SPOT && m_lookAtDesc) ? m_lookAtDesc : "-";
+	fprintf(s_file, "%.2f,%d,%d,%s,%d,%d,%d,%.0f,%.0f,%.0f,%.0f,%s,%.1f,%.0f,%.0f,%d,%s\n",
 		gpGlobals->time, entindex(), m_iTeam, m_state ? m_state->GetName() : "-", int(GetTask()),
 		pEnemy ? pEnemy->entindex() : 0, pLeader ? pLeader->entindex() : 0,
 		goal.x, goal.y, noise ? noise->x : 0.0f, noise ? noise->y : 0.0f,
-		m_lsWhy, m_lsWhy[0] ? gpGlobals->time - m_lsWhyAt : 0.0f);
+		m_lsWhy, m_lsWhy[0] ? gpGlobals->time - m_lsWhyAt : 0.0f,
+		speed, off, IsAttacking() ? 1 : 0, look);
 	fflush(s_file);
 }
 

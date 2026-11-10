@@ -225,9 +225,12 @@ void CCSBot::UpdateLookAngles()
 		// another, about as often as the person in the playtest (10% of running time past
 		// 100 degrees). A deliberate look back, or a real threat, still turns it all the way)
 		float speed = float(pev->velocity.Length2D());
+		// (its own "checking" looks, a spot behind it among them, are kept in too: on the run
+		// they're a glance; it stops for a long one)
 		bool lookBack = m_lookAtDesc && Q_strcmp(m_lookAtDesc, "Loner-Strike: looking back") == 0;
+		bool checking = m_lookAtDesc && Q_strcmp(m_lookAtDesc, "Loner-Strike: checking") == 0;
 		if (speed > 150.0f && !IsAttacking() && !IsEnemyVisible() && !lookBack
-			&& !(m_lookAtSpotState != NOT_LOOKING_AT_SPOT && m_lookAtSpotPriority >= PRIORITY_HIGH))
+			&& !(m_lookAtSpotState != NOT_LOOKING_AT_SPOT && m_lookAtSpotPriority >= PRIORITY_HIGH && !checking))
 		{
 			float heading = UTIL_VecToYaw(pev->velocity);
 			float off = NormalizeAngle(useYaw - heading);
