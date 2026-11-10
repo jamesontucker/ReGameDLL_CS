@@ -219,6 +219,21 @@ void CCSBot::UpdateLookAngles()
 	// little off and corrected; still in between. Ladders keep the stock spring
 	if (LsFight() && !IsUsingLadder())
 	{
+		// (on the move and not fighting, the view stays within 90 degrees of where it's
+		// going: people check as they go, they don't run backwards at a site. A quick
+		// deliberate look back, or a real threat, still turns it all the way)
+		float speed = float(pev->velocity.Length2D());
+		bool lookBack = m_lookAtDesc && Q_strcmp(m_lookAtDesc, "Loner-Strike: looking back") == 0;
+		if (speed > 150.0f && !IsAttacking() && !IsEnemyVisible() && !lookBack
+			&& !(m_lookAtSpotState != NOT_LOOKING_AT_SPOT && m_lookAtSpotPriority >= PRIORITY_HIGH))
+		{
+			float heading = UTIL_VecToYaw(pev->velocity);
+			float off = NormalizeAngle(useYaw - heading);
+			if (off > 90.0f)
+				useYaw = heading + 90.0f;
+			else if (off < -90.0f)
+				useYaw = heading - 90.0f;
+		}
 		LsHandUpdate(useYaw, usePitch, deltaT);
 		return;
 	}
@@ -562,17 +577,40 @@ void CCSBot::UpdateLookAround(bool updateNow)
 		}
 
 		int which = RANDOM_LONG(0, m_approachPointCount - 1);
-		// (Loner-Strike: mostly the nearer of two ways in to where it's looking, a small move;
-		// now and then any, a bigger check)
-		if (LsFight() && m_approachPointCount > 1 && RANDOM_FLOAT(0.0f, 1.0f) < 0.75f)
+		// (Loner-Strike: only ways in it can actually see from here, not a wall in its face or
+		// one round a corner it can't see past (people don't stare at a wall); mostly the one
+		// nearest to where it's looking, a small move, now and then a bigger check. None in
+		// view: the stock pick)
+		if (LsFight())
 		{
-			int other = RANDOM_LONG(0, m_approachPointCount - 1);
-			auto turn = [this](int i) {
-				Vector to = m_approachPoint[i] - pev->origin;
-				return Q_abs(NormalizeAngle(UTIL_VecToYaw(to) - pev->v_angle.y));
-			};
-			if (turn(other) < turn(which))
-				which = other;
+			int seen[MAX_APPROACH_POINTS];
+			int count = 0;
+			Vector eye = GetEyePosition();
+			for (int i = 0; i < m_approachPointCount; i++)
+			{
+				Vector spot = m_approachPoint[i] + Vector(0, 0, HalfHumanHeight);
+				float dist = float((spot - eye).Length());
+				if (dist < 150.0f)
+					continue;
+				TraceResult tr;
+				UTIL_TraceLine(eye, spot, ignore_monsters, ENT(pev), &tr);
+				if (tr.flFraction >= 0.95f)
+					seen[count++] = i;
+			}
+			if (count > 0)
+			{
+				auto turn = [this](int i) {
+					Vector to = m_approachPoint[i] - pev->origin;
+					return Q_abs(NormalizeAngle(UTIL_VecToYaw(to) - pev->v_angle.y));
+				};
+				which = seen[RANDOM_LONG(0, count - 1)];
+				if (count > 1 && RANDOM_FLOAT(0.0f, 1.0f) < 0.75f)
+				{
+					int other = seen[RANDOM_LONG(0, count - 1)];
+					if (turn(other) < turn(which))
+						which = other;
+				}
+			}
 		}
 		Vector spot = m_approachPoint[which];
 
