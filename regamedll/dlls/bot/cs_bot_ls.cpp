@@ -42,8 +42,12 @@
 
 #include "precompiled.h"
 #include <vector>
-#include <chrono>
 #include <cstdio>
+#ifdef _WIN32
+#include <chrono>
+#else
+#include <sys/time.h>
+#endif
 
 cvar_t cv_bot_ls_own_memory = { "bot_ls_own_memory", "1", FCVAR_SERVER, 0.0f, nullptr };
 cvar_t cv_bot_ls_routes     = { "bot_ls_routes", "1.0", FCVAR_SERVER, 0.0f, nullptr };
@@ -2396,6 +2400,19 @@ void CCSBot::LsCheckBeforeDefuse()
 
 namespace
 {
+// A clock in milliseconds for the frame budget (on Linux gettimeofday: std::chrono's clock
+// needs a newer libstdc++ than the servers this is built for have)
+double LsNowMs()
+{
+#ifdef _WIN32
+	return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now().time_since_epoch()).count();
+#else
+	timeval tv;
+	gettimeofday(&tv, nullptr);
+	return tv.tv_sec * 1000.0 + tv.tv_usec / 1000.0;
+#endif
+}
+
 const unsigned int LSV_MAGIC = 0x3156534C;	// "LSV1"
 const float LSV_RANGE = 3500.0f;			// farther than this counts as not in sight
 const double LSV_BUDGET_MS = 0.3;			// per frame
@@ -2601,7 +2618,7 @@ void LsSightStep()
 	if (s_sight.ready || s_sight.count < 2)
 		return;
 
-	auto start = std::chrono::steady_clock::now();
+	double start = LsNowMs();
 	size_t n = s_sight.count;
 	int sinceCheck = 0;
 	while (s_sight.i + 1 < n)
@@ -2616,7 +2633,7 @@ void LsSightStep()
 		if (++sinceCheck >= 8)
 		{
 			sinceCheck = 0;
-			double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+			double ms = LsNowMs() - start;
 			if (ms >= LSV_BUDGET_MS)
 			{
 				s_sight.spentMs += ms;
@@ -2624,7 +2641,7 @@ void LsSightStep()
 			}
 		}
 	}
-	s_sight.spentMs += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+	s_sight.spentMs += LsNowMs() - start;
 	// (each area sees itself)
 	for (size_t k = 0; k < n; k++)
 		s_sight.bits[(k * n + k) >> 3] |= (unsigned char)(1 << ((k * n + k) & 7));
