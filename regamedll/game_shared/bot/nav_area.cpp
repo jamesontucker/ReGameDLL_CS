@@ -3204,7 +3204,8 @@ public:
 			}
 
 			// if a Player is using this hiding spot, don't consider it
-			if (IsSpotOccupied(m_me, spot->GetPosition()))
+			// (Loner-Strike: nor one right by where a teammate is or is going to hide)
+			if (IsSpotOccupied(m_me, spot->GetPosition()) || LsSpotCrowded(m_me, spot->GetPosition()))
 			{
 				// player is in hiding spot
 				// TODO: Check if player is moving or sitting still

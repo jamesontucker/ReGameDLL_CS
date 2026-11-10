@@ -70,6 +70,32 @@ bool LsMatch()
 	return cv_bot_ls_match.value > 0.0f;
 }
 
+// Loner-Strike (bot_ls_fight): no camping on top of each other. A hiding spot is taken when a
+// living teammate is close to it, or a teammate bot is hiding at or on its way to a spot close
+// to it: people spread out to hold a place, they don't stand shoulder to shoulder
+bool LsSpotCrowded(CBaseEntity *me, const Vector *pos)
+{
+	if (!LsFight() || !me || !me->IsPlayer())
+		return false;
+	const float apart = 220.0f;
+	int team = static_cast<CBasePlayer *>(me)->m_iTeam;
+	for (int i = 1; i <= gpGlobals->maxClients; i++)
+	{
+		CBasePlayer *mate = UTIL_PlayerByIndex(i);
+		if (!mate || mate == me || !mate->IsAlive() || mate->m_iTeam != team)
+			continue;
+		if ((mate->pev->origin - *pos).IsLengthLessThan(apart))
+			return true;
+		if (mate->IsBot())
+		{
+			const Vector *goal = static_cast<CCSBot *>(mate)->LsHideGoal();
+			if (goal && (*goal - *pos).IsLengthLessThan(apart))
+				return true;
+		}
+	}
+	return false;
+}
+
 bool LsFight()
 {
 	return cv_bot_ls_fight.value > 0.0f;

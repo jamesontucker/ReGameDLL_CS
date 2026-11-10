@@ -348,6 +348,7 @@ public:
 	void Hide(const Vector *hidingSpot, float duration = -1.0f, bool holdPosition = false);			// move to the given hiding place
 	bool IsHiding() const;																			// returns true if bot is currently hiding
 	bool IsAtHidingSpot() const;																	// return true if we are hiding and at our hiding spot
+	const Vector *LsHideGoal() const { return IsHiding() ? &m_hideState.GetHidingSpot() : nullptr; }	// Loner-Strike: where it is hiding, or going to
 	bool TryToRetreat();																			// retreat to a nearby hiding spot, away from enemies
 
 	void Hunt();
@@ -1480,6 +1481,7 @@ extern cvar_t cv_bot_ls_match;
 extern cvar_t cv_bot_ls_trace;
 extern const char LS_PEEK[];					// the look-at of a corner peek
 bool LsFight();
+bool LsSpotCrowded(CBaseEntity *me, const Vector *pos);	// a teammate at or heading to somewhere right by it
 bool LsMatch();
 bool LsSolo();
 bool LsOwnMemory();

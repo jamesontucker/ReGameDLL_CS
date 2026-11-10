@@ -324,7 +324,7 @@ public:
 				continue;
 			if (m_range > 0.0f && (*spot->GetPosition() - *m_origin).IsLengthGreaterThan(m_range))
 				continue;
-			if (IsSpotOccupied(m_me, spot->GetPosition()))
+			if (IsSpotOccupied(m_me, spot->GetPosition()) || LsSpotCrowded(m_me, spot->GetPosition()))
 				continue;
 			m_spot[m_count++] = spot->GetPosition();
 		}
