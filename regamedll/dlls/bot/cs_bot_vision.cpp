@@ -240,7 +240,30 @@ void CCSBot::UpdateLookAngles()
 			float heading = UTIL_VecToYaw(pev->velocity);
 			float off = NormalizeAngle(useYaw - heading);
 			float now = gpGlobals->time;
-			if (Q_abs(off) <= 90.0f)
+			// a noise further off, away from its way: "huh?", a look straight at it for a
+			// third to two thirds of a second, then back to where it's going and the noise let
+			// go (once a noise: the same one heard again doesn't turn it again)
+			bool huh = false;
+			if (farNoise && Q_abs(off) > 90.0f)
+			{
+				if (m_lsHuhUntil <= 0.0f && m_lsHuhNoise != m_noiseTimestamp)
+				{
+					m_lsHuhUntil = now + RANDOM_FLOAT(0.35f, 0.7f);
+					m_lsHuhNoise = m_noiseTimestamp;
+				}
+				if (m_lsHuhUntil > 0.0f && now < m_lsHuhUntil)
+					huh = true;
+				else
+				{
+					m_lsHuhUntil = 0.0f;
+					ClearLookAt();
+				}
+			}
+			else if (!farNoise)
+				m_lsHuhUntil = 0.0f;
+			if (huh)
+				m_lsBehindSince = 0.0f;
+			else if (Q_abs(off) <= 90.0f)
 				m_lsBehindSince = 0.0f;
 			else
 			{

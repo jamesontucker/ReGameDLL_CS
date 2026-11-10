@@ -1231,6 +1231,8 @@ private:
 	float m_lsBombCallAt = 0.0f;
 	int m_lsLastApproach = -1;						// the opening it watched last while holding (not again straight away)
 	float m_lsBehindSince = 0.0f;					// when the view went over its shoulder while running (0: it isn't)
+	float m_lsHuhUntil = 0.0f;						// a "huh?" look at a noise off its way, until then (0: none)
+	float m_lsHuhNoise = -1.0f;						// the noise (its timestamp) it last looked at like that
 	float m_lsBehindNext = 0.0f;					// the next over-the-shoulder glance allowed					// next look for a teammate's "bomb's at A" (after a plant)
 	bool m_lsWasBlind = false;
 	float m_lsOverwhelmedAt = -10.0f;				// several enemies facing it at once, then
