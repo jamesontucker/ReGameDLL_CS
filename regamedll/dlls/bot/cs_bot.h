@@ -856,11 +856,11 @@ private:
 	unsigned char m_approachPointCount;
 	Vector m_approachPointViewPosition;			// the position used when computing current approachPoint set
 
-	bool BendLineOfSight(const Vector *eye, const Vector *point, Vector *bend) const;
+	bool BendLineOfSight(const Vector *eye, const Vector *point, Vector *bend) const;	// "bend" our line of sight until we can see the target point. Return bend point, false if cant bend.
 	bool LsCornerAhead(Vector *out);		// Loner-Strike: an edge ahead someone could be just past
-	Vector m_lsCorner;					// the last corner it checked, and when
-	float m_lsCornerAt = 0.0f;
-	float m_lsCornerCheckAt = 0.0f;	// "bend" our line of sight until we can see the target point. Return bend point, false if cant bend.
+	Vector m_lsGlanceCorner;				// the last corner it glanced at walking, and when
+	float m_lsGlanceCornerAt = 0.0f;
+	float m_lsCornerCheckAt = 0.0f;
 	bool FindApproachPointNearestPath(Vector *pos);										// find the approach point that is nearest to our current path, ahead of us
 
 	bool m_isWaitingToTossGrenade;				// lining up throw
@@ -1104,8 +1104,8 @@ public:
 	void LsBuyEco();								// a save round: a pistol at most
 	void LsBuyForce();								// a force buy: a cheaper gun
 	void LsBuyExtras();								// grenades and the defuse kit (instead of the stock picks)
-	void LsSaveCheck();
-	void LsPostPlantAware();								// alone against many late in a lost round: hide, keep the gun
+	void LsSaveCheck();								// alone against many late in a lost round: hide, keep the gun
+	void LsPostPlantAware();						// a CT hiding with the bomb down and time to retake: goes
 	bool LsSavingGun() const { return m_lsSaving; }
 	void LsCallBuy(int plan);						// a person's "eco" / "force" / "full buy": this buy, or the next
 	void LsAskThrow(const char *item, const Vector &at);	// a person's "flash for me", "smoke mid": that grenade, there
@@ -1385,8 +1385,8 @@ private:
 	Vector m_lsThrowAt;								//   where
 	int m_lsBuyPlan = 0;							// this round: 0 the usual buy, 1 save, 2 force
 	bool m_lsSaving = false;						// alone against many late on: keeping its gun
-	bool m_lsSaveDecided = false;
-	float m_lsPlantHideSince = 0.0f;				// hiding with the bomb down since (LsPostPlantAware)					// decided about that this round
+	bool m_lsSaveDecided = false;					// decided about that this round
+	float m_lsPlantHideSince = 0.0f;				// hiding with the bomb down since (LsPostPlantAware)
 	float m_lsSaveNext = 0.0f;
 	float m_lsClearSawAt = -10.0f;					// its enemy last seen with no smoke in the way
 	float m_lsSmokeLostAt = -10.0f;					// ...and lost (behind smoke or a wall) after that

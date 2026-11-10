@@ -974,7 +974,7 @@ bool CCSBot::LsCornerAhead(Vector *out)
 			Vector dir(BotCOS(yaw), BotSIN(yaw), 0.0f);
 			Vector at = eye + dir * (nearD + 24.0f);
 			at.z = eye.z;
-			if (now - m_lsCornerAt < 4.0f && (at - m_lsCorner).IsLengthLessThan(128.0f))
+			if (now - m_lsGlanceCornerAt < 4.0f && (at - m_lsGlanceCorner).IsLengthLessThan(128.0f))
 				continue;
 			// (a corner a teammate is at, or just came from, is covered)
 			bool covered = false;
@@ -1003,8 +1003,8 @@ bool CCSBot::LsCornerAhead(Vector *out)
 	}
 	if (bestScore < 0.0f)
 		return false;
-	m_lsCorner = best;
-	m_lsCornerAt = now;
+	m_lsGlanceCorner = best;
+	m_lsGlanceCornerAt = now;
 	*out = best;
 	return true;
 }

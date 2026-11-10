@@ -2170,7 +2170,18 @@ bool CCSBot::LsBangThrough(const Vector &target)
 	UTIL_TraceLine(target, eye, ignore_monsters, ENT(pev), &out);
 	if (out.fStartSolid || out.flFraction >= 1.0f)
 		return false;
-	if ((in.vecEndPos - out.vecEndPos).IsLengthGreaterThan(pWeapon->m_iId == WEAPON_AWP ? 40.0f : 22.0f))
+	// (how much a bullet still gets through usefully: the AWP and the Para most, the AK and the
+	// other rifles a crate's side or a door, the Deagle and the scout a thin one)
+	float thick;
+	switch (pWeapon->m_iId)
+	{
+	case WEAPON_AWP: thick = 64.0f; break;
+	case WEAPON_M249: case WEAPON_G3SG1: case WEAPON_SG550: thick = 48.0f; break;
+	case WEAPON_AK47: thick = 40.0f; break;
+	case WEAPON_DEAGLE: case WEAPON_SCOUT: thick = 26.0f; break;
+	default: thick = 34.0f; break;
+	}
+	if ((in.vecEndPos - out.vecEndPos).IsLengthGreaterThan(thick))
 		return false;
 	// nobody on this side of the wall in the way, nor one of ours just past it
 	UTIL_TraceLine(eye, in.vecEndPos, dont_ignore_monsters, ENT(pev), &mates);
@@ -2205,9 +2216,24 @@ bool CCSBot::LsWallbang(float notSeenEnemyTime)
 		return false;
 	m_lsBangRolledAt = GetLastSawEnemyTimestamp();
 	float skill = LsSkill();
-	if (LsTrait(32) > 0.2f + 0.4f * skill || RANDOM_FLOAT(0.0f, 1.0f) > 0.6f)
+	// (the habit: most of the strong ones have it, few new players; and how often they act on it)
+	if (LsTrait(32) > 0.15f + 0.75f * skill || RANDOM_FLOAT(0.0f, 1.0f) > 0.35f + 0.55f * skill)
 		return false;
-	return LsBangThrough(GetLastKnownEnemyPosition() + Vector(0, 0, 10.0f));
+	// where they'd be by now, not where they were: a good player leads the spray along the way
+	// they were going (a little, a newer player not at all)
+	Vector at = GetLastKnownEnemyPosition();
+	CBasePlayer *pEnemy = static_cast<CBasePlayer *>(GetEnemy());
+	if (pEnemy && pEnemy->IsAlive())
+	{
+		Vector lead = pEnemy->pev->origin - at;
+		lead.z = 0.0f;
+		float most = 90.0f * skill;
+		float len = float(lead.Length());
+		if (len > most && len > 0.0f)
+			lead = lead * (most / len);
+		at = at + lead;
+	}
+	return LsBangThrough(at + Vector(0, 0, 10.0f));
 }
 
 // Something heard from an enemy it can't see (bot_ls_fight): footsteps, a reload, gunfire.
@@ -2290,7 +2316,7 @@ void CCSBot::LsHeard(GameEventType event, CBasePlayer *pPlayer, float dist)
 	}
 
 	// the good ones spray a thin wall they know someone's behind
-	if (dist < 650.0f && skill > 0.65f && LsTrait(33) < skill - 0.35f && now - m_lsBangHeardAt > 6.0f && RANDOM_FLOAT(0.0f, 1.0f) < 0.35f)
+	if (dist < 750.0f && skill > 0.6f && LsTrait(33) < skill - 0.3f && now - m_lsBangHeardAt > 5.0f && RANDOM_FLOAT(0.0f, 1.0f) < 0.3f + 0.6f * (skill - 0.6f))
 	{
 		m_lsBangHeardAt = now;
 		if (LsBangThrough(heard + Vector(0, 0, 10.0f)))
