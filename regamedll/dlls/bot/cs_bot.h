@@ -855,7 +855,11 @@ private:
 	unsigned char m_approachPointCount;
 	Vector m_approachPointViewPosition;			// the position used when computing current approachPoint set
 
-	bool BendLineOfSight(const Vector *eye, const Vector *point, Vector *bend) const;	// "bend" our line of sight until we can see the target point. Return bend point, false if cant bend.
+	bool BendLineOfSight(const Vector *eye, const Vector *point, Vector *bend) const;
+	bool LsCornerAhead(Vector *out);		// Loner-Strike: an edge ahead someone could be just past
+	Vector m_lsCorner;					// the last corner it checked, and when
+	float m_lsCornerAt = 0.0f;
+	float m_lsCornerCheckAt = 0.0f;	// "bend" our line of sight until we can see the target point. Return bend point, false if cant bend.
 	bool FindApproachPointNearestPath(Vector *pos);										// find the approach point that is nearest to our current path, ahead of us
 
 	bool m_isWaitingToTossGrenade;				// lining up throw

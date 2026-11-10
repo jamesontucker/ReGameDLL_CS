@@ -828,9 +828,8 @@ void CCSBot::UpdateLookAround(bool updateNow)
 				if (spotOrder.t > t)
 					break;
 
-				// (Loner-Strike: only a spot someone could really be in that it can see from here,
-				// not right beside it, and roughly ahead or to the side of where it's going; a
-				// nook in the wall it's walking past, or one behind a wall, is nobody's check)
+				// (Loner-Strike: not a nook right beside it, nor one behind it: roughly ahead or to
+				// the side of where it's going; one it can't see is checked round its cover below)
 				if (LsFight())
 				{
 					Vector eye = GetEyePosition();
@@ -840,8 +839,6 @@ void CCSBot::UpdateLookAround(bool updateNow)
 						continue;
 					Vector ahead = m_spotEncounter->path.to - m_spotEncounter->path.from;
 					if (ahead.Length2D() > 1.0f && Q_abs(NormalizeAngle(UTIL_VecToYaw(to) - UTIL_VecToYaw(ahead))) > 110.0f)
-						continue;
-					if (LsClearTo(eye, pos, ENT(pev)) < 0.95f)
 						continue;
 				}
 
@@ -863,18 +860,150 @@ void CCSBot::UpdateLookAround(bool updateNow)
 				Vector pos = *checkSpot;
 				pos.z += HalfHumanHeight;
 
-				// glance at the spot for minimum time
-				SetLookAt("Encounter Spot", &pos, PRIORITY_LOW, 0, true, 10.0f);
+				// Loner-Strike: a spot behind cover (a box, a corner) is checked where it can be
+				// seen from: the edge of that cover, the way a person pies a corner, never the box
+				// face or the wall in between. None to see it round: it's left
+				bool look = true;
+				if (LsFight())
+				{
+					Vector eye = GetEyePosition();
+					if (LsClearTo(eye, pos, ENT(pev)) < 0.95f)
+					{
+						Vector bend;
+						look = BendLineOfSight(&eye, &pos, &bend) && (bend - eye).Length2D() > 96.0f;
+						if (look)
+						{
+							bend.z = Q_max(bend.z, pos.z);
+							pos = bend;
+						}
+					}
+				}
 
-				// Loner-Strike: or put a few bullets into it first (some, up close)
-				LsPrefire(pos);
+				if (look)
+				{
+					// glance at the spot for minimum time
+					SetLookAt("Encounter Spot", &pos, PRIORITY_LOW, 0, true, 10.0f);
+
+					// Loner-Strike: or put a few bullets into it first (some, up close)
+					LsPrefire(pos);
+				}
 
 				// immediately mark it as "checked", so we don't check it again
 				// if we get distracted before we check it - that's the way it goes
 				SetHidingSpotCheckTimestamp(dangerSpot[which]);
+				if (look)
+					return;
 			}
 		}
 	}
+
+	// Loner-Strike: and the corners it can feel out from the walls round it as it moves: where
+	// a near surface (a box, a doorway's side, a tunnel's bend) gives way to open space beyond,
+	// someone could be just past the edge. A flat wall has no edge and is never looked at
+	if (LsFight() && !IsNotMoving() && !IsSafe() && !IsLookingAtSpot(PRIORITY_LOW) && gpGlobals->time >= m_lsCornerCheckAt)
+	{
+		// how often: the careful and campers check more, rushers less, newer players less
+		float skill = LsSkill(), aggro = LsAggro();
+		int style = LsStyle();
+		float gap = RANDOM_FLOAT(0.8f, 1.5f) + 1.2f * (1.0f - skill);
+		if (style == LS_STYLE_CAREFUL || style == LS_STYLE_CAMPER || style == LS_STYLE_NINJA)
+			gap *= 0.7f;
+		else if (style == LS_STYLE_RUSHER || aggro > 0.75f)
+			gap *= 1.35f;
+		m_lsCornerCheckAt = gpGlobals->time + gap;
+		// (a newer player misses checks; a good one rarely does)
+		Vector corner;
+		if (RANDOM_FLOAT(0.0f, 1.0f) < 0.35f + 0.65f * skill && LsCornerAhead(&corner))
+		{
+			// a newer player's eyes land roughly on it (low, off to a side); a good one's crosshair
+			// sits on the edge at head height, and stays there while it walks past (slicing the pie)
+			float sloppy = 1.0f - skill;
+			corner.x += RANDOM_FLOAT(-50.0f, 50.0f) * sloppy;
+			corner.y += RANDOM_FLOAT(-50.0f, 50.0f) * sloppy;
+			corner.z = pev->origin.z + LsLookHeight();	// (chest for a newer player, head for a good one)
+			float hold = 0.25f + 0.7f * skill;
+			if (style == LS_STYLE_CAREFUL || style == LS_STYLE_NINJA)
+				hold *= 1.3f;
+			SetLookAt("Loner-Strike: corner", &corner, PRIORITY_LOW, hold, true, 10.0f);
+		}
+	}
+}
+
+// Loner-Strike: the nearest edge ahead (within about 100 degrees of where it's going) with
+// open space past it, at waist height (a crate) or eye height (a doorway); not one it checked
+// a moment ago. Where to look: just past the edge, at head height.
+bool CCSBot::LsCornerAhead(Vector *out)
+{
+	const int N = 27;                       // -104 .. +104 degrees, 8 apart
+	const float RANGE = 1200.0f;
+	float now = gpGlobals->time;
+	Vector eye = GetEyePosition();
+	float base = pev->velocity.Length2D() > 60.0f ? UTIL_VecToYaw(pev->velocity) : pev->v_angle.y;
+	float heights[2] = { pev->origin.z, eye.z };
+	int style = LsStyle();
+	bool rusher = style == LS_STYLE_RUSHER || LsAggro() > 0.8f;
+	bool longLines = style == LS_STYLE_CAMPER || style == LS_STYLE_AWPER;
+	bool recentEnemy = GetTimeSinceLastSawEnemy() < 15.0f;
+	Vector enemyAt = GetLastKnownEnemyPosition();
+	float bestScore = -1.0f;
+	Vector best;
+	for (int h = 0; h < 2; h++)
+	{
+		float d[N];
+		Vector from(eye.x, eye.y, heights[h]);
+		for (int i = 0; i < N; i++)
+		{
+			float yaw = base + 8.0f * float(i - N / 2);
+			Vector dir(BotCOS(yaw), BotSIN(yaw), 0.0f);
+			d[i] = RANGE * LsClearTo(from, from + dir * RANGE, ENT(pev));
+		}
+		for (int i = 0; i + 1 < N; i++)
+		{
+			float nearD = Q_min(d[i], d[i + 1]), farD = Q_max(d[i], d[i + 1]);
+			// (a real gap past the edge; not a wall at its shoulder, nor one far off)
+			if (farD - nearD < 220.0f || nearD < 140.0f || nearD > 1000.0f)
+				continue;
+			float turn = 8.0f * (float(i - N / 2) + 0.5f);
+			// (a rusher looks where it's going: edges well off to the side are left)
+			if (rusher && Q_abs(turn) > 55.0f)
+				continue;
+			float yaw = base + turn;
+			Vector dir(BotCOS(yaw), BotSIN(yaw), 0.0f);
+			Vector at = eye + dir * (nearD + 24.0f);
+			at.z = eye.z;
+			if (now - m_lsCornerAt < 4.0f && (at - m_lsCorner).IsLengthLessThan(128.0f))
+				continue;
+			// (a corner a teammate is at, or just came from, is covered)
+			bool covered = false;
+			for (int m = 1; m <= gpGlobals->maxClients && !covered; m++)
+			{
+				CBasePlayer *mate = UTIL_PlayerByIndex(m);
+				if (mate && mate != this && mate->IsAlive() && mate->m_iTeam == m_iTeam && (mate->pev->origin - at).IsLengthLessThan(250.0f))
+					covered = true;
+			}
+			if (covered)
+				continue;
+			// (the nearest first, those nearer straight ahead a little before; one near where an
+			// enemy was seen or heard lately well before the rest; a camper or awper favours the
+			// edges with a long way open past them)
+			float score = 1000.0f / nearD - 0.004f * Q_abs(turn);
+			if (recentEnemy && (at - enemyAt).IsLengthLessThan(700.0f))
+				score += 6.0f;
+			if (longLines)
+				score += farD / 600.0f;
+			if (score > bestScore)
+			{
+				bestScore = score;
+				best = at;
+			}
+		}
+	}
+	if (bestScore < 0.0f)
+		return false;
+	m_lsCorner = best;
+	m_lsCornerAt = now;
+	*out = best;
+	return true;
 }
 
 // "Bend" our line of sight around corners until we can "see" the point.
