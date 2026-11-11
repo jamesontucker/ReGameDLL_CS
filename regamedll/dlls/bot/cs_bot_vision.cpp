@@ -1343,7 +1343,7 @@ CBasePlayer *CCSBot::FindMostDangerousThreat()
 			unsigned char visParts;
 			if (!IsVisible(pPlayer, CHECK_FOV, &visParts))
 			{
-				// (Loner-Strike: only their gun sticking out past cover: now and then noticed)
+				// (Loner-Strike: only a bit of them showing past cover - the gun, a shoulder, a foot: now and then noticed)
 				if (LsFight())
 					LsBarrelCheck(pPlayer);
 				continue;

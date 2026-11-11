@@ -1354,7 +1354,7 @@ public:
 	bool LsSpaceOut();								// in a fight on top of a teammate: a step aside (true while stepping)
 	float LsReloadCoverChance();					// how likely it gets out of sight to reload
 	bool LsSaveFreeShot(CBasePlayer *pEnemy);		// saving its gun: a free shot at one who hasn't seen it
-	void LsBarrelCheck(CBasePlayer *pPlayer);		// only a gun sticking out in view: now and then noticed
+	void LsBarrelCheck(CBasePlayer *pPlayer);		// only a bit showing (gun, shoulder, knee, foot): now and then noticed
 	float LsCrouchFactor();
 	float LsPinnedDownTime();
 	void LsFightHabits(float range, bool crouchAndHold);	// crouch bursts, jump peeks

@@ -1994,11 +1994,12 @@ float CCSBot::LsReloadCoverChance()
 	return Q_min(0.97f, chance);
 }
 
-// Only a gun sticking out past cover in view (the body hidden): people notice it now and then -
-// the better and the watchful more, the newer ones mostly not, less when it's far off or out at
-// the edge of the view. Noticed, it knows someone's there: the eyes go to the edge they'd peek
-// from, and one with the wallbang habit and a gun that goes through may spray the cover where
-// they must be
+// Only a bit of someone showing past cover (the body points the vision checks all hidden): the
+// gun sticking out, a shoulder, a knee, a foot. People notice those now and then - the better and
+// the watchful more, the newer ones mostly not, a small bit less than a big one, less when it's
+// far off or out at the edge of the view. Noticed, it knows someone's there: the eyes go to it
+// (the edge they'd peek from), and one with the wallbang habit and a gun that goes through may
+// spray the cover where they must be. A few points a look (the gun and two others), not all
 void CCSBot::LsBarrelCheck(CBasePlayer *pPlayer)
 {
 	// (nor a bot a plugin is steering: a steered mode keeps its own view)
@@ -2012,51 +2013,84 @@ void CCSBot::LsBarrelCheck(CBasePlayer *pPlayer)
 	if (idx < 0 || idx >= MAX_CLIENTS || now < m_lsBarrelCheckAt[idx])
 		return;
 	m_lsBarrelCheckAt[idx] = now + 0.3f;
+
+	// the bits: (where, how easy to notice, what it's called)
+	struct Bit { Vector at; float size; const char *why; const char *look; };
+	Bit bits[3];
+	int n = 0;
 	CBasePlayerItem *pGun = pPlayer->m_pActiveItem;
-	if (!pGun)
-		return;
-	float len;
-	switch (WeaponIDToWeaponClass(pGun->m_iId))
+	float len = 0.0f;
+	switch (pGun ? WeaponIDToWeaponClass(pGun->m_iId) : WEAPONCLASS_NONE)
 	{
 	case WEAPONCLASS_PISTOL: len = 18.0f; break;
-	case WEAPONCLASS_SNIPERRIFLE: len = 40.0f; break;
-	case WEAPONCLASS_RIFLE: case WEAPONCLASS_MACHINEGUN: case WEAPONCLASS_SHOTGUN: len = 34.0f; break;
-	case WEAPONCLASS_SUBMACHINEGUN: len = 26.0f; break;
-	default: return;
+	// (no longer than the gun a player sees: a longer point would poke out through a thin door)
+	case WEAPONCLASS_SNIPERRIFLE: case WEAPONCLASS_RIFLE: case WEAPONCLASS_MACHINEGUN: case WEAPONCLASS_SHOTGUN: len = 28.0f; break;
+	case WEAPONCLASS_SUBMACHINEGUN: len = 24.0f; break;
+	default: break;
 	}
-	Vector fwd;
-	UTIL_MakeVectorsPrivate(pPlayer->pev->v_angle, fwd, nullptr, nullptr);
 	Vector theirEye = pPlayer->pev->origin + pPlayer->pev->view_ofs;
-	Vector tip = theirEye + fwd * len + Vector(0, 0, -6.0f);
+	if (len > 0.0f)
+	{
+		Vector fwd;
+		UTIL_MakeVectorsPrivate(pPlayer->pev->v_angle, fwd, nullptr, nullptr);
+		bits[n++] = { theirEye + fwd * len + Vector(0, 0, -6.0f), 1.0f, "a gun sticking out", "Loner-Strike: a gun sticking out" };
+	}
+	// (the body's edges as the model shows them, across its line of sight: shoulders, knees, feet
+	// - lower when crouched; inside the hull's edge, which is wider than the model)
+	Vector2D dir = (pPlayer->pev->origin - pev->origin).Make2D();
+	dir.NormalizeInPlace();
+	Vector side(-dir.y, dir.x, 0.0f);
+	bool ducked = (pPlayer->pev->flags & FL_DUCKING) != 0;
+	const Vector &o = pPlayer->pev->origin;
+	float shoulderZ = ducked ? 6.0f : 14.0f, kneeZ = ducked ? -6.0f : -16.0f, footZ = ducked ? -14.0f : -32.0f;
+	for (int k = 0; k < 2; k++)
+	{
+		int pick = RANDOM_LONG(0, 5);
+		float s = (pick & 1) ? 1.0f : -1.0f;
+		switch (pick / 2)
+		{
+		case 0: bits[n++] = { o + side * (11.0f * s) + Vector(0, 0, shoulderZ), 1.0f, "a shoulder showing", "Loner-Strike: a shoulder showing" }; break;
+		case 1: bits[n++] = { o + side * (7.0f * s) + Vector(0, 0, kneeZ), 0.6f, "a knee showing", "Loner-Strike: a knee showing" }; break;
+		default: bits[n++] = { o + side * (7.0f * s) + Vector(0, 0, footZ), 0.4f, "a foot showing", "Loner-Strike: a foot showing" }; break;
+		}
+	}
+
 	Vector eye = pev->origin + pev->view_ofs;
-	float dist = float((tip - eye).Length());
-	if (dist > 2500.0f || !IsVisible(&tip, CHECK_FOV))
-		return;
-	// (how far from where it's looking)
 	Vector look;
 	UTIL_MakeVectorsPrivate(pev->v_angle, look, nullptr, nullptr);
-	float cosA = float(DotProduct((tip - eye) * (1.0f / Q_max(1.0f, dist)), look));
 	float skill = LsSkill();
-	float p = 0.02f + 0.3f * skill * skill;
-	p *= cosA > 0.978f ? 1.0f : cosA > 0.866f ? 0.45f : 0.15f;		// within 12 deg, 30 deg, the rest
-	p *= Q_max(0.25f, 1.0f - Q_max(0.0f, dist - 600.0f) / 2000.0f);
 	int style = LsStyle();
-	if (style == LS_STYLE_CAREFUL || style == LS_STYLE_CAMPER || style == LS_STYLE_AWPER)
-		p *= 1.3f;
-	else if (style == LS_STYLE_RUSHER || style == LS_STYLE_KNIFER)
-		p *= 0.75f;
-	if (RANDOM_FLOAT(0.0f, 1.0f) >= p)
+	float lean = (style == LS_STYLE_CAREFUL || style == LS_STYLE_CAMPER || style == LS_STYLE_AWPER) ? 1.3f
+		: (style == LS_STYLE_RUSHER || style == LS_STYLE_KNIFER) ? 0.75f : 1.0f;
+	for (int k = 0; k < n; k++)
+	{
+		const Bit &bit = bits[k];
+		float dist = float((bit.at - eye).Length());
+		if (dist > 2500.0f || !IsVisible(&bit.at, CHECK_FOV))
+			continue;
+		// (how far from where it's looking)
+		float cosA = float(DotProduct((bit.at - eye) * (1.0f / Q_max(1.0f, dist)), look));
+		float p = (0.02f + 0.3f * skill * skill) * bit.size * lean;
+		p *= cosA > 0.978f ? 1.0f : cosA > 0.866f ? 0.45f : 0.15f;		// within 12 deg, 30 deg, the rest
+		p *= Q_max(0.25f, 1.0f - Q_max(0.0f, dist - 600.0f) / 2000.0f);
+		if (RANDOM_FLOAT(0.0f, 1.0f) >= p)
+			continue;
+		// noticed: not again for this one for a moment
+		m_lsBarrelCheckAt[idx] = now + RANDOM_FLOAT(3.0f, 5.0f);
+		// (the eyes on that spot at head-ish height, where they'd come out: not on a foot on the floor)
+		Vector at(bit.at.x, bit.at.y, Q_max(bit.at.z, o.z + shoulderZ));
+		SetLookAt(bit.look, &at, PRIORITY_HIGH, RANDOM_FLOAT(1.5f, 3.0f));
+		LsWhy(bit.why);
+		// (where they must be: a guess from what showed - closer for the better ones, and from a
+		// gun or a shoulder than from a foot)
+		float err = (8.0f + 24.0f * (1.0f - skill)) / Q_max(0.5f, bit.size);
+		Vector body = (k == 0 && len > 0.0f ? theirEye : o + Vector(0, 0, ducked ? 4.0f : 10.0f))
+			+ Vector(RANDOM_FLOAT(-err, err), RANDOM_FLOAT(-err, err), RANDOM_FLOAT(-6.0f, 6.0f));
+		if (LsFree() && LsTrait(32) <= 0.175f + 0.575f * skill
+			&& RANDOM_FLOAT(0.0f, 1.0f) < (0.2f + 0.35f * skill) * (0.7f + 0.6f * LsAggro()))
+			LsBangThrough(body);
 		return;
-	// noticed: not again for this one for a moment
-	m_lsBarrelCheckAt[idx] = now + RANDOM_FLOAT(3.0f, 5.0f);
-	SetLookAt("Loner-Strike: a gun sticking out", &tip, PRIORITY_HIGH, RANDOM_FLOAT(1.5f, 3.0f));
-	LsWhy("a gun sticking out");
-	// (where they must be: just behind the barrel, a guess - closer for the better ones)
-	float err = 8.0f + 24.0f * (1.0f - skill);
-	Vector body = theirEye + Vector(RANDOM_FLOAT(-err, err), RANDOM_FLOAT(-err, err), RANDOM_FLOAT(-6.0f, 6.0f));
-	if (LsFree() && LsTrait(32) <= 0.175f + 0.575f * skill
-		&& RANDOM_FLOAT(0.0f, 1.0f) < (0.2f + 0.35f * skill) * (0.7f + 0.6f * LsAggro()))
-		LsBangThrough(body);
+	}
 }
 
 // How likely this bot crouches to hold in a fight (most never do, a few always try)
