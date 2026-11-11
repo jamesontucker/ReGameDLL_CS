@@ -5130,6 +5130,33 @@ void CCSBot::LsDoorButton()
 		LsWhy("out of the door's way");
 		return;
 	}
+	// an open swinging door it's walking into (a leaf standing open across the way): a step back
+	// and to the side, round its edge - a few goes, then another way round
+	if (rotating && pDoor->m_toggle_state == TS_AT_TOP)
+	{
+		if (now - m_lsDoorSideAt > 4.0f)
+			m_lsDoorSideTries = 0;
+		m_lsDoorSideAt = now;
+		if (++m_lsDoorSideTries > 3)
+		{
+			m_lsDoorSideTries = 0;
+			giveUp();
+			LsWhy("door in the way: another way");
+			return;
+		}
+		// (across the way it's going, away from the leaf's middle; as strafe keys, by its view)
+		Vector toDoor = BrushCenter(pHit) - pev->origin;
+		Vector2D side(-ahead.y, ahead.x);
+		if (side.x * toDoor.x + side.y * toDoor.y > 0.0f)
+			side = side * -1.0f;
+		float yaw = pev->v_angle.y;
+		float viewLeft = side.x * -BotSIN(yaw) + side.y * BotCOS(yaw);
+		m_lsDoorSide = viewLeft > 0.0f ? -1 : 1;
+		m_lsDoorBackUntil = now + 0.3f;
+		m_lsDoorSideUntil = now + 0.7f;
+		LsWhy("round the open door");
+		return;
+	}
 	if (pDoor->m_toggle_state != TS_AT_BOTTOM)
 		return;
 	Vector doorAt = BrushCenter(pHit);

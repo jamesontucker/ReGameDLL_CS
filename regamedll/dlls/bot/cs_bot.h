@@ -881,6 +881,10 @@ private:
 	float m_lsBreakStartAt = 0.0f;			// starts breaking it then (a newer player takes a moment)
 	int m_lsSafeMap = 0;				// the map its safe time was set for
 	float m_lsDoorBackUntil = 0.0f;		// stepping back out of a door's swing
+	float m_lsDoorSideUntil = 0.0f;		// stepping round the edge of an open door leaf
+	int m_lsDoorSide = 0;				// +1 right, -1 left
+	float m_lsDoorSideAt = -10.0f;
+	int m_lsDoorSideTries = 0;
 	EntityHandle<CBaseEntity> m_lsDoor;	// the door it pressed for, and when to see whether it opened
 	float m_lsDoorCheckAt = 0.0f;
 	void LsForceBadArea(const CNavArea *area, float secs);	// Loner-Strike: avoid an area for a while (a door it can't open)

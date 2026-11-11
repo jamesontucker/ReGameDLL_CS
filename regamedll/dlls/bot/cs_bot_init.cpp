@@ -282,6 +282,8 @@ void CCSBot::ResetValues()
 	m_lsBreak = nullptr;
 	m_lsBreakUntil = 0.0f;
 	m_lsDoorBackUntil = 0.0f;
+	m_lsDoorSideUntil = 0.0f;
+	m_lsDoorSideTries = 0;
 	m_lsDoor = nullptr;
 	m_lsDoorCheckAt = 0.0f;
 	for (int r = 0; r < 8; r++)

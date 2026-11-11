@@ -976,6 +976,14 @@ void CCSBot::Update()
 	// Loner-Strike: stepping back out of a door's swing (after the path code, which would walk on)
 	if (LsFight() && gpGlobals->time < m_lsDoorBackUntil)
 		MoveBackward();
+	// (and round the edge of an open door leaf in the way)
+	if (LsFight() && gpGlobals->time < m_lsDoorSideUntil)
+	{
+		if (m_lsDoorSide > 0)
+			StrafeRight();
+		else
+			StrafeLeft();
+	}
 	}
 
 	// Loner-Strike: whatever a plugin asked of it for a moment (ls_bot)
