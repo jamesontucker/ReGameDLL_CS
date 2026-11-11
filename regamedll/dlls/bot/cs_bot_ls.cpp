@@ -4385,6 +4385,28 @@ float CCSBot::LsFallMargin()
 bool CCSBot::LsMatchup(CBasePlayer *pEnemy)
 {
 	float now = gpGlobals->time;
+	// hit with low cover in front: down behind it a moment, then back up to shoot (the better
+	// ones; on aim maps it's how the whole fight goes: from the box, not out in the open)
+	if (m_lsDuckUntil > 0.0f && now >= m_lsDuckUntil)
+	{
+		m_lsDuckUntil = 0.0f;
+		StandUp();
+	}
+	else if (m_lsDuckUntil > 0.0f)
+		Crouch();
+	else if (GetTimeSinceAttacked() < 0.3f && now - m_lsDuckAt > 2.0f && !IsReloading() && pEnemy->IsAlive())
+	{
+		m_lsDuckAt = now;
+		int kind = LsMapKind();
+		bool aim = kind == LSMAP_AIM || kind == LSMAP_FY || kind == LSMAP_AWP;
+		float odds = aim ? 0.3f + 0.5f * LsSkill() : 0.4f * LsSkill();
+		if (LsSkill() > 0.35f && RANDOM_FLOAT(0.0f, 1.0f) < odds && LsLowCoverToward(pEnemy->pev->origin))
+		{
+			m_lsDuckUntil = now + RANDOM_FLOAT(0.5f, 1.0f);
+			Crouch();
+			LsWhy("down behind cover");
+		}
+	}
 	if (now < m_lsMatchupAt || !IsEnemyVisible() || !pEnemy->IsAlive())
 		return false;
 	m_lsMatchupAt = now + 0.5f;

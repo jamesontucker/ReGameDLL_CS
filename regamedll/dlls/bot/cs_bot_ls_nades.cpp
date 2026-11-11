@@ -441,6 +441,15 @@ void CCSBot::LsNadeStart(int id, const Vector &aim, float pause)
 	m_lsNadeFrom = pev->origin;
 	m_lsNadeAng = UTIL_VecToAngles(aim - GetEyePosition());
 	m_lsNadeAng.x = -m_lsNadeAng.x;
+	// (how well it throws: the better players and the ones who like grenades land them where
+	// they meant; a bad thrower's is off by up to a dozen degrees - short, long, wide, now and
+	// then into a teammate's face)
+	{
+		float bad = (1.0f - LsSkill()) * (1.2f - LsTrait(42));
+		bad = bad * bad * (LsMatch() ? 0.5f : 1.0f);
+		m_lsNadeAng.y += RANDOM_FLOAT(-12.0f, 12.0f) * bad;
+		m_lsNadeAng.x += RANDOM_FLOAT(-8.0f, 8.0f) * bad;
+	}
 	m_lsNadePhase = 1;
 	m_lsNadePhaseAt = gpGlobals->time;
 	m_lsNadeNextAt = gpGlobals->time + pause;
