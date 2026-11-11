@@ -418,7 +418,14 @@ bool CCSBot::IsVisible(CBasePlayer *pPlayer, bool testFOV, unsigned char *visPar
 		testVisParts |= CHEST;
 
 	// check top of head
-	spot = spot + Vector(0, 0, 25.0f);
+	// (Loner-Strike: the eyes, standing or crouched: where a peeking player shows first, and
+	// whatever can see back at it. The stock point, 25 up, sat in the air over a crouched
+	// player's head - seen over the box they were hiding behind - and missed a face showing
+	// through a gap or over cover with the top of the head hidden)
+	if (LsFight())
+		spot = pPlayer->pev->origin + pPlayer->pev->view_ofs;
+	else
+		spot = spot + Vector(0, 0, 25.0f);
 
 	if (IsVisible(&spot, testFOV))
 		testVisParts |= HEAD;
