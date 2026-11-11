@@ -204,6 +204,10 @@ void AttackState::OnUpdate(CCSBot *me)
 	if (!m_haveSeenEnemy)
 		m_haveSeenEnemy = me->IsEnemyVisible();
 
+	// Loner-Strike: the wrong gun for this range, a flashed enemy to push, low cover to reload behind
+	if (LsFight() && me->LsMatchup(pEnemy))
+		return;
+
 	// Retreat check
 	// Do not retreat if the enemy is too close
 	if (m_retreatTimer.IsElapsed())

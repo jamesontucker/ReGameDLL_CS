@@ -1576,7 +1576,17 @@ bool CCSBot::LsMayBackOff(const Vector &toEnemy)
 	// ground behind (a drop would be a fall)
 	Vector behind = from + back * 96.0f;
 	UTIL_TraceLine(behind, behind - Vector(0, 0, 80.0f), ignore_monsters, ENT(pev), &tr);
-	return tr.flFraction < 1.0f;
+	if (tr.flFraction < 1.0f)
+		return true;
+	// (a newer player in a fight, now and then, backs off an edge it didn't see: rare, a few
+	// times a long session at most)
+	if (LsSkill() < 0.3f && !LsMatch() && LsTrait(74) < 0.35f && gpGlobals->time - m_lsEdgeSlipAt > 600.0f && RANDOM_FLOAT(0.0f, 1.0f) < 0.05f)
+	{
+		m_lsEdgeSlipAt = gpGlobals->time;
+		LsWhy("backed off an edge");
+		return true;
+	}
+	return false;
 }
 
 // Holds fire while moving fast with a rifle at range, to stop and then shoot: what good
@@ -4242,9 +4252,9 @@ void CCSBot::LsHeardBreak(CBaseEntity *pBreak)
 
 // The nearest spot (within 500 units, at least minMove away, not toward the threat) a
 // standing head there is out of the threat's sight: it runs there
-bool CCSBot::LsTakeCoverFrom(const Vector &threat, float minMove)
+bool CCSBot::LsTakeCoverFrom(const Vector &threat, float minMove, bool fromFight)
 {
-	if (!m_lastKnownArea || IsUsingLadder() || IsAttacking())
+	if (!m_lastKnownArea || IsUsingLadder() || (IsAttacking() && !fromFight))
 		return false;
 	Vector from = threat + Vector(0, 0, 17.0f);
 	float threatD = float((pev->origin - threat).Length());
@@ -4287,9 +4297,139 @@ bool CCSBot::LsTakeCoverFrom(const Vector &threat, float minMove)
 	if (!best)
 		return false;
 	Vector spot = *best->GetCenter();
+	if (fromFight)
+	{
+		StopAttacking();
+		IgnoreEnemies(LsTeamGame() ? 1.5f : 0.8f);
+	}
+	StandUp();
 	Run();
-	MoveTo(&spot, FASTEST_ROUTE);
+	// (a short hold there, then on: back out by another way, the spot it left avoided)
+	Hide(&spot, RANDOM_FLOAT(1.5f, 4.0f));
+	LsFallBack();
 	LsWhy("to cover");
+	return true;
+}
+
+// What kind of gun someone has out
+enum { LSG_NONE, LSG_PISTOL, LSG_DEAGLE, LSG_SMG, LSG_SHOTGUN, LSG_RIFLE, LSG_SNIPER, LSG_MG };
+static int LsGunClass(CBasePlayer *pPlayer)
+{
+	CBasePlayerWeapon *pGun = static_cast<CBasePlayerWeapon *>(pPlayer->m_pActiveItem);
+	if (!pGun)
+		return LSG_NONE;
+	switch (pGun->m_iId)
+	{
+	case WEAPON_GLOCK18: case WEAPON_USP: case WEAPON_P228: case WEAPON_FIVESEVEN: case WEAPON_ELITE: return LSG_PISTOL;
+	case WEAPON_DEAGLE: return LSG_DEAGLE;
+	case WEAPON_MAC10: case WEAPON_TMP: case WEAPON_MP5N: case WEAPON_UMP45: case WEAPON_P90: return LSG_SMG;
+	case WEAPON_M3: case WEAPON_XM1014: return LSG_SHOTGUN;
+	case WEAPON_AK47: case WEAPON_M4A1: case WEAPON_GALIL: case WEAPON_FAMAS: case WEAPON_SG552: case WEAPON_AUG: return LSG_RIFLE;
+	case WEAPON_AWP: case WEAPON_SCOUT: case WEAPON_G3SG1: case WEAPON_SG550: return LSG_SNIPER;
+	case WEAPON_M249: return LSG_MG;
+	}
+	return LSG_NONE;
+}
+
+// Low cover right by where it stands, toward a spot (map knowledge: something solid within
+// 64 units that way at a crouched head, nothing at standing eyes)
+bool CCSBot::LsLowCoverToward(const Vector &at)
+{
+	if (!m_lastKnownArea || !LsExposureReady())
+		return false;
+	const LsAreaKnow *k = LsKnow(m_lastKnownArea);
+	if (!k)
+		return false;
+	int bestP = -1;
+	float bestD = 40.0f;
+	for (int p = 0; p < 9; p++)
+	{
+		Vector v;
+		LsExposurePoint(m_lastKnownArea, p, &v);
+		float d = float((v - pev->origin).Length2D());
+		if (d < bestD)
+		{
+			bestD = d;
+			bestP = p;
+		}
+	}
+	if (bestP < 0)
+		return false;
+	float yaw = UTIL_VecToYaw(at - pev->origin);
+	while (yaw < 0.0f)
+		yaw += 360.0f;
+	int d = int(yaw / 22.5f + 0.5f) & 15;
+	return (k->pointCoverLow[bestP] & (1 << d)) && !(k->pointCoverHigh[bestP] & (1 << d));
+}
+
+// How close to dying a drop may bring it: the better ones keep well clear, newer ones now and
+// then misjudge it (never off a lethal one: some margin's always there)
+float CCSBot::LsFallMargin()
+{
+	if (!LsFight())
+		return 10.0f;
+	float skill = LsSkill();
+	if (skill > 0.6f)
+		return 25.0f;
+	if (skill < 0.3f && !LsMatch() && LsTrait(73) < 0.25f)
+		return 3.0f;
+	return 10.0f;
+}
+
+// Mid-fight, a couple of times a second: a flashed enemy is pushed (the better ones see it);
+// reloading behind low cover, it crouches; and once a fight, the matchup: the wrong gun for
+// this range (a rifle against an AWP down a long lane, an SMG or a pistol against a rifle far
+// off, a shotgun past its reach) - the better ones get out of that line and come by another
+// way, unless the enemy's hurt or not looking its way. Newer ones just fight it out; less of
+// it in deathmatch, from rushers, and on aim maps (nowhere to go round)
+bool CCSBot::LsMatchup(CBasePlayer *pEnemy)
+{
+	float now = gpGlobals->time;
+	if (now < m_lsMatchupAt || !IsEnemyVisible() || !pEnemy->IsAlive())
+		return false;
+	m_lsMatchupAt = now + 0.5f;
+	float skill = LsSkill();
+	float range = float((pEnemy->pev->origin - pev->origin).Length());
+
+	if (pEnemy->IsBlind() && range < 1200.0f && !IsUsingSniperRifle() && now > m_lsPushUntil && RANDOM_FLOAT(0.0f, 1.0f) < 0.3f + 0.6f * skill)
+	{
+		m_lsPushUntil = now + RANDOM_FLOAT(1.0f, 1.8f);
+		LsWhy("pushing a flashed one");
+	}
+	if (IsReloading() && skill > 0.4f && LsLowCoverToward(pEnemy->pev->origin))
+		Crouch();
+
+	CBasePlayer *pDone = m_lsMatchupEnemy;
+	if (pDone == pEnemy)
+		return false;
+	m_lsMatchupEnemy = pEnemy;
+	int mine = LsGunClass(this), theirs = LsGunClass(pEnemy);
+	bool bad = false;
+	if (theirs == LSG_SNIPER && mine != LSG_SNIPER && range > 900.0f && IsPlayerLookingAtMe(pEnemy))
+		bad = true;
+	bool farGun = theirs == LSG_RIFLE || theirs == LSG_SNIPER || theirs == LSG_MG;
+	if (farGun && ((mine == LSG_SMG && range > 1300.0f) || (mine == LSG_SHOTGUN && range > 800.0f) || (mine == LSG_PISTOL && range > 1100.0f)))
+		bad = true;
+	if (!bad || pEnemy->pev->health < 45.0f || skill < 0.35f)
+		return false;
+	if (m_state == &m_plantBombState || m_state == &m_defuseBombState || IsEscapingFromBomb())
+		return false;
+	float odds = 0.3f + 0.6f * skill;
+	if (!LsTeamGame())
+		odds *= 0.4f;
+	if (LsStyle() == LS_STYLE_RUSHER)
+		odds *= 0.5f;
+	int kind = LsMapKind();
+	if (kind == LSMAP_AIM || kind == LSMAP_FY || kind == LSMAP_AWP)
+		odds *= 0.3f;
+	if (RANDOM_FLOAT(0.0f, 1.0f) > odds)
+		return false;
+	const CNavArea *here = m_lastKnownArea;
+	if (!LsTakeCoverFrom(pEnemy->pev->origin, 64.0f, true))
+		return false;
+	if (here)
+		LsForceBadArea(here, 20.0f);
+	LsWhy(theirs == LSG_SNIPER ? "out of the AWP's lane" : "wrong gun for this range");
 	return true;
 }
 

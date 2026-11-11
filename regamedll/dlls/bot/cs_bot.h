@@ -1204,7 +1204,13 @@ public:
 	void LsHeardBreak(CBaseEntity *pBreak);		// glass, a vent cover, a board breaking: someone's there
 	void LsHurtBy(CBasePlayer *pAttacker);		// hit: through a wall? that spot's not safe
 	bool LsPreAim(const Vector &heard, float secs);	// look where a sound will come out (the area's angles)
-	bool LsTakeCoverFrom(const Vector &threat, float minMove);	// to the nearest spot out of its sight
+	bool LsTakeCoverFrom(const Vector &threat, float minMove, bool fromFight = false);	// to the nearest spot out of its sight, a short hold there
+	bool LsMatchup(CBasePlayer *pEnemy);		// mid-fight: the wrong gun for this range (an AWP down a lane): out of it
+	bool LsLowCoverToward(const Vector &at);	// low cover right by it that way (crouch behind it)
+	float LsFallMargin();						// how close to dying from a drop it'll go (pros never close)
+	EntityHandle<CBasePlayer> m_lsMatchupEnemy;	// the enemy whose matchup it weighed (once a fight)
+	float m_lsMatchupAt = 0.0f;
+	float m_lsEdgeSlipAt = -999.0f;			// a newer player backing off an edge it didn't see (rare)
 	bool LsRunnerGlance();						// mid-fight, a turn to someone heard running at it
 	EntityHandle<CBasePlayer> m_lsRunner;		// ...who, where, until when, and when it last did
 	Vector m_lsRunnerSpot;
@@ -2237,12 +2243,13 @@ public:
 				if (fallDamage > 0.0f)
 				{
 					// if the fall would kill us, don't use it
-					const float deathFallMargin = 10.0f;
+					const float deathFallMargin = m_bot->LsFallMargin();
 					if (fallDamage + deathFallMargin >= m_bot->pev->health)
 						return -1.0f;
 
 					// if we need to get there in a hurry, ignore minor pain
-					const float painTolerance = 15.0f * m_bot->LsAggro() + 10.0f;
+					// (Loner-Strike: less of it hurt)
+					const float painTolerance = (15.0f * m_bot->LsAggro() + 10.0f) * Q_min(1.0f, float(m_bot->pev->health) / 100.0f);
 					if (m_route != FASTEST_ROUTE || fallDamage > painTolerance)
 					{
 						// cost is proportional to how much it hurts when we fall

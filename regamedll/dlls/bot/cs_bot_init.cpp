@@ -200,6 +200,8 @@ void CCSBot::ResetValues()
 	m_lsButtonUntil = 0.0f;
 	m_lsButtonBehind = nullptr;
 	m_lsRunner = nullptr;
+	m_lsMatchupEnemy = nullptr;
+	m_lsMatchupAt = 0.0f;
 	m_lsRunnerUntil = 0.0f;
 	m_lsRunnerAt = 0.0f;
 	m_lsSniperHeard = nullptr;
