@@ -411,8 +411,25 @@ void IdleState::OnUpdate(CCSBot *me)
 			if (LsFight() && me->LsTeamGame() && !TheCSBots()->IsBombPlanted() && !me->GetGameState()->IsLooseBombLocationKnown()
 				&& !me->LsShirksObjective() && TheCSBots()->GetZoneCount() > 0 && !me->LsOrderActive())
 			{
-				float push = me->LsStyle() == LS_STYLE_RUSHER ? 0.7f : 0.1f + 0.35f * me->LsAggro();
-				if (RANDOM_FLOAT(0.0f, 1.0f) > push)
+				// (whether it pushes out is decided once a round: a site hold running out isn't
+				// another roll - re-rolled at every hold's end, most CTs ended up roaming the map
+				// alone by mid-round and were picked off one by one by Ts moving together)
+				if (me->m_lsCtPushRound != LsRoundSerial())
+				{
+					float push = me->LsStyle() == LS_STYLE_RUSHER ? 0.7f : 0.1f + 0.35f * me->LsAggro();
+					me->m_lsCtPushRound = LsRoundSerial();
+					me->m_lsCtPush = RANDOM_FLOAT(0.0f, 1.0f) < push;
+					me->m_lsCtPushed = false;
+				}
+				// (the push is the round's first move; after it, back to a site)
+				bool pushNow = me->m_lsCtPush && !me->m_lsCtPushed;
+				me->m_lsCtPushed = me->m_lsCtPushed || pushNow;
+				if (pushNow)
+				{
+					me->Hunt();
+					me->LsWhy("ct-push");
+					return;
+				}
 				{
 					const CCSBotManager::Zone *zone = me->LsQuietZone();
 					CNavArea *area = zone ? TheCSBots()->GetRandomAreaInZone(zone) : nullptr;
@@ -774,6 +791,22 @@ void IdleState::OnUpdate(CCSBot *me)
 							rescueHostages = true;
 						else
 							fetchHostages = true;
+
+						// Loner-Strike: people take out what they've got rather than run more
+						// laps past the Ts: two in tow, or one with the clock short, hurt, or a
+						// fight just now, and the next ones aren't right here - out. The greedy
+						// (bold, rushers) push their luck for one more when it's not far
+						if (fetchHostages && LsFight() && me->GetHostageEscortCount() > 0 && toHostage > 500.0f)
+						{
+							int have = me->GetHostageEscortCount();
+							bool pressed = LsTimeLeft() < 60.0f || me->pev->health < 60.0f || me->GetTimeSinceLastSawEnemy() < 10.0f;
+							bool greedy = me->LsAggro() > 0.7f && toHostage < 0.6f * toZone && have < 3;
+							if ((have >= 2 || pressed) && !greedy)
+							{
+								fetchHostages = false;
+								rescueHostages = true;
+							}
+						}
 					}
 				}
 				else

@@ -1206,6 +1206,8 @@ public:
 	void LsHeardBreak(CBaseEntity *pBreak);		// glass, a vent cover, a board breaking: someone's there
 	void LsHurtBy(CBasePlayer *pAttacker);		// hit: through a wall? that spot's not safe
 	bool LsPreAim(const Vector &heard, float secs, CBasePlayer *who = nullptr);	// look where a sound will come out (the area's angles)
+	int m_lsCtPushRound = -1;						// a CT: the round it decided whether to push out (once a round)
+	bool m_lsCtPush = false, m_lsCtPushed = false;
 	float m_lsInvestAimAt = 0.0f;					// next pre-aim while closing on a noise (InvestigateNoiseState)
 	float m_lsHuntHoldUntil = 0.0f;					// hunting, stopped a moment to hold an angle on a sound (HuntState)
 	float m_lsScanBlindUntil = 0.0f;				// its map angles are all walled off from where it stands, until (UpdateLookAround)

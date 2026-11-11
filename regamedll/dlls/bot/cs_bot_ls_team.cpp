@@ -1290,7 +1290,8 @@ void CCSBot::LsAvenge(CBasePlayer *pVictim, CBasePlayer *pKiller)
 	float lean = (style == LS_STYLE_CAMPER || style == LS_STYLE_CAREFUL) ? 1.35f : (style == LS_STYLE_LURKER || style == LS_STYLE_NINJA) ? 1.1f
 		: (style == LS_STYLE_RUSHER || style == LS_STYLE_KNIFER) ? 0.25f : 1.0f;
 	float holdOdds = Q_min(0.95f, (0.15f + 0.75f * LsSkill()) * (1.0f - 0.55f * LsAggro()) * lean);
-	bool holds = !LsSolo() && RANDOM_FLOAT(0.0f, 1.0f) < holdOdds;
+	// (a CT with the bomb down and time to get there doesn't sit on an angle: the clock says go)
+	bool holds = !LsSolo() && !LsRetakeRush() && RANDOM_FLOAT(0.0f, 1.0f) < holdOdds;
 	if (holds && LsFree() && !IsAttacking())
 	{
 		float secs = RANDOM_FLOAT(3.0f, 6.0f) * (0.7f + 0.6f * (1.0f - LsAggro())) * (lean > 1.2f ? 1.4f : 1.0f);
@@ -1306,6 +1307,9 @@ void CCSBot::LsAvenge(CBasePlayer *pVictim, CBasePlayer *pKiller)
 		LsWhy("avenge: holding the angle");
 		return;
 	}
+	// (on a timed retake it keeps its way to the bomb: the glance at the shots is all)
+	if (LsRetakeRush())
+		return;
 	Hurry(RANDOM_FLOAT(4.0f, 7.0f));
 	if (LsFree() && !LsLoner())
 	{
