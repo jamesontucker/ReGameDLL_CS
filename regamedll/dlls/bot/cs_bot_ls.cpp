@@ -90,7 +90,8 @@ bool LsSpotCrowded(CBaseEntity *me, const Vector *pos)
 	// (free-for-all: nobody's a teammate)
 	if (!LsFight() || !me || !me->IsPlayer() || (CSGameRules() && CSGameRules()->IsFreeForAll()))
 		return false;
-	const float apart = 220.0f;
+	// (a disciplined team spreads wider: different angles onto the same way in, a crossfire)
+	const float apart = LsMatch() ? 320.0f : 220.0f;
 	int team = static_cast<CBasePlayer *>(me)->m_iTeam;
 	for (int i = 1; i <= gpGlobals->maxClients; i++)
 	{
@@ -3870,6 +3871,15 @@ bool CCSBot::LsScanAngles(bool holding)
 			score *= m_lsFeedSniper ? 2.0f : 1.6f;
 		if (skill > 0.55f && LsHabitNear(tc, 450.0f))
 			score *= 1.5f;
+		// (a CT going for a planted bomb watches the places that see it: where the Ts guard it
+		// from)
+		if (m_iTeam == CT && skill > 0.35f && TheCSBots()->IsBombPlanted() && GetGameState()->GetBombPosition())
+		{
+			Vector bomb = *GetGameState()->GetBombPosition();
+			CNavArea *bombArea = TheNavAreaGrid.GetNearestNavArea(&bomb);
+			if (bombArea && target != bombArea && LsSees(target, bombArea) && (tc - bomb).IsLengthLessThan(1000.0f))
+				score *= 1.8f;
+		}
 		// (where an AWPer was heard scoping lately: the better ones keep an eye on it)
 		if (skill > 0.4f && now - m_lsSniperHeardAt < 15.0f && (tc - m_lsSniperSpot).IsLengthLessThan(600.0f))
 			score *= 1.8f;
@@ -4635,8 +4645,7 @@ bool CCSBot::LsTakeCoverFrom(const Vector &threat, float minMove, bool fromFight
 }
 
 // What kind of gun someone has out
-enum { LSG_NONE, LSG_PISTOL, LSG_DEAGLE, LSG_SMG, LSG_SHOTGUN, LSG_RIFLE, LSG_SNIPER, LSG_MG };
-static int LsGunClass(CBasePlayer *pPlayer)
+int LsGunClass(CBasePlayer *pPlayer)
 {
 	CBasePlayerWeapon *pGun = static_cast<CBasePlayerWeapon *>(pPlayer->m_pActiveItem);
 	if (!pGun)
@@ -5097,4 +5106,42 @@ void CCSBot::LsImpactNearMate(CBasePlayer *pShooter, const Vector &impact)
 		SetLookAt("Loner-Strike: teammate under fire", &look, PRIORITY_MEDIUM, RANDOM_FLOAT(0.8f, 1.5f));
 	}
 	LsWhy("teammate under fire");
+}
+
+// Where to defuse from: beside the bomb on the side away from the threat (the last place an
+// enemy was seen, or the kill feed's spot), so the bomb and what's around it is between them;
+// the bomb itself if nothing's known or no side is hidden. The better players think of it
+Vector CCSBot::LsDefuseSpot(const Vector &bomb)
+{
+	if (!LsFight() || LsSkill() < 0.35f)
+		return bomb;
+	Vector threat;
+	if (GetTimeSinceLastSawEnemy() < 20.0f)
+		threat = GetLastKnownEnemyPosition();
+	else if (gpGlobals->time - m_lsFeedAt < 20.0f)
+		threat = m_lsFeedSpot;
+	else
+		return bomb;
+	Vector from = threat + Vector(0, 0, 17.0f);
+	Vector best = bomb;
+	float bestScore = -1e9f;
+	for (int i = 0; i < 8; i++)
+	{
+		float yaw = float(i) * 45.0f;
+		Vector spot = bomb + Vector(BotCOS(yaw) * 40.0f, BotSIN(yaw) * 40.0f, 0.0f);
+		// (standing room, and ground)
+		TraceResult tr;
+		UTIL_TraceHull(bomb + Vector(0, 0, 36.0f), spot + Vector(0, 0, 36.0f), ignore_monsters, human_hull, ENT(pev), &tr);
+		if (tr.flFraction < 1.0f || tr.fStartSolid)
+			continue;
+		// (a crouched defuser's head out of the threat's line is the point)
+		UTIL_TraceLine(from, spot + Vector(0, 0, 20.0f), ignore_monsters, ignore_glass, ENT(pev), &tr);
+		float score = (tr.flFraction < 1.0f ? 500.0f : 0.0f) + float((spot - threat).Length2D()) * 0.2f;
+		if (score > bestScore)
+		{
+			bestScore = score;
+			best = spot;
+		}
+	}
+	return best;
 }

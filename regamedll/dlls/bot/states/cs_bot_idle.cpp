@@ -269,7 +269,9 @@ void IdleState::OnUpdate(CCSBot *me)
 						// move to the bomb and defuse it
 						me->SetTask(CCSBot::DEFUSE_BOMB);
 						me->SetDisposition(CCSBot::OPPORTUNITY_FIRE);
-						me->MoveTo(bombPos);
+						// (Loner-Strike: from the side away from the threat)
+						Vector defuseAt = me->LsDefuseSpot(*bombPos);
+						me->MoveTo(&defuseAt);
 						return;
 					}
 					else

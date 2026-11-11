@@ -1409,6 +1409,16 @@ private:
 	int m_lsStagedRound = -1;						// the round it waited near the site for the push
 	int m_lsPushRound = -1;							// the round it went in with the push
 	const CCSBotManager::Zone *m_lsExecSite = nullptr;	// the site those were for (the team can switch)
+	enum { LSR_NONE, LSR_ENTRY, LSR_TRADE, LSR_FLANK, LSR_SNIPER };
+	int m_lsRole = LSR_NONE;						// its part in the push this round (picked from what the others are doing)
+	int m_lsRoleRound = -1;
+	float m_lsTradeGoAt = 0.0f;						// a trader goes in a beat after the entry
+	int m_lsPerchRound = -1;						// the round an AWPer took a perch
+	float m_lsPerchTryAt = 0.0f;
+	void LsExecuteGo(const CCSBotManager::Zone *site);
+	int LsPickRole();
+	bool LsTakePerch(const CCSBotManager::Zone *site, bool tSide);
+	Vector LsDefuseSpot(const Vector &bomb);		// beside the bomb, the side away from the threat
 	float m_lsDefuseNoticeAt = -1.0f;				// when it takes in the defuse it hears
 	int m_lsWinReloadRound = -1;
 	int m_lsMoraleHideRound = -1;					// the round it hid on low morale (once is enough)
@@ -1617,6 +1627,8 @@ enum { LSMAP_OBJECTIVE, LSMAP_AIM, LSMAP_FY, LSMAP_AWP, LSMAP_KNIFE, LSMAP_OTHER
 int LsMapKind();
 const Vector *LsEnemySpawn(int team);	// the middle of the other team's spawn (null if none)
 float LsArrival(const CNavArea *area, int team);	// seconds that team needs, running from its spawn, to get there (-1 unknown)
+enum { LSG_NONE, LSG_PISTOL, LSG_DEAGLE, LSG_SMG, LSG_SHOTGUN, LSG_RIFLE, LSG_SNIPER, LSG_MG };
+int LsGunClass(CBasePlayer *pPlayer);	// what kind of gun someone has out
 int LsAlive(int team);					// how many of a team are alive (the scoreboard shows it)
 bool LsHabitNear(const Vector &at, float range);	// a person's spot this map (where they killed a bot from)
 int LsMapSerial();						// changes when the map does

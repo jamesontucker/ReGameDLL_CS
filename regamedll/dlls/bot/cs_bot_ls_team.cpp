@@ -23,6 +23,26 @@ void CCSBot::LsTeamTick()
 		m_lsForTimeRoll = -1;
 	}
 
+	// a CT AWPer early in the round takes a perch over the site it's going to hold (once a
+	// round; a sniper who knows the map; not with an order on, nor in a fight)
+	if (m_iTeam == CT && m_lsPerchRound != round && LsGunClass(this) == LSG_SNIPER && !TheCSBots()->IsBombPlanted() && LsFree()
+		&& TheCSBots()->GetElapsedRoundTime() < 25.0f && LsSkill() > 0.3f && !CSGameRules()->IsFreezePeriod() && now >= m_lsPerchTryAt)
+	{
+		m_lsPerchTryAt = now + 2.0f;
+		const CCSBotManager::Zone *site = nullptr;
+		if (HasPath())
+		{
+			Vector end = GetPathEndpoint();
+			site = TheCSBots()->GetZone(&end);
+		}
+		if (!site)
+			site = TheCSBots()->GetClosestZone(&pev->origin);
+		if (site && TheCSBots()->GetScenario() == CCSBotManager::SCENARIO_DEFUSE_BOMB && LsTakePerch(site, false))
+			LsWhy("awp perch");
+		else
+			m_lsPerchRound = round;
+	}
+
 	// the bomb down somewhere it hasn't seen: a teammate on that site, or one who just died
 	// there, calls it ("bomb's at A"), as people do, so the retake goes to the right site
 	// instead of guessing one
@@ -501,6 +521,12 @@ static float s_execFirstAt = 0.0f;
 static float s_execGoAt = 0.0f;
 
 /// The round's push: (re)set for a new round, or when the team switches site
+// The push's parts this round (who's taken which) and where each is going in the site, so the
+// next one picks what's missing and somewhere else: no commander, each reads the others
+static int s_roleCount[5];
+static Vector s_claimed[16];
+static int s_claimedCount = 0;
+
 static void LsExecuteRound(const CCSBotManager::Zone *site)
 {
 	if (s_execRound != LsRoundSerial() || s_execSite != site)
@@ -509,7 +535,144 @@ static void LsExecuteRound(const CCSBotManager::Zone *site)
 		s_execSite = site;
 		s_execFirstAt = 0.0f;
 		s_execGoAt = 0.0f;
+		for (int i = 0; i < 5; i++)
+			s_roleCount[i] = 0;
+		s_claimedCount = 0;
 	}
+}
+
+// A spot in the site away from where the others are going (spread, not stacked); a flanker's
+// is across the site from where it is (it comes in from the other side)
+static const Vector *LsSpreadSpot(const CCSBotManager::Zone *site, const Vector &from, bool farSide)
+{
+	const Vector *best = nullptr;
+	float bestScore = -1e9f;
+	for (int t = 0; t < 10; t++)
+	{
+		const Vector *pos = TheCSBots()->GetRandomPositionInZone(site);
+		if (!pos)
+			continue;
+		float apart = 1000.0f;
+		for (int i = 0; i < s_claimedCount; i++)
+			apart = Q_min(apart, float((*pos - s_claimed[i]).Length2D()));
+		float score = Q_min(apart, 450.0f) + (farSide ? 0.6f : -0.3f) * float((*pos - from).Length2D()) + RANDOM_FLOAT(0.0f, 80.0f);
+		if (score > bestScore)
+		{
+			bestScore = score;
+			best = pos;
+		}
+	}
+	if (best && s_claimedCount < 16)
+		s_claimed[s_claimedCount++] = *best;
+	return best;
+}
+
+// Its part in the push, from its gun, its style and what's still missing: an AWPer takes a
+// perch over the site (one), a lurker or ninja comes in another way (one, with three or more
+// left), the bold ones go first (one or two), the rest trade a step behind
+int CCSBot::LsPickRole()
+{
+	int style = LsStyle();
+	int alive = LsAlive(TERRORIST);
+	int role;
+	if (IsCarryingBomb())
+		role = s_roleCount[LSR_ENTRY] == 0 && alive <= 2 ? LSR_ENTRY : LSR_TRADE;	// (the bomb follows the entry in)
+	else if (LsGunClass(this) == LSG_SNIPER && s_roleCount[LSR_SNIPER] == 0 && alive >= 3)
+		role = LSR_SNIPER;
+	else if ((style == LS_STYLE_LURKER || style == LS_STYLE_NINJA) && s_roleCount[LSR_FLANK] == 0 && alive >= 3)
+		role = LSR_FLANK;
+	else if (s_roleCount[LSR_ENTRY] == 0 || ((style == LS_STYLE_RUSHER || LsAggro() > 0.65f) && s_roleCount[LSR_ENTRY] < 2))
+		role = LSR_ENTRY;
+	else
+		role = LSR_TRADE;
+	s_roleCount[role]++;
+	return role;
+}
+
+void CCSBot::LsExecuteGo(const CCSBotManager::Zone *site)
+{
+	int round = LsRoundSerial();
+	float now = gpGlobals->time;
+	if (m_lsRoleRound != round)
+	{
+		m_lsRoleRound = round;
+		m_lsRole = LsPickRole();
+		// (a trader a beat behind the entry: close enough to trade, not on its heels)
+		m_lsTradeGoAt = m_lsRole == LSR_TRADE ? now + RANDOM_FLOAT(0.6f, 1.3f) : 0.0f;
+		if (m_lsRole == LSR_SNIPER && LsTakePerch(site, true))
+		{
+			m_lsPushRound = round;
+			LsWhy("execute: awp perch");
+			return;
+		}
+		if (m_lsRole == LSR_SNIPER)
+			m_lsRole = LSR_TRADE;
+	}
+	if (now < m_lsTradeGoAt)
+		return;
+	const Vector *pos = LsSpreadSpot(site, pev->origin, m_lsRole == LSR_FLANK);
+	if (!pos)
+		return;
+	m_lsPushRound = round;
+	if (IsCarryingBomb())
+		SetTask(PLANT_BOMB);
+	// (the flanker takes the quieter way round; the rest the quick one)
+	MoveTo(pos, m_lsRole == LSR_FLANK ? SAFEST_ROUTE : FASTEST_ROUTE);
+	if (m_lsRole == LSR_ENTRY)
+		Run();
+	LsWhy(m_lsRole == LSR_ENTRY ? "execute: entry" : m_lsRole == LSR_FLANK ? "execute: flank" : "execute: trade");
+}
+
+// A perch over a site for an AWPer, from the map knowledge: somewhere outside it with a good
+// long view into it (500-1800 units off), high ground better, not seen from everywhere, on
+// its own side (a T's on the way in, a CT's toward its spawn); held a while
+bool CCSBot::LsTakePerch(const CCSBotManager::Zone *site, bool tSide)
+{
+	if (!LsSightReady() || !site)
+		return false;
+	Vector mid = site->m_center;
+	CNavArea *midArea = TheNavAreaGrid.GetNearestNavArea(&mid);
+	const Vector *own = LsEnemySpawn(m_iTeam == CT ? TERRORIST : CT);	// (its own spawn)
+	if (!midArea || !own)
+		return false;
+	float siteToOwn = float((mid - *own).Length2D());
+	CNavArea *best = nullptr;
+	float bestScore = -1e9f;
+	for (unsigned short i = 0; ; i++)
+	{
+		CNavArea *a = LsKnowArea(i);
+		if (!a)
+			break;
+		const Vector &c = *a->GetCenter();
+		float d = float((c - mid).Length2D());
+		if (d < 500.0f || d > 1800.0f || TheCSBots()->GetZone(&c) == site)
+			continue;
+		// (its side of the site)
+		if (float((c - *own).Length2D()) > siteToOwn)
+			continue;
+		int q = LsSightQuality(a, midArea);
+		if (q < 40)
+			continue;
+		const LsAreaKnow *k = LsKnow(a);
+		// (no crawlspace, no spot others are holding)
+		if (k && k->ceiling * 4 < 70)
+			continue;
+		if (LsSpotCrowded(this, &c))
+			continue;
+		float score = float(q) + (k ? 0.4f * float(k->high) - 300.0f * float(k->sees) / 2000.0f : 0.0f) + RANDOM_FLOAT(0.0f, 40.0f);
+		if (score > bestScore)
+		{
+			bestScore = score;
+			best = a;
+		}
+	}
+	if (!best)
+		return false;
+	m_lsPerchRound = LsRoundSerial();
+	Vector at = *best->GetCenter();
+	SetTask(MOVE_TO_SNIPER_SPOT);
+	Hide(&at, RANDOM_FLOAT(18.0f, 30.0f), true);
+	return true;
 }
 
 bool CCSBot::LsLurksOtherSite()
@@ -569,17 +732,7 @@ void CCSBot::LsExecuteTick()
 	{
 		// (in a fight at the go: it goes once the fight is over)
 		if (dist < 1700.0f && !IsAttacking())
-		{
-			const Vector *pos = TheCSBots()->GetRandomPositionInZone(site);
-			if (pos)
-			{
-				m_lsPushRound = round;
-				if (IsCarryingBomb())
-					SetTask(PLANT_BOMB);
-				MoveTo(pos, FASTEST_ROUTE);
-				LsWhy("execute");
-			}
-		}
+			LsExecuteGo(site);
 		return;
 	}
 
@@ -1110,6 +1263,11 @@ bool CCSBot::LsPlantHere()
 			continue;
 		float mid = float((*pArea->GetCenter() - zone->m_center).Length2D());
 		float score = -mid + RANDOM_FLOAT(0.0f, 200.0f) + (pArea->GetHidingSpotList()->empty() ? 0.0f : 300.0f);
+		// (a plant seen from fewer places is harder to retake and to defuse: the map knowledge
+		// says how many areas see each spot; the ones who know it pick the hidden corner)
+		const LsAreaKnow *k = LsKnow(pArea);
+		if (k && LsKnows(LSK_DEFUSE_MATH))
+			score -= 500.0f * Q_min(1.0f, float(k->sees) / 600.0f);
 		if (score > bestScore)
 		{
 			bestScore = score;
@@ -1162,6 +1320,21 @@ void CCSBot::LsHideNearBomb(const Vector &bomb)
 		Vector eye = *pos + Vector(0, 0, HalfHumanHeight);
 		UTIL_TraceLine(eye, bomb + Vector(0, 0, 8.0f), ignore_monsters, ENT(pev), &tr);
 		float score = RANDOM_FLOAT(0.0f, 250.0f) - 0.4f * float(fabs(d - 500.0f)) + (tr.flFraction >= 1.0f ? 400.0f : 0.0f);
+		// (a crossfire: from a different side of the bomb than the teammates guarding it, so a
+		// defuser can't face them all; the better ones set it up)
+		if (LsSkill() > 0.35f)
+		{
+			Vector dir = *pos - bomb;
+			dir.z = 0.0f;
+			float len = float(dir.Length2D());
+			LsForTeammates(this, [&](CBasePlayer *pPlayer) {
+				Vector theirs = pPlayer->pev->origin - bomb;
+				theirs.z = 0.0f;
+				float tl = float(theirs.Length2D());
+				if (len > 1.0f && tl > 1.0f && tl < 1200.0f && float(DotProduct(dir, theirs)) / (len * tl) > 0.64f)
+					score -= 350.0f;
+			});
+		}
 		if (score > bestScore)
 		{
 			bestScore = score;
