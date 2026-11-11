@@ -233,8 +233,6 @@ void CCSBot::ResetValues()
 	m_lsCoverRunUntil = 0.0f;
 	m_lsMatchupUntil = 0.0f;
 	m_lsHuntRetryAt = 0.0f;
-	m_lsClutchWaitTotal = 0.0f;
-	m_lsClutchWaitAt = 0.0f;
 	// (a respawn that doesn't go through RoundRespawn: no order or plugin marks carried over)
 	if (LsFight())
 	{

@@ -1274,8 +1274,7 @@ public:
 	float m_lsCoverRunUntil = 0.0f;					// on a deliberate cover move (a matchup, a rush): aiming at it doesn't pull it back out
 	float m_lsMatchupUntil = 0.0f;					// the matchup with m_lsMatchupEnemy decided until (not re-weighed each new fight)
 	float m_lsHuntRetryAt = 0.0f;
-	bool LsClutchWait();								// the last T, the bomb, several CTs about and something heard or seen: not now
-	float m_lsClutchWaitTotal = 0.0f, m_lsClutchWaitAt = 0.0f;
+	void LsCheckBeforePlant();						// a quick double check before planting
 	bool LsBombHot(const Vector &bomb);				// a teammate died by the dropped bomb a moment ago (the radar shows it)
 	void LsTraceSeen(CBasePlayer *pEnemy);			// bot_ls_trace: an enemy first in view					// every hunting goal failed: a moment before trying again		// behind the way it's going (a new goal there is a U-turn)							// bot_ls_trace: a fight starting, and how long it took to react					// the round it picked its way into a retake
 	void LsRetakeApproach();				// mid jump-peek (in the air: still the jiggle)					// a smoke for the AWP lane it just got out of, thrown from cover then

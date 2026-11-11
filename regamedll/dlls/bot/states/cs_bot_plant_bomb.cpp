@@ -33,6 +33,7 @@ void PlantBombState::OnEnter(CCSBot *me)
 {
 	me->Crouch();
 	me->LsObjectiveBegins();	// Loner-Strike
+	me->LsCheckBeforePlant();
 	me->SetDisposition(CCSBot::SELF_DEFENSE);
 
 	float yaw = me->pev->v_angle.y;

@@ -2767,6 +2767,37 @@ void CCSBot::LsCheckBeforeDefuse()
 }
 
 
+// About to plant: a quick double check first - a glance at a noise just heard, or the site's
+// busiest way in - then the plant, relying on what it sees and hears. A fraction of a second;
+// more likely alone than with teammates covering; newer players often skip it
+void CCSBot::LsCheckBeforePlant()
+{
+	if (!LsFight() || LsTimeLeft() < 15.0f)
+		return;
+	int cover = 0;
+	LsForTeammates(this, [&](CBasePlayer *pPlayer) {
+		if ((pPlayer->pev->origin - pev->origin).IsLengthLessThan(600.0f))
+			cover++;
+	});
+	float chance = (0.35f + 0.55f * LsSkill()) * (cover ? 0.5f : 1.0f);
+	if (RANDOM_FLOAT(0.0f, 1.0f) > chance)
+		return;
+	Vector look;
+	const LsAreaKnow *k = m_lastKnownArea ? LsKnow(m_lastKnownArea) : nullptr;
+	CNavArea *way = (k && k->angleCount) ? LsKnowArea(k->angles[0].area) : nullptr;
+	if (m_noiseTimestamp > 0.0f && gpGlobals->time - m_noiseTimestamp < 4.0f && (m_noisePosition - pev->origin).IsLengthLessThan(1200.0f))
+		look = m_noisePosition + Vector(0, 0, HalfHumanHeight);
+	else if (way)
+		look = *way->GetCenter() + Vector(0, 0, HalfHumanHeight + LsLookHeight());
+	else
+		return;
+	float secs = RANDOM_FLOAT(0.35f, 0.8f);
+	SetLookAt("Loner-Strike: checking", &look, PRIORITY_HIGH, secs);
+	m_lsCheckUntil = gpGlobals->time + secs;
+	m_lsObjUseAt = m_lsCheckUntil;
+}
+
+
 // ---- map knowledge ------------------------------------------------------------------------
 //
 // What a person learns about a map by playing it, worked out once per map in the background
@@ -6061,25 +6092,6 @@ bool CCSBot::LsBehindMe(const Vector &at) const
 bool CCSBot::LsBombHot(const Vector &bomb)
 {
 	return LsRecentDeathNear(m_iTeam, bomb, 500.0f, 15.0f);
-}
-
-// The last T alive, with the bomb, two or more CTs left and the clock not yet pressing: with
-// something heard or seen close a moment ago, a person waits for a quiet moment to plant rather
-// than starting it (and starting it again) with them right there. At most about 25 s in all
-bool CCSBot::LsClutchWait()
-{
-	float now = gpGlobals->time;
-	if (!LsFight() || m_iTeam != TERRORIST || !IsCarryingBomb() || GetFriendsRemaining() > 0 || GetEnemiesRemaining() < 2
-		|| LsTimeLeft() < 30.0f || m_lsClutchWaitTotal > 25.0f || LsSkill() < 0.3f)
-		return false;
-	bool threat = (IsNoiseHeard() && now - m_noiseTimestamp < 5.0f && (m_noisePosition - pev->origin).IsLengthLessThan(1000.0f))
-		|| GetTimeSinceLastSawEnemy() < 5.0f || GetTimeSinceAttacked() < 5.0f || now - m_lsShotAtAt < 5.0f;
-	if (!threat)
-		return false;
-	if (m_lsClutchWaitAt > 0.0f && now - m_lsClutchWaitAt < 10.0f)
-		m_lsClutchWaitTotal += now - m_lsClutchWaitAt;
-	m_lsClutchWaitAt = now;
-	return true;
 }
 
 // bot_ls_trace: an enemy first in view (after not having been for a few seconds): with the
