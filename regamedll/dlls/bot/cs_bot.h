@@ -1291,7 +1291,7 @@ public:
 	bool LsFree() const;							// free to go somewhere for team play: not busy, saving, puppeted
 	void LsCheckBeforeDefuse();						// a look round the site before defusing
 	bool LsObjectiveThreat(bool defusing);			// planting/defusing: a threat around it (true: stop for now)
-	void LsWhy(const char *why) { m_lsWhy = why; m_lsWhyAt = gpGlobals->time; }
+	void LsWhy(const char *why);			// a decision's label (bot_ls_trace: written as it happens)
 	void LsTrace();										// bot_ls_trace: what it's doing, to lstrace.csv
 	bool LsShirksObjective();						// a rogue who leaves the objective to others
 	CNavArea *LsPickHuntArea();					// every bot for itself: where to hunt
@@ -1682,6 +1682,7 @@ int LsRoundSerial();
 const CCSBotManager::Zone *LsTSite();	// the Ts' site this round
 void LsTSiteDeath(CBasePlayer *pVictim);	// a T down at it early: two and the team goes for the other	// a count of rounds that only goes up (a restart sets the game's own back to 0)
 void Bot_LsRegisterCVars();
+void LsTraceMark();						// ls_mark [note]: a moment flagged in lstrace.csv
 void Bot_LsServerCommand();
 
 // Inlines

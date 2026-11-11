@@ -1999,20 +1999,19 @@ float CCSBot::LsChaseExtra()
 // of where the bots went can be explained (time,id,team,state,task,enemy,leader,goal x,y,
 // noise x,y,why,seconds since why, then speed, view off its heading, attacking, what it's
 // looking at)
-void CCSBot::LsTrace()
+// The trace file (bot_ls_trace), opened once; a line naming the map whenever it changes (the
+// clock restarts with each map), and the columns once per opening
+static FILE *LsTraceFile()
 {
-	if (cv_bot_ls_trace.value <= 0.0f || !IsAlive() || gpGlobals->time < m_lsTraceAt)
-		return;
-	m_lsTraceAt = gpGlobals->time + 0.5f;
-
 	static FILE *s_file = nullptr;
 	if (!s_file)
 	{
 		s_file = fopen("lstrace.csv", "a");
 		if (!s_file)
-			return;
+			return nullptr;
+		fprintf(s_file, "#cols,time,id,team,state,task,enemy,leader,goal_x,goal_y,noise_x,noise_y,why,why_ago,speed,view_off,attacking,look,x,y,z,hp,weapon,crouched\n");
+		fprintf(s_file, "#cols_why,time,id,team,x,y,z,why\n");
 	}
-	// (a line naming the map whenever it changes: the clock restarts with each map)
 	static char s_map[64] = "";
 	static float s_last = 0.0f;
 	if (Q_strcmp(s_map, STRING(gpGlobals->mapname)) != 0 || gpGlobals->time < s_last)
@@ -2021,6 +2020,58 @@ void CCSBot::LsTrace()
 		fprintf(s_file, "#map,%s\n", s_map);
 	}
 	s_last = gpGlobals->time;
+	return s_file;
+}
+
+// A decision: its label, and with bot_ls_trace on a line the moment it's made (a quick one -
+// a flash turn, a runner glance - would otherwise be gone before the next half-second line)
+void CCSBot::LsWhy(const char *why)
+{
+	bool changed = why != m_lsWhy || gpGlobals->time - m_lsWhyAt > 1.0f;
+	m_lsWhy = why;
+	m_lsWhyAt = gpGlobals->time;
+	if (!changed || cv_bot_ls_trace.value <= 0.0f || !why || !why[0])
+		return;
+	FILE *f = LsTraceFile();
+	if (!f)
+		return;
+	fprintf(f, "#why,%.2f,%d,%d,%.0f,%.0f,%.0f,%s\n", gpGlobals->time, entindex(), m_iTeam, pev->origin.x, pev->origin.y, pev->origin.z, why);
+	fflush(f);
+}
+
+// ls_mark [note]: a moment the person playing flagged (a key bound to it): found again later
+// among the bots' lines around that time
+void LsTraceMark()
+{
+	FILE *f = LsTraceFile();
+	if (!f)
+	{
+		CONSOLE_ECHO("ls_mark: can't write lstrace.csv\n");
+		return;
+	}
+	char note[128] = "";
+	for (int i = 1; i < CMD_ARGC() && Q_strlen(note) < 100; i++)
+	{
+		if (i > 1)
+			Q_strlcat(note, " ");
+		Q_strlcat(note, CMD_ARGV(i));
+	}
+	for (char *c = note; *c; c++)
+		if (*c == ',' || *c == '\n' || *c == '\r')
+			*c = ' ';
+	fprintf(f, "#mark,%.2f,%s,%s\n", gpGlobals->time, STRING(gpGlobals->mapname), note);
+	fflush(f);
+	CONSOLE_ECHO("Marked at %.1f%s%s\n", gpGlobals->time, note[0] ? ": " : "", note);
+}
+
+void CCSBot::LsTrace()
+{
+	if (cv_bot_ls_trace.value <= 0.0f || !IsAlive() || gpGlobals->time < m_lsTraceAt)
+		return;
+	m_lsTraceAt = gpGlobals->time + 0.5f;
+	FILE *s_file = LsTraceFile();
+	if (!s_file)
+		return;
 	CBasePlayer *pEnemy = GetEnemy();
 	CBasePlayer *pLeader = IsFollowing() ? GetFollowLeader() : nullptr;
 	Vector goal = HasPath() ? GetPathEndpoint() : Vector(0, 0, 0);
@@ -2028,12 +2079,14 @@ void CCSBot::LsTrace()
 	float speed = float(pev->velocity.Length2D());
 	float off = speed > 1.0f ? NormalizeAngle(pev->v_angle.y - UTIL_VecToYaw(pev->velocity)) : 0.0f;
 	const char *look = (m_lookAtSpotState != NOT_LOOKING_AT_SPOT && m_lookAtDesc) ? m_lookAtDesc : "-";
-	fprintf(s_file, "%.2f,%d,%d,%s,%d,%d,%d,%.0f,%.0f,%.0f,%.0f,%s,%.1f,%.0f,%.0f,%d,%s\n",
+	CBasePlayerItem *pItem = m_pActiveItem;
+	fprintf(s_file, "%.2f,%d,%d,%s,%d,%d,%d,%.0f,%.0f,%.0f,%.0f,%s,%.1f,%.0f,%.0f,%d,%s,%.0f,%.0f,%.0f,%.0f,%d,%d\n",
 		gpGlobals->time, entindex(), m_iTeam, m_state ? m_state->GetName() : "-", int(GetTask()),
 		pEnemy ? pEnemy->entindex() : 0, pLeader ? pLeader->entindex() : 0,
 		goal.x, goal.y, noise ? noise->x : 0.0f, noise ? noise->y : 0.0f,
 		m_lsWhy, m_lsWhy[0] ? gpGlobals->time - m_lsWhyAt : 0.0f,
-		speed, off, IsAttacking() ? 1 : 0, look);
+		speed, off, IsAttacking() ? 1 : 0, look,
+		pev->origin.x, pev->origin.y, pev->origin.z, pev->health, pItem ? pItem->m_iId : 0, (pev->flags & FL_DUCKING) ? 1 : 0);
 	fflush(s_file);
 }
 
