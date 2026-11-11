@@ -67,6 +67,243 @@ void LsCtSiteDeath(CBasePlayer *pVictim)
 	s_hitAt = now;
 }
 
+// ---- threat memory: after backing off from someone ---------------------------------------
+//
+// It saw an enemy and backed off (a retreat, or out of a fight into cover): it remembers where,
+// how many, what they had and when - only what it saw - for as long as it would (a good player
+// most of the round, a newer one a few seconds; careful ones longer, rushers less), keeps
+// glancing that way meanwhile (the angle picks favour it, LsScan), and once it's out of sight
+// makes up its mind: hold from cover, take another angle on them, go back in, go round, fall
+// back to the team - or (a newer one) forget about it. One choice, weighed on what it knows:
+// how many, their gun, hurt or not, its own gun, health and bullets, teammates close by, the
+// bomb and the clock. Skill is how much of that it takes into account and how surely it picks
+// the sensible thing; personality is what it leans to.
+
+bool CCSBot::LsThreatActive() const
+{
+	return m_lsThreatAt > 0.0f && m_lsThreatRound == LsRoundSerial() && gpGlobals->time < m_lsThreatUntil;
+}
+
+void CCSBot::LsThreatNote()
+{
+	if (!LsFight() || LsSolo() || !LsTeamGame() || !TheCSBots())
+		return;
+	CBasePlayer *pEnemy = GetEnemy();
+	if (!pEnemy || !pEnemy->IsAlive() || GetTimeSinceLastSawEnemy() > 3.0f)
+		return;
+	float now = gpGlobals->time;
+	// (the same ones it just made up its mind about - a fall back it chose is a retreat too -
+	// aren't news: no fresh decision, round and round)
+	if (m_lsThreatDecided && now - m_lsThreatDecidedAt < 8.0f && (GetLastKnownEnemyPosition() - m_lsThreatPos).IsLengthLessThan(400.0f))
+		return;
+	float skill = LsSkill();
+	int style = LsStyle();
+	m_lsThreatPos = GetLastKnownEnemyPosition();
+	m_lsThreatFrom = pev->origin;
+	m_lsThreatAt = now;
+	m_lsThreatRound = LsRoundSerial();
+	m_lsThreatWho = pEnemy->entindex();
+	m_lsThreatCount = Q_max(1, GetNearbyEnemyCount());
+	m_lsThreatSniper = LsGunClass(pEnemy) == LSG_SNIPER;
+	m_lsThreatDecided = false;
+	// (the better ones make up their minds sooner)
+	m_lsThreatDecideAt = now + 1.0f + 2.5f * (1.0f - skill) + RANDOM_FLOAT(0.0f, 1.0f);
+	float keep = 12.0f + 80.0f * skill;
+	if (style == LS_STYLE_CAREFUL || style == LS_STYLE_CAMPER || style == LS_STYLE_AWPER)
+		keep *= 1.3f;
+	else if (style == LS_STYLE_RUSHER || style == LS_STYLE_KNIFER)
+		keep *= 0.8f;
+	m_lsThreatUntil = now + keep;
+	// (and that spot as a little danger in its own memory)
+	CNavArea *area = TheNavAreaGrid.GetNearestNavArea(&m_lsThreatPos);
+	if (area)
+		LsAddDangerNearby(0.25f + 0.1f * float(Q_min(3, m_lsThreatCount)), area, &m_lsThreatPos, 350.0f);
+	LsTraceNote("threat: remembered");
+}
+
+void CCSBot::LsThreatTick()
+{
+	float now = gpGlobals->time;
+	if (m_lsThreatDecided || !LsThreatActive() || now < m_lsThreatDecideAt)
+		return;
+	// (a CT racing the bomb, a plant, a defuse, hostages, an order, the bomb on its back, the
+	// team's own site take: no choice of its own to make about them - that comes first)
+	if (LsRetakeRush() || IsDefusingBomb() || m_state == &m_plantBombState || IsEscapingFromBomb() || GetHostageEscortCount() > 0
+		|| LsOrderActive() || LsPuppetActive() || m_lsSaving || IsCarryingBomb() || m_bIsVIP || LsExecuting())
+	{
+		m_lsThreatDecided = true;
+		m_lsThreatDecidedAt = now;
+		return;
+	}
+	// (out of sight of them first: in a fight it's the fight; and still on its way into cover:
+	// once it's there)
+	if (IsAttacking() || IsEnemyVisible() || (IsHiding() && pev->velocity.Length2D() > 60.0f))
+		return;
+	m_lsThreatDecided = true;
+	m_lsThreatDecidedAt = now;
+
+	float skill = LsSkill(), aggro = LsAggro(), team = LsTeamwork();
+	int style = LsStyle();
+	bool careful = style == LS_STYLE_CAREFUL || style == LS_STYLE_CAMPER || style == LS_STYLE_AWPER;
+	bool bold = style == LS_STYLE_RUSHER || style == LS_STYLE_KNIFER;
+	bool sneaky = style == LS_STYLE_LURKER || style == LS_STYLE_NINJA;
+	// what it knows (how much of it counts: "see", its skill - a newer one goes on fear and
+	// impatience, a good one weighs the whole picture)
+	float see = skill;
+	int many = m_lsThreatCount;
+	float hp = LsHealth();
+	int mine = LsGunClass(this);
+	bool empty = LsOutOfAmmo();
+	CBasePlayer *pFoe = UTIL_PlayerByIndex(m_lsThreatWho);
+	float foeHp = 100.0f;
+	bool hurt = pFoe && pFoe->IsAlive() && LsKnownHurt(pFoe, m_iTeam, &foeHp) && foeHp < 50.0f;
+	int mates = 0;
+	LsForTeammates(this, [&](CBasePlayer *pPlayer) {
+		if ((pPlayer->pev->origin - pev->origin).IsLengthLessThan(800.0f))
+			mates++;
+	});
+	bool bombMap = TheCSBots()->GetScenario() == CCSBotManager::SCENARIO_DEFUSE_BOMB;
+	bool planted = TheCSBots()->IsBombPlanted();
+	bool mustGo = bombMap && ((planted && m_iTeam == CT) || (!planted && m_iTeam == TERRORIST && LsTimeLeft() < 30.0f));
+	bool timeOnSide = bombMap && !planted && m_iTeam == CT;
+
+	enum { HOLD, ANGLE, PEEK, ROUND, BACK, FORGET, NUM };
+	float w[NUM];
+	w[HOLD] = 1.0f + (careful ? 0.8f : 0.0f) + (timeOnSide ? 0.5f : 0.0f) + (mine == LSG_SNIPER ? 0.6f : 0.0f) + see * (many >= 2 ? 0.6f : 0.0f);
+	w[ANGLE] = 0.2f + 1.3f * skill + see * (m_lsThreatSniper ? 0.9f : 0.0f) + (careful ? 0.3f : 0.0f);
+	w[PEEK] = 0.3f + 1.0f * aggro + (bold ? 0.8f : 0.0f) + see * (hurt ? 1.2f : 0.0f) + see * 0.4f * float(Q_min(2, mates)) + (mustGo ? 1.5f : 0.0f);
+	// (the better ones don't walk back into three of them, nor alone into two)
+	if (many >= 3)
+		w[PEEK] *= 1.0f - 0.7f * see;
+	else if (many == 2 && mates == 0)
+		w[PEEK] *= 1.0f - 0.4f * see;
+	w[ROUND] = (sneaky ? 1.1f : 0.0f) + 0.3f * skill + (many == 1 ? 0.3f : 0.0f) + (mustGo ? 0.4f : 0.0f);
+	w[BACK] = see * (many >= 3 ? 1.5f : (many == 2 && mates == 0) ? 0.6f : 0.0f) + (hp < 40.0f ? 0.6f : 0.0f) + 0.4f * team + (empty ? 2.5f : 0.0f);
+	w[FORGET] = 1.2f * (1.0f - skill) * (1.0f - skill);
+	if (mustGo)
+	{
+		w[HOLD] *= 0.3f;
+		w[BACK] *= 0.2f;
+		w[FORGET] = 0.0f;
+	}
+	if (empty)
+		w[PEEK] = w[ROUND] = 0.0f;
+	// (the better it is, the more surely the best of them; a newer one's pick is looser)
+	float sharp = 1.0f + 3.0f * skill;
+	float total = 0.0f;
+	for (int i = 0; i < NUM; i++)
+	{
+		w[i] = w[i] > 0.0f ? powf(w[i], sharp) : 0.0f;
+		total += w[i];
+	}
+	if (total <= 0.0f)
+		return;
+	float roll = RANDOM_FLOAT(0.0f, total);
+	int pick = FORGET;
+	for (int i = 0; i < NUM; i++)
+	{
+		if (roll < w[i])
+		{
+			pick = i;
+			break;
+		}
+		roll -= w[i];
+	}
+
+	CNavArea *threatArea = TheNavAreaGrid.GetNearestNavArea(&m_lsThreatPos);
+	// another angle on them: close by, sees the spot, away from where it was seen from
+	if (pick == ANGLE)
+	{
+		CNavArea *bestArea = nullptr;
+		float bestD = 900.0f;
+		if (threatArea && LsSightReady())
+		{
+			for (auto area : TheNavAreaList)
+			{
+				const Vector &c = *area->GetCenter();
+				float d = float((c - pev->origin).Length2D());
+				if (d >= bestD || Q_abs(c.z - pev->origin.z) > 200.0f)
+					continue;
+				float toThreat = float((c - m_lsThreatPos).Length2D());
+				if (toThreat < 300.0f || toThreat > 1600.0f || (c - m_lsThreatFrom).IsLengthLessThan(250.0f) || LsBadArea(area))
+					continue;
+				if (!LsSees(area, threatArea))
+					continue;
+				bool taken = false;
+				LsForTeammates(this, [&](CBasePlayer *pPlayer) {
+					if ((pPlayer->pev->origin - c).IsLengthLessThan(120.0f))
+						taken = true;
+				});
+				if (taken)
+					continue;
+				bestD = d;
+				bestArea = area;
+			}
+		}
+		if (bestArea)
+		{
+			Vector spot = *bestArea->GetCenter();
+			Hide(&spot, RANDOM_FLOAT(6.0f, 14.0f) * (careful ? 1.3f : 1.0f), true);
+			LsWhy("threat: another angle on them");
+			return;
+		}
+		pick = HOLD;
+	}
+	switch (pick)
+	{
+	case HOLD:
+	{
+		// (where it is, eyes on the way they'd come)
+		Vector here = pev->origin;
+		Hide(&here, RANDOM_FLOAT(5.0f, 12.0f) * (careful ? 1.4f : 1.0f), true);
+		LsPreAim(m_lsThreatPos, RANDOM_FLOAT(3.0f, 6.0f));
+		LsWhy("threat: holding it");
+		break;
+	}
+	case PEEK:
+	{
+		Vector to = m_lsThreatPos;
+		MoveTo(&to, FASTEST_ROUTE);
+		LsWhy("threat: back in on them");
+		break;
+	}
+	case ROUND:
+	{
+		Vector to = m_lsThreatPos;
+		MoveTo(&to, SAFEST_ROUTE);
+		LsWhy("threat: going round");
+		break;
+	}
+	case BACK:
+	{
+		CBasePlayer *pMate = nullptr;
+		float best = 2500.0f;
+		LsForTeammates(this, [&](CBasePlayer *pPlayer) {
+			float d = float((pPlayer->pev->origin - pev->origin).Length());
+			if (d > 250.0f && d < best)
+			{
+				best = d;
+				pMate = pPlayer;
+			}
+		});
+		if (pMate)
+		{
+			Vector to = pMate->pev->origin;
+			MoveTo(&to, SAFEST_ROUTE);
+		}
+		else
+			TryToRetreat();
+		LsWhy("threat: falling back to the team");
+		break;
+	}
+	default:
+		// (out of sight, out of mind)
+		m_lsThreatUntil = now + 3.0f;
+		LsWhy("threat: forgot about them");
+		break;
+	}
+}
+
 // Out of bullets, how likely it still goes in with the knife: a knifer often, a rusher or a bold
 // newer player now and then, nearly never a good careful one
 static float LsEmptyDare(const CCSBot *me)
@@ -658,6 +895,9 @@ void CCSBot::LsTeamTick()
 			LsWhy("out of ammo: with a teammate");
 		}
 	}
+
+	// someone it backed off from: what to do about them
+	LsThreatTick();
 
 	// the round's over: a bot without a gun picks one up from the floor close by
 	if (TheCSBots()->IsRoundOver() && m_lsPickupRound != round && !m_bHasPrimary && !IsAttacking() && !LsWeaponModeOn())

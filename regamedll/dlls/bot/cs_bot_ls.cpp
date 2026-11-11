@@ -4567,6 +4567,10 @@ bool CCSBot::LsScanAngles(bool holding)
 		// (near something heard or seen lately)
 		if ((noiseFresh && (tc - m_noisePosition).IsLengthLessThan(600.0f)) || (sawFresh && (tc - GetLastKnownEnemyPosition()).IsLengthLessThan(600.0f)))
 			score *= 2.5f;
+		// (someone it backed off from, still remembered: that way is watched - the better ones
+		// and the careful keep coming back to it)
+		else if (LsThreatActive() && (tc - m_lsThreatPos).IsLengthLessThan(600.0f))
+			score *= 1.5f + 1.2f * skill + ((style == LS_STYLE_CAREFUL || style == LS_STYLE_CAMPER) ? 0.5f : 0.0f);
 		// (moving: ahead first, nobody walks backwards into somewhere unchecked; behind only
 		// once what's ahead is checked, and then just a quick look over the shoulder)
 		float off = float(Q_abs(NormalizeAngle(UTIL_VecToYaw(tc - pev->origin) - heading)));
@@ -5438,6 +5442,8 @@ bool CCSBot::LsTakeCoverFrom(const Vector &threat, float minMove, bool fromFight
 	float travel = float((spot - pev->origin).Length2D()) / 230.0f;
 	if (fromFight)
 	{
+		// (backing out of a fight: it remembers who it backed off from)
+		LsThreatNote();
 		StopAttacking();
 		IgnoreEnemies(Q_min(2.5f, travel + (!LsSolo() ? 0.3f : 0.1f)));
 	}

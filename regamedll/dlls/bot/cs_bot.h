@@ -1350,7 +1350,10 @@ public:
 	bool LsPickSteady();
 	bool LsMayBackOff(const Vector &toEnemy);
 	bool LsHoldFireToStop(float range);
-	void LsTraceNote(const char *note);				// a line in the trace (a #why) without changing what it's doing
+	void LsTraceNote(const char *note);
+	void LsThreatNote();							// backed off from someone: remembered (cs_bot_ls_team.cpp)
+	void LsThreatTick();							// and what to do about them, once out of sight
+	bool LsThreatActive() const;					// still remembered				// a line in the trace (a #why) without changing what it's doing
 	float m_lsStopNoteAt = -10.0f;					// trace: when its stop habit was last noted
 	int LsStopStyle();								// its habit for stopping to shoot: 0 run, 1 crouch, 2 walk, 3 counter-strafe
 	bool LsStopGun() const;							// a gun worth stopping for (rifles, the Deagle)
@@ -1482,6 +1485,18 @@ private:
 	float m_lsSaveSeenAt[MAX_CLIENTS] = {};			// saving: when each enemy was last in view (a fresh sighting rolls)
 	float m_lsSaveShotAt = 0.0f;					// when it fires the free shot (0: not taking one)
 	float m_lsBarrelCheckAt[MAX_CLIENTS] = {};		// per enemy: next look for a gun sticking out
+	// threat memory: an enemy it backed off from (cs_bot_ls_team.cpp LsThreatNote)
+	Vector m_lsThreatPos;							// where it last saw them
+	Vector m_lsThreatFrom;							// where it was when it saw them
+	float m_lsThreatAt = 0.0f;						// when (0: nothing remembered)
+	float m_lsThreatUntil = 0.0f;					// remembered until
+	float m_lsThreatDecideAt = 0.0f;				// when it makes up its mind about them
+	int m_lsThreatCount = 0;						// how many it saw
+	int m_lsThreatWho = 0;							// the one it was fighting (entity index)
+	int m_lsThreatRound = -1;
+	bool m_lsThreatSniper = false;					// they had a sniper rifle
+	bool m_lsThreatDecided = true;
+	float m_lsThreatDecidedAt = -100.0f;			// when it last made up its mind (a fall back it chose isn't noted again)
 	float m_lsPushUntil = 0.0f;						// running at them until
 	float m_lsYaw = 0.0f;							// eased heading
 	float m_lsYawAt = 0.0f;							// when it was last eased

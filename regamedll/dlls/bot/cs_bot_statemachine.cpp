@@ -284,6 +284,7 @@ bool CCSBot::TryToRetreat()
 		Run();
 		Hide(spot, holdTime);
 		LsFallBack();	// Loner-Strike: eyes on the threat, not its back to it
+		LsThreatNote();	// Loner-Strike: and remembers them
 
 		PrintIfWatched("Retreating to a safe spot!\n");
 		return true;
