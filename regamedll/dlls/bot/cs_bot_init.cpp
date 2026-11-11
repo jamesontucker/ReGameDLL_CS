@@ -206,6 +206,8 @@ void CCSBot::ResetValues()
 	m_lsDuckAt = -999.0f;
 	m_lsReloadCrouchAt = 0.0f;
 	m_lsKnifeOkUntil = 0.0f;
+	m_lsRushHoldUntil = 0.0f;
+	m_lsRushHoldCheckAt = 0.0f;
 	m_lsReloadCrouched = false;
 	for (int i = 0; i < MAX_CLIENTS; i++)
 		m_lsRushHeardAt[i] = -999.0f;

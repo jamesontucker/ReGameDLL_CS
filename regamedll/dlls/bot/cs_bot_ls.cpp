@@ -694,7 +694,8 @@ bool CCSBot::LsBusy() const
 {
 	return IsDefusingBomb() || IsEscapingFromBomb() || TheCSBots()->IsBombPlanted() || m_isWaitingToTossGrenade
 		|| GetHostageEscortCount() > 0 || IsHurrying() || GetTimeSinceAttacked() < 3.0f || IsSurprised()
-		|| (IsCarryingBomb() && !(CSGameRules() && CSGameRules()->IsFreezePeriod()));
+		|| (IsCarryingBomb() && !(CSGameRules() && CSGameRules()->IsFreezePeriod()))
+		|| const_cast<CCSBot *>(this)->LsRushing();	// (the team's push onto a site, a retake)
 }
 
 // Too busy for a person's order (follow me, go b, wait): the bomb, a hostage, a grenade
@@ -939,7 +940,8 @@ void CCSBot::LsOrderTick()
 		}
 		// (sent off it by something: a fight that's over, a state change; on its way again; but
 		// a spot it can't get to is given up)
-		if (!IsMovingTo() && now >= o.nextTry)
+		// (in cover for a moment - from a rush, a shot - it waits: no try spent)
+		if (!IsMovingTo() && !IsHiding() && now >= o.nextTry)
 		{
 			if (++o.tries > 2)
 			{
@@ -2016,6 +2018,9 @@ void CCSBot::LsShotAt(CBasePlayer *pShooter, const Vector &impact)
 	if (gpGlobals->time - m_lsShotAtAt < 0.8f)
 		return;
 	m_lsShotAtAt = gpGlobals->time;
+	// (shot at: no hold keeps it standing there, a person's "wait" included)
+	if (LsPuppetActive())
+		LsPuppetRelease();
 	m_lsShotBy = pShooter;
 	{
 		float away = float((pShooter->pev->origin - pev->origin).Length());
@@ -2414,7 +2419,8 @@ void CCSBot::LsHeard(GameEventType event, CBasePlayer *pPlayer, float dist)
 		m_lsFightHeardAt = now;
 	}
 	// (a plugin's hold or look gives way to an enemy heard close by)
-	if (LsPuppetActive() && dist < 700.0f)
+	// (not a person's "wait" or "follow me": those only give way to what an order does)
+	if (LsPuppetActive() && dist < 700.0f && !(now < m_lsPuppet.followUntil || FStrEq(m_lsPuppet.holdTag, "bc")))
 		LsPuppetRelease();
 	bool busy = m_state == &m_plantBombState || m_state == &m_defuseBombState || IsUsingLadder() || m_lsSaving || LsPuppetActive() || IsBlind();
 
@@ -4375,7 +4381,7 @@ void CCSBot::LsHeardBreak(CBaseEntity *pBreak)
 
 // The nearest spot (within 500 units, at least minMove away, not toward the threat) a
 // standing head there is out of the threat's sight: it runs there
-bool CCSBot::LsTakeCoverFrom(const Vector &threat, float minMove, bool fromFight)
+bool CCSBot::LsTakeCoverFrom(const Vector &threat, float minMove, bool fromFight, float holdSecs)
 {
 	if (!m_lastKnownArea || IsUsingLadder() || (IsAttacking() && !fromFight))
 		return false;
@@ -4440,6 +4446,11 @@ bool CCSBot::LsTakeCoverFrom(const Vector &threat, float minMove, bool fromFight
 		hold *= 1.3f;
 	else if (style == LS_STYLE_RUSHER)
 		hold *= 0.6f;
+	if (holdSecs >= 0.0f)
+		hold = holdSecs;
+	// (a dash: no sneaking, crouch-walking or pausing on the way; a slow route gets more time)
+	travel *= 1.4f;
+	Hurry(travel + 0.5f);
 	Hide(&spot, hold + travel);
 	LsFallBack();
 	m_lsBackFrom = threat + Vector(0, 0, HalfHumanHeight + LsLookHeight());
@@ -4521,6 +4532,13 @@ float CCSBot::LsFallMargin()
 bool CCSBot::LsMatchup(CBasePlayer *pEnemy, bool crouchAndHold)
 {
 	float now = gpGlobals->time;
+	// (reloaded behind low cover: back up, whether or not the enemy's in view from down there)
+	if (m_lsReloadCrouched && !IsReloading())
+	{
+		m_lsReloadCrouched = false;
+		if (!crouchAndHold && m_lsDuckUntil <= 0.0f)
+			StandUp();
+	}
 	// hit with low cover in front: down behind it a moment, then back up to shoot (the better
 	// ones; on aim maps it's how the whole fight goes: from the box, not out in the open)
 	// (not a bot holding crouched there anyway: that's its own habit)
@@ -4563,13 +4581,7 @@ bool CCSBot::LsMatchup(CBasePlayer *pEnemy, bool crouchAndHold)
 	}
 	// (most of the time, more often the better it is: not every reload like a script; decided
 	// once per reload)
-	if (m_lsReloadCrouched && !IsReloading())
-	{
-		m_lsReloadCrouched = false;
-		if (!crouchAndHold && m_lsDuckUntil <= 0.0f)
-			StandUp();
-	}
-	else if (IsReloading() && !crouchAndHold && skill > 0.4f && now > m_lsReloadCrouchAt)
+	if (IsReloading() && !crouchAndHold && skill > 0.4f && now > m_lsReloadCrouchAt)
 	{
 		m_lsReloadCrouchAt = now + 3.0f;
 		if (RANDOM_FLOAT(0.0f, 1.0f) < 0.45f + 0.5f * skill && LsLowCoverToward(pEnemy->pev->origin))
@@ -4725,11 +4737,47 @@ bool CCSBot::LsRushed(const Vector *threat)
 		return false;
 	Vector from = sum * (1.0f / float(count));
 	const CNavArea *here = m_lastKnownArea;
-	if (!LsTakeCoverFrom(from, 0.0f, IsAttacking()))
+	// (the better ones wait for the team in there - until one turns up, or they've gone quiet -
+	// not peek straight back into the stack; never past what the round's clock allows)
+	float wait = Q_min(5.0f + 7.0f * skill, Q_max(1.5f, LsTimeLeft() - 25.0f));
+	if (LsStyle() == LS_STYLE_RUSHER)
+		wait *= 0.5f;
+	if (!LsTakeCoverFrom(from, 0.0f, IsAttacking(), wait))
 		return false;
+	m_lsRushHoldUntil = now + wait + 3.0f;
 	if (here)
 		LsForceBadArea(here, 8.0f + 6.0f * skill);
 	GetChatter()->Scared();
 	LsWhy("rushed: back to cover");
 	return true;
+}
+
+// In cover from a rush, waiting for its team: it comes out when a teammate's close by, or it's
+// been quiet a few seconds (none of them seen or heard running at it)
+void CCSBot::LsRushHoldTick()
+{
+	float now = gpGlobals->time;
+	if (m_lsRushHoldUntil <= 0.0f || now < m_lsRushHoldCheckAt)
+		return;
+	m_lsRushHoldCheckAt = now + 0.5f;
+	if (!IsHiding() || now > m_lsRushHoldUntil || IsAttacking())
+	{
+		m_lsRushHoldUntil = 0.0f;
+		return;
+	}
+	bool mate = false;
+	LsForTeammates(this, [&](CBasePlayer *pPlayer) {
+		if ((pPlayer->pev->origin - pev->origin).IsLengthLessThan(500.0f))
+			mate = true;
+	});
+	bool quiet = now - m_lsRushedAt > 3.0f && GetTimeSinceLastSawEnemy() > 3.0f;
+	for (int i = 0; i < MAX_CLIENTS && quiet; i++)
+		if (now - m_lsRushHeardAt[i] < 2.0f)
+			quiet = false;
+	if (mate || quiet)
+	{
+		m_lsRushHoldUntil = 0.0f;
+		Idle();
+		LsWhy(mate ? "team's here: out of cover" : "gone quiet: out of cover");
+	}
 }

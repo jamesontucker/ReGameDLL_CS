@@ -1206,7 +1206,7 @@ public:
 	void LsHeardBreak(CBaseEntity *pBreak);		// glass, a vent cover, a board breaking: someone's there
 	void LsHurtBy(CBasePlayer *pAttacker);		// hit: through a wall? that spot's not safe
 	bool LsPreAim(const Vector &heard, float secs);	// look where a sound will come out (the area's angles)
-	bool LsTakeCoverFrom(const Vector &threat, float minMove, bool fromFight = false);	// to the nearest spot out of its sight, a short hold there
+	bool LsTakeCoverFrom(const Vector &threat, float minMove, bool fromFight = false, float holdSecs = -1.0f);	// to the nearest spot out of its sight, a short hold there
 	bool LsMatchup(CBasePlayer *pEnemy, bool crouchAndHold);		// mid-fight: the wrong gun for this range (an AWP down a lane): out of it
 	bool LsLowCoverToward(const Vector &at);	// low cover right by it that way (crouch behind it)
 	float LsFallMargin();						// how close to dying from a drop it'll go (pros never close)
@@ -1215,7 +1215,10 @@ public:
 	float m_lsDuckUntil = 0.0f;				// down behind low cover until, and when it may again
 	float m_lsDuckAt = -999.0f;
 	float m_lsReloadCrouchAt = 0.0f;			// whether to crouch for this reload was decided (until then)
-	float m_lsKnifeOkUntil = 0.0f;				// a plugin's knife out on purpose, left alone until then
+	float m_lsKnifeOkUntil = 0.0f;
+	float m_lsRushHoldUntil = 0.0f;			// in cover from a rush, waiting for its team, until (at most)
+	float m_lsRushHoldCheckAt = 0.0f;
+	void LsRushHoldTick();				// a plugin's knife out on purpose, left alone until then
 	bool m_lsReloadCrouched = false;			// ...and it did (up again when it's done)
 	bool LsRushed(const Vector *threat);		// many more of them coming at it than its side has here: back to cover
 	float m_lsRushHeardAt[MAX_CLIENTS];			// each enemy last heard running toward it, close

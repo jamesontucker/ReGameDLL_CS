@@ -260,6 +260,11 @@ bool CCSBot::TryToHide(CNavArea *searchFromArea, float duration, float hideRange
 // Retreat to a nearby hiding spot, away from enemies
 bool CCSBot::TryToRetreat()
 {
+	// (Loner-Strike: never off a plant or a defuse, a run from the bomb, hostages, nor a CT's
+	// late retake: no time to hide)
+	if (LsFight() && (m_state == &m_plantBombState || m_state == &m_defuseBombState || IsEscapingFromBomb() || GetHostageEscortCount() > 0
+		|| (m_iTeam == CT && TheCSBots()->IsBombPlanted() && TheCSBots()->GetBombTimeLeft() < 15.0f)))
+		return false;
 	const float maxRange = 1000.0f;
 	const Vector *spot = FindNearbyRetreatSpot(this, maxRange);
 

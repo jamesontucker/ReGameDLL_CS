@@ -972,6 +972,9 @@ bool CCSBot::LsOverwhelmed()
 	if (now - m_lsOverwhelmedAt > 0.5f || now < m_lsOverwhelmRollAt)
 		return false;
 	m_lsOverwhelmRollAt = now + 4.0f;
+	// (a newer player doesn't read being outnumbered: it takes the fight)
+	if (RANDOM_FLOAT(0.0f, 1.0f) > 0.35f + 0.65f * LsSkill())
+		return false;
 	float bold = 0.6f * LsAggro() + 0.4f * LsTrait(92);
 	return RANDOM_FLOAT(0.0f, 1.0f) > 0.25f + 0.6f * bold + (LsHealth() > 80.0f ? 0.1f : 0.0f);
 }

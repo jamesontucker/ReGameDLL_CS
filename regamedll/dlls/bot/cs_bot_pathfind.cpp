@@ -1367,7 +1367,8 @@ CCSBot::PathResult CCSBot::UpdatePathMovement(bool allowSpeedChange)
 	if (m_pathIndex < m_pathLength - 1 && (m_goalPosition - pev->origin).IsLengthLessThan(nearCornerRange))
 	{
 		// Loner-Strike: or strafe round it looking into the opening, as players peek
-		if (!LsCornerPeek())
+		// (only an idle look: a reaction - a sound, being shot at - stays)
+		if (!LsCornerPeek() && (!LsFight() || m_lookAtSpotState == NOT_LOOKING_AT_SPOT || m_lookAtSpotPriority <= PRIORITY_LOW))
 		{
 			ClearLookAt();
 			InhibitLookAround(0.5f);

@@ -447,7 +447,7 @@ void AttackState::OnUpdate(CCSBot *me)
 		// (Loner-Strike: ducked behind its own cover - a duck, a crouch to reload - it knows just
 		// where they are: none of the "they went behind cover" reactions (ambush, a spray at the
 		// wall, a chase))
-		if (LsFight() && (me->m_lsDuckUntil > 0.0f || me->m_lsReloadCrouched))
+		if (LsFight() && (me->m_lsDuckUntil > 0.0f || (me->m_lsReloadCrouched && me->IsReloading())))
 			return;
 
 		// attend to nearby enemy gunfire

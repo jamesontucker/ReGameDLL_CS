@@ -387,6 +387,7 @@ void CCSBot::Update()
 	LsBumpCheck();
 	LsCrouchWalk();
 	LsDoorButton();
+	LsRushHoldTick();
 
 	// (Loner-Strike: who it's fighting, for the plugins to follow (gm_humanbots times its
 	// reaction and aim for the same one): pev->euser4, nothing else uses it)

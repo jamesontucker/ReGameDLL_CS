@@ -775,6 +775,12 @@ void CCSBot::ReloadCheck()
 			if (GetTimeSinceLastSawEnemy() < safeTime)
 			{
 				PrintIfWatched("Retreating to a safe spot to reload!\n");
+				// (Loner-Strike: the nearest spot out of their line, held while it reloads)
+				if (LsFight() && !IsAttacking() && LsTakeCoverFrom(GetLastKnownEnemyPosition(), 0.0f, false, 2.5f))
+				{
+					LsWhy("reload-cover");
+					return;
+				}
 				const Vector *spot = FindNearbyRetreatSpot(this, 1000.0f);
 				if (spot)
 				{
