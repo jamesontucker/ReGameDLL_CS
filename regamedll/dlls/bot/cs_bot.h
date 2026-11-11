@@ -1285,6 +1285,15 @@ public:
 	void LsSmokeLaneTick();
 	void LsFlashWatch();							// a flashbang about to pop in front of it: turn away (the better ones)
 	float m_lsFlashCheckAt = 0.0f, m_lsFlashAwayUntil = 0.0f;
+	float m_lsFlashPopAt = -999.0f;					// a flash it saw go off (or a teammate's, called out): when and where
+	Vector m_lsFlashPopPos;
+	float m_lsFlashGuess = 2.0f;					// how long it reckons that flash blinds (closer the better it is)
+	float m_lsFlashHeardAt = -999.0f;				// a bang heard (not seen): where, roughly
+	Vector m_lsFlashHeardPos;
+	float m_lsFlashBackAt = 0.0f;					// after turning its back to an enemy flash: when to look back where it came from
+	Vector m_lsFlashBackPos;
+	int m_lsAwayWho = 0;							// the enemy in view that has had its back (or side) to it since
+	float m_lsAwaySince = 0.0f;
 	bool LsLadderExposed() const;					// enemies about: a ladder is a bad place to be
 	bool LsAwpKnownToward(const Vector &dir2d) const;	// an AWPer known (heard, the feed) roughly that way
 	bool m_lsJumpPeek = false;						// this corner's jiggle is a jump-peek (baiting an AWP)
@@ -1470,6 +1479,9 @@ private:
 	enum { LSR_NONE, LSR_ENTRY, LSR_TRADE, LSR_FLANK, LSR_SNIPER };
 	int m_lsRole = LSR_NONE;						// its part in the push this round (picked from what the others are doing)
 	int m_lsRoleRound = -1;
+	int m_lsCallRound = -1;							// the round it said yes to a person's "rush b" / "go b" (in the push, whatever its habits)
+	int m_lsCallSkipRound = -1;						// the round it heard that call and did its own thing instead
+	float LsEntryScore();							// how fit it is to go in first (style, nerve, gun, health)
 	float m_lsTradeGoAt = 0.0f;						// a trader goes in a beat after the entry
 	int m_lsPerchRound = -1;						// the round an AWPer took a perch
 	float m_lsPerchTryAt = 0.0f;
@@ -1723,6 +1735,8 @@ bool LsHeSafe(CCSBot *me, const Vector &burst);
 float LsTimeLeft();	// the round's time left (a lot, when the round never runs out)
 int LsRoundSerial();
 const CCSBotManager::Zone *LsTSite();	// the Ts' site this round
+void LsTeamCall(const CCSBotManager::Zone *zone, bool rush);	// a person called the site ("rush b"): the team's site, rushed or gathered
+bool LsTeamCalled(bool *rush);			// a person called this round's site (and whether it was a rush)
 void LsTSiteDeath(CBasePlayer *pVictim);	// a T down at it early: two and the team goes for the other	// a count of rounds that only goes up (a restart sets the game's own back to 0)
 void Bot_LsRegisterCVars();
 void LsTraceMark();						// ls_mark [note]: a moment flagged in lstrace.csv

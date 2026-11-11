@@ -681,10 +681,37 @@ int CCSBot::LsPickRole()
 		role = LSR_SNIPER;
 	else if ((style == LS_STYLE_LURKER || style == LS_STYLE_NINJA) && s_roleCount[LSR_FLANK] == 0 && alive >= 3)
 		role = LSR_FLANK;
-	else if (s_roleCount[LSR_ENTRY] == 0 || ((style == LS_STYLE_RUSHER || LsAggro() > 0.65f) && s_roleCount[LSR_ENTRY] < 2))
-		role = LSR_ENTRY;
 	else
-		role = LSR_TRADE;
+	{
+		// (the entry goes to whoever suits it best of those still to pick, not the first to
+		// think: a careful one doesn't go first just because it got there first. Only ones in
+		// the push and close enough to go in count)
+		int round = LsRoundSerial();
+		float mine = LsEntryScore();
+		int better = 0;
+		for (int i = 1; i <= gpGlobals->maxClients; i++)
+		{
+			CBasePlayer *pT = UTIL_PlayerByIndex(i);
+			if (!pT || pT == this || FNullEnt(pT->pev) || !pT->IsAlive() || !pT->IsBot() || pT->m_iTeam != TERRORIST)
+				continue;
+			CCSBot *pB = static_cast<CCSBot *>(pT);
+			// (nor ones whose part is already plain: a flanker-to-be, the sniper, the bomb, one in a fight)
+			int st = pB->LsStyle();
+			if (pB->IsCarryingBomb() || pB->IsAttacking() || LsGunClass(pB) == LSG_SNIPER
+				|| ((st == LS_STYLE_LURKER || st == LS_STYLE_NINJA) && s_roleCount[LSR_FLANK] == 0 && alive >= 3))
+				continue;
+			if (pB->m_lsRoleRound == round || pB->LsOrderActive() || pB->LsLurksOtherSite() || !s_execSite
+				|| (s_execSite->m_center - pB->pev->origin).Make2D().IsLengthGreaterThan(1700.0f))
+				continue;
+			if (pB->LsEntryScore() > mine)
+				better++;
+		}
+		bool bold = style == LS_STYLE_RUSHER || LsAggro() > 0.65f;
+		if (better == 0 && (s_roleCount[LSR_ENTRY] == 0 || (bold && s_roleCount[LSR_ENTRY] < 2)))
+			role = LSR_ENTRY;
+		else
+			role = LSR_TRADE;
+	}
 	s_roleCount[role]++;
 	return role;
 }
@@ -781,7 +808,33 @@ bool CCSBot::LsTakePerch(const CCSBotManager::Zone *site, bool tSide)
 
 bool CCSBot::LsLurksOtherSite()
 {
+	// (said yes to a person's call: with the team; heard it and passed: its own way, the other site)
+	int round = LsRoundSerial();
+	if (m_lsCallRound == round || IsCarryingBomb())
+		return false;
+	if (m_lsCallSkipRound == round)
+		return true;
 	return LsStyle() == LS_STYLE_LURKER ? LsTrait(89) < 0.6f : LsTrait(89) < 0.12f;
+}
+
+// How fit it is to go in first: the bold and the rushers, a gun for close work, health; never
+// the bomb (it follows the entry in) nor a sniper (that's the perch)
+float CCSBot::LsEntryScore()
+{
+	int style = LsStyle();
+	float score = LsAggro() + 0.4f * LsSkill() + 0.3f * float(pev->health) / 100.0f;
+	if (style == LS_STYLE_RUSHER || style == LS_STYLE_KNIFER)
+		score += 1.0f;
+	else if (style == LS_STYLE_CAREFUL || style == LS_STYLE_CAMPER || style == LS_STYLE_AWPER)
+		score -= 0.5f;
+	int gun = LsGunClass(this);
+	if (gun == LSG_RIFLE || gun == LSG_SMG || gun == LSG_SHOTGUN || gun == LSG_MG)
+		score += 0.3f;
+	else if (gun == LSG_SNIPER)
+		score -= 1.5f;
+	if (IsCarryingBomb())
+		score -= 2.0f;
+	return score;
 }
 
 bool CCSBot::LsExecuting()
@@ -804,7 +857,7 @@ void CCSBot::LsExecuteTick()
 	int round = LsRoundSerial();
 	float now = gpGlobals->time;
 	const CCSBotManager::Zone *site = LsTSite();
-	if (!site || LsLurksOtherSite() || GetFriendsRemaining() == 0)
+	if (!site || LsLurksOtherSite() || (GetFriendsRemaining() == 0 && m_lsCallRound != round))
 		return;
 	LsExecuteRound(site);
 	// (its own marks count for this round's site only: a switch starts over)
@@ -822,6 +875,9 @@ void CCSBot::LsExecuteTick()
 			&& (m_lsPushDest - pev->origin).Make2D().IsLengthLessThan(150.0f))
 		{
 			m_lsPushArrived = true;
+			// (a person's call done: gm_botchat's "still on it" mark goes)
+			if (m_lsCallRound == round)
+				pev->vuser1.x = 0.0f;
 			Hide(GetLastKnownArea(), RANDOM_FLOAT(6.0f, 14.0f), 300.0f);
 			LsWhy("execute: holding the site");
 		}
@@ -843,6 +899,24 @@ void CCSBot::LsExecuteTick()
 			UTIL_TraceLine(GetEyePosition(), site->m_center + Vector(0, 0, 48.0f), ignore_monsters, ENT(pev), &tr);
 			closeBy = tr.flFraction < 1.0f;
 		}
+	}
+	// a person's call: a rush goes now; and one who said yes heads for the site from wherever it
+	// is (running for a rush), the push picking it up once it's close
+	bool callRush = false;
+	bool called = LsTeamCalled(&callRush) && m_lsCallRound == round;
+	if (LsTeamCalled(&callRush) && callRush && s_execGoAt <= 0.0f)
+		s_execGoAt = now;
+	if (called && dist >= 1700.0f && !IsAttacking() && now >= m_lsExecCheckAt
+		&& (!HasPath() || (GetPathEndpoint() - site->m_center).IsLengthGreaterThan(900.0f)))
+	{
+		m_lsExecCheckAt = now + 0.5f;
+		const Vector *in = TheCSBots()->GetRandomPositionInZone(site);
+		Vector to = in ? *in : site->m_center;
+		MoveTo(&to, FASTEST_ROUTE);
+		if (callRush)
+			Run();
+		LsWhy(callRush ? "call: rushing in" : "call: heading for the site");
+		return;
 	}
 	if (s_execGoAt > 0.0f)
 	{

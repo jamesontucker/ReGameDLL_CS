@@ -76,6 +76,28 @@ void CCSBot::OnEvent(GameEventType event, CBaseEntity *pEntity, CBaseEntity *pOt
 
 	CBasePlayer *pPlayer = static_cast<CBasePlayer *>(pEntity);
 
+	// Loner-Strike: a flash going off. It knows someone over there may be blind only when it saw
+	// the pop, or a teammate threw it (they call their flashes), never from the game's own flag
+	if (event == EVENT_FLASHBANG_GRENADE_EXPLODED && pOther && LsFight())
+	{
+		const Vector *pop = (const Vector *)pOther;
+		bool ours = pPlayer && pPlayer->IsPlayer() && (pPlayer == this || !IsEnemy(pPlayer));
+		if (ours || IsVisible(pop, true))
+		{
+			m_lsFlashPopAt = gpGlobals->time;
+			m_lsFlashPopPos = *pop;
+			// (a flash blinds about 2 s: a good player's guess is close, a newer one's way off)
+			m_lsFlashGuess = 2.0f + RANDOM_FLOAT(-1.0f, 1.0f) * (1.0f - 0.75f * LsSkill());
+		}
+		// (only heard: the bang, from roughly over there)
+		else if ((*pop - pev->origin).IsLengthLessThan(1500.0f))
+		{
+			float err = 350.0f * (1.0f - 0.6f * LsSkill());
+			m_lsFlashHeardAt = gpGlobals->time;
+			m_lsFlashHeardPos = *pop + Vector(RANDOM_FLOAT(-err, err), RANDOM_FLOAT(-err, err), 0.0f);
+		}
+	}
+
 	// Loner-Strike: a teammate down: the radar shows where, the kill feed with what
 	if (event == EVENT_PLAYER_DIED && pPlayer && pPlayer != this && pPlayer->IsPlayer() && LsFight())
 		LsFeed(pPlayer, (pOther && pOther->IsPlayer()) ? static_cast<CBasePlayer *>(pOther) : nullptr);

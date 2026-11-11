@@ -246,6 +246,10 @@ void CCSBot::ResetValues()
 	m_lsSmokeLaneAt = 0.0f;
 	pev->vuser1.y = 0.0f;
 	m_lsFlashCheckAt = 0.0f;
+	m_lsFlashPopAt = -999.0f;
+	m_lsFlashHeardAt = -999.0f;
+	m_lsFlashBackAt = 0.0f;
+	m_lsAwayWho = 0;
 	m_lsFlashAwayUntil = 0.0f;
 	m_lsJumpPeek = false;
 	// (a new map: its avoided areas were the last map's)

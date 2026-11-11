@@ -530,6 +530,36 @@ const CCSBotManager::Zone *LsTSite()
 	return TheCSBots()->GetZone(Q_min(s_tSiteZone, TheCSBots()->GetZoneCount() - 1));
 }
 
+// A person called the site for the team ("rush b", "go a"): the team's site this round, kept
+// (two deaths there don't switch it); a rush goes in at once, without gathering first
+static int s_callRound = -1;
+static bool s_callRush = false;
+
+void LsTeamCall(const CCSBotManager::Zone *zone, bool rush)
+{
+	if (!TheCSBots() || !zone)
+		return;
+	for (int z = 0; z < TheCSBots()->GetZoneCount(); z++)
+		if (TheCSBots()->GetZone(z) == zone)
+		{
+			LsTSite();
+			s_tSiteZone = z;
+			s_tSiteDeaths = 0;
+			// (a second call this round: "rush" stays a rush once said)
+			s_callRush = (s_callRound == LsRoundSerial() && s_callRush) || rush;
+			s_callRound = LsRoundSerial();
+			return;
+		}
+}
+
+bool LsTeamCalled(bool *rush)
+{
+	bool on = s_callRound == LsRoundSerial();
+	if (rush)
+		*rush = on && s_callRush;
+	return on;
+}
+
 // A T died near the round's site early on: two of those and the team reads it as the CTs
 // stacking that site, and goes for the other one ("they're all at b, go a")
 void LsTSiteDeath(CBasePlayer *pVictim)
@@ -539,6 +569,9 @@ void LsTSiteDeath(CBasePlayer *pVictim)
 		|| TheCSBots()->GetElapsedRoundTime() > 60.0f || gpGlobals->time == s_tSiteLastDeath)
 		return;
 	s_tSiteLastDeath = gpGlobals->time;
+	// (a person's call stands: they decide when to switch)
+	if (s_callRound == LsRoundSerial())
+		return;
 	if ((pVictim->pev->origin - site->m_center).IsLengthGreaterThan(1300.0f))
 		return;
 	if (++s_tSiteDeaths >= 2)
@@ -1141,7 +1174,17 @@ void Bot_LsServerCommand()
 	// not while it's in a fight or busy with something that matters, nor while something
 	// has startled it; a person's order (goto, follow, a chat hold) only gives way to a fight,
 	// the bomb or a ladder
-	bool order = FStrEq(what, "goto") || FStrEq(what, "follow") || (FStrEq(what, "hold") && CMD_ARGC() > 4 && FStrEq(CMD_ARGV(4), "bc"));
+	// (push: a person's call for the team's site counts even if this one is busy - in a fight,
+	// carrying the bomb; only its own joining in waits on that)
+	if (FStrEq(what, "push") && me->m_iTeam == TERRORIST && TheCSBots()->GetScenario() == CCSBotManager::SCENARIO_DEFUSE_BOMB
+		&& !TheCSBots()->IsBombPlanted())
+	{
+		Vector at(LsArg(3), LsArg(4), LsArg(5));
+		LsTeamCall(TheCSBots()->GetClosestZone(&at), LsArg(6) == 1.0f);
+		if (LsArg(6) >= 3.0f)
+			return;
+	}
+	bool order = FStrEq(what, "goto") || FStrEq(what, "push") || FStrEq(what, "follow") || (FStrEq(what, "hold") && CMD_ARGC() > 4 && FStrEq(CMD_ARGV(4), "bc"));
 	// (look ... 2: an urgent turn, toward someone it senses behind it mid-fight: only an
 	// enemy already in sight or a ladder stops it)
 	bool urgent = FStrEq(what, "look") && LsArg(7) >= 2.0f;
@@ -1200,6 +1243,14 @@ void CCSBot::LsPuppetCommand(const char *what, float now)
 				Idle();
 			m_lsOrder = LsOrder();
 			pev->vuser1.x = 0.0f;
+			// (out of a called push too: back to its own game)
+			if (m_lsCallRound == LsRoundSerial())
+			{
+				m_lsCallRound = -1;
+				m_lsCallSkipRound = LsRoundSerial();
+				if (LsExecuting())
+					Idle();
+			}
 			LsPuppetRelease();
 			return;
 		}
@@ -1314,6 +1365,36 @@ void CCSBot::LsPuppetCommand(const char *what, float now)
 			pev->fuser4 = now; m_lsOrderFields = true;	// (taken: gm_botchat reads it)
 			pev->vuser1.x = m_lsOrder.until;	// (and on till then: gm_pubserver won't kick it)
 		}
+	}
+	else if (FStrEq(what, "push"))
+	{
+		// push x y z <0 go | 1 rush | 2 heard, not going> bc: a person's "go b" / "rush b" to the
+		// whole team, on a bomb map, for a T. The ones who said yes join the team's push on that
+		// site, roles and all (entry, trade, flank, perch: picked from who suits them); "rush"
+		// goes in at once, "go" gathers out of sight first. Not an order that takes it over: the
+		// push is the order. One who heard it and didn't want to does its own thing
+		int round = LsRoundSerial();
+		Vector at(LsArg(3), LsArg(4), LsArg(5));
+		int kind = (int)LsArg(6);
+		if (m_iTeam != TERRORIST || TheCSBots()->GetScenario() != CCSBotManager::SCENARIO_DEFUSE_BOMB || TheCSBots()->IsBombPlanted())
+			return;
+		const CCSBotManager::Zone *zone = TheCSBots()->GetClosestZone(&at);
+		if (!zone)
+			return;
+		if (kind == 2)
+		{
+			m_lsCallSkipRound = round;
+			m_lsCallRound = -1;
+			return;
+		}
+		m_lsCallRound = round;
+		m_lsCallSkipRound = -1;
+		m_lsOrder = LsOrder();
+		p.holdUntil = p.crouchUntil = p.lookUntil = 0.0f;
+		p.holdTag[0] = '\0';
+		m_lsExecCheckAt = 0.0f;
+		pev->fuser4 = now; m_lsOrderFields = true;	// (taken: gm_botchat reads it)
+		pev->vuser1.x = now + 30.0f;
 	}
 	else if (FStrEq(what, "plant"))
 	{
@@ -5178,10 +5259,40 @@ bool CCSBot::LsMatchup(CBasePlayer *pEnemy, bool crouchAndHold)
 	float skill = LsSkill();
 	float range = float((pEnemy->pev->origin - pev->origin).Length());
 
-	if (pEnemy->IsBlind() && range < 1200.0f && !IsUsingSniperRifle() && now > m_lsPushUntil && RANDOM_FLOAT(0.0f, 1.0f) < 0.3f + 0.6f * skill)
+	// A flashed enemy, read the way a person reads it (1.6 shows nothing on a blind player):
+	// a flash it saw pop by them, or a teammate's, pushed for as long as it reckons it lasts; or,
+	// a good player, a bang heard over there and that one in view with its back turned for half a
+	// second. Never the game's own flag: a wrong read runs it into someone who can see again
 	{
-		m_lsPushUntil = now + RANDOM_FLOAT(1.0f, 1.8f);
-		LsWhy("pushing a flashed one");
+		Vector toMe = pev->origin - pEnemy->pev->origin;
+		toMe.z = 0.0f;
+		Vector efwd;
+		UTIL_MakeVectorsPrivate(pEnemy->pev->v_angle, efwd, nullptr, nullptr);
+		efwd.z = 0.0f;
+		float tl = float(toMe.Length()), fl = float(efwd.Length());
+		bool facingMe = tl > 1.0f && fl > 0.01f && float(DotProduct(toMe, efwd)) / (tl * fl) > 0.75f;
+		int who = pEnemy->entindex();
+		if (facingMe || m_lsAwayWho != who)
+		{
+			m_lsAwayWho = facingMe ? 0 : who;
+			m_lsAwaySince = now;
+		}
+		float until = 0.0f;
+		bool sawPop = now < m_lsFlashPopAt + m_lsFlashGuess && (m_lsFlashPopPos - pEnemy->pev->origin).IsLengthLessThan(900.0f);
+		// (a good player sees one already turned on it isn't blind; a newer one goes anyway)
+		if (sawPop && (!facingMe || skill < 0.5f))
+			until = m_lsFlashPopAt + m_lsFlashGuess;
+		else if (skill >= 0.5f && !facingMe && now - m_lsFlashHeardAt < 2.0f && now - m_lsAwaySince >= 0.5f
+			&& (m_lsFlashHeardPos - pEnemy->pev->origin).IsLengthLessThan(800.0f))
+			until = now + RANDOM_FLOAT(0.8f, 1.4f);
+		// (the bold go for it more, the careful and campers less)
+		float lean = (LsStyle() == LS_STYLE_CAREFUL || LsStyle() == LS_STYLE_CAMPER) ? 0.7f : (LsStyle() == LS_STYLE_RUSHER || LsStyle() == LS_STYLE_KNIFER) ? 1.25f : 1.0f;
+		if (until > now && range < 1200.0f && !IsUsingSniperRifle() && now > m_lsPushUntil
+			&& RANDOM_FLOAT(0.0f, 1.0f) < (0.3f + 0.6f * skill) * lean * (0.8f + 0.4f * LsAggro()))
+		{
+			m_lsPushUntil = Q_min(until, now + 1.8f);
+			LsWhy(sawPop ? "pushing a flashed one" : "pushing one acting flashed");
+		}
 	}
 	// (most of the time, more often the better it is: not every reload like a script; decided
 	// once per reload)
@@ -5772,7 +5883,7 @@ void CCSBot::LsHurtCallTick()
 // ---- flashes, ladders, AWPers known ------------------------------------------------------
 
 // The flashbangs in the air about to go off, looked up once a tenth of a second for all the bots
-struct LsFlashSeen { Vector at; float pop; edict_t *owner; bool he; };
+struct LsFlashSeen { Vector at, vel; float pop; edict_t *owner; bool he; };
 static LsFlashSeen s_flashes[8];
 static int s_flashCount = 0;
 static float s_flashScanAt = -1.0f;
@@ -5796,6 +5907,7 @@ static void LsScanFlashes()
 		if (pop < now)
 			continue;
 		s_flashes[s_flashCount].at = pEnt->pev->origin;
+		s_flashes[s_flashCount].vel = pEnt->pev->velocity;
 		s_flashes[s_flashCount].pop = pop;
 		s_flashes[s_flashCount].owner = pEnt->pev->owner;
 		s_flashes[s_flashCount].he = he;
@@ -5808,6 +5920,19 @@ static void LsScanFlashes()
 void CCSBot::LsFlashWatch()
 {
 	float now = gpGlobals->time;
+	// back round once it has popped, to where it came from: whoever threw it comes in behind it
+	if (m_lsFlashBackAt > 0.0f && now >= m_lsFlashBackAt)
+	{
+		m_lsFlashBackAt = 0.0f;
+		if (LsFight() && !IsBlind() && !IsEnemyVisible())
+		{
+			// (the turn away was only for the pop itself)
+			if (m_lookAtDesc && !Q_strncmp(m_lookAtDesc, "Loner-Strike: turned", 20))
+				ClearLookAt();
+			SetLookAt("Loner-Strike: back to the flash", &m_lsFlashBackPos, PRIORITY_HIGH, 1.2f);
+			LsWhy("back to where the flash came from");
+		}
+	}
 	if (!LsFight() || now < m_lsFlashCheckAt || now < m_lsFlashAwayUntil || IsBlind())
 		return;
 	m_lsFlashCheckAt = now + 0.1f;
@@ -5851,6 +5976,25 @@ void CCSBot::LsFlashWatch()
 		else
 			SetLookAt("Loner-Strike: turned from a flash", &away, PRIORITY_UNINTERRUPTABLE, 0.9f);
 		LsWhy("turned from a flash");
+		// (an enemy's: then straight back round to where it was thrown from, the way it flew in,
+		// a little after the pop - the better it is, the quicker; a teammate's needs no look)
+		CBaseEntity *pThrower = f.owner ? CBaseEntity::Instance(f.owner) : nullptr;
+		if (pThrower && pThrower->IsPlayer() && IsEnemy(pThrower))
+		{
+			Vector back = f.vel;
+			back.z = 0.0f;
+			Vector src = f.at;
+			if (back.Length() > 50.0f)
+			{
+				TraceResult tb;
+				Vector far2 = f.at - back.Normalize() * 500.0f;
+				UTIL_TraceLine(f.at, far2, ignore_monsters, ignore_glass, ENT(pev), &tb);
+				src = f.at + (tb.vecEndPos - f.at) * 0.9f;
+			}
+			m_lsFlashBackPos = src;
+			m_lsFlashBackPos.z = eye.z;
+			m_lsFlashBackAt = Q_max(f.pop, now) + RANDOM_FLOAT(0.05f, 0.2f) + 0.5f * (1.0f - LsSkill());
+		}
 		return;
 	}
 }
