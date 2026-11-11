@@ -88,7 +88,14 @@ void Bot_LsRegisterCVars()
 void LsPublishSites()
 {
 	static int s_doneFor = -1;
-	if (s_doneFor == g_lsNavLoads || !TheCSBots() || TheNavAreaList.empty())
+	// (no nav on this map: nothing to name - the last map's letters don't carry over)
+	if (TheNavAreaList.empty())
+	{
+		if (cv_ls_sites.string && cv_ls_sites.string[0])
+			CVAR_SET_STRING("ls_sites", "");
+		return;
+	}
+	if (s_doneFor == g_lsNavLoads || !TheCSBots())
 		return;
 	s_doneFor = g_lsNavLoads;
 	char out[128] = "";
@@ -4272,8 +4279,12 @@ bool CCSBot::LsScanAngles(bool holding)
 			bestA = a;
 		}
 	}
+	// (nothing it can see down from here: not again every think - the sight traces wait a moment)
 	if (bestA < 0)
+	{
+		m_lsScanNext = now + RANDOM_FLOAT(0.4f, 0.8f);
 		return false;
+	}
 	// (an angle ahead not checked yet goes before any behind)
 	if (behind[bestA])
 	{
@@ -5260,7 +5271,18 @@ void CCSBot::LsHurtBy(CBasePlayer *pAttacker)
 		return;
 	m_lsHurtCheckAt = now + 1.0f;
 	if (IsVisible(pAttacker, false))
+	{
+		// (in plain view, being picked off from further than its gun reaches - an SMG or a
+		// pistol at 900 against a rifle tapping away: no sitting there taking it. The better
+		// ones get out of the line, by who it is; the rest at least fire back, below)
+		int mine = LsGunClass(this), theirs = LsGunClass(pAttacker);
+		float apart = float((pAttacker->pev->origin - pev->origin).Length());
+		bool shortGun = (mine == LSG_SMG || mine == LSG_SHOTGUN || mine == LSG_PISTOL) && (theirs == LSG_RIFLE || theirs == LSG_SNIPER || theirs == LSG_DEAGLE || theirs == LSG_MG);
+		if (shortGun && apart > 750.0f && m_state != &m_plantBombState && m_state != &m_defuseBombState && !IsEscapingFromBomb()
+			&& RANDOM_FLOAT(0.0f, 1.0f) < 0.3f + 0.6f * LsSkill() && LsTakeCoverFrom(pAttacker->pev->origin, 120.0f, true))
+			LsWhy("outgunned at range: cover");
 		return;
+	}
 	TraceResult tr;
 	UTIL_TraceLine(pAttacker->pev->origin + pAttacker->pev->view_ofs, GetEyePosition(), ignore_monsters, ignore_glass, ENT(pAttacker->pev), &tr);
 	if (tr.flFraction >= 1.0f)
@@ -5534,6 +5556,27 @@ bool LsRecentDeathNear(int team, const Vector &at, float range, float secs)
 			return true;
 	}
 	return false;
+}
+
+// A player's death for the "teammate died there" memory: bots note their own; a person's is
+// noted from the bots' events, once (every bot hears the same death)
+void LsNoteAnyDeath(CBasePlayer *pVictim)
+{
+	if (!pVictim)
+		return;
+	float now = gpGlobals->time;
+	int map = LsMapSerial();
+	for (int i = 0; i < 16; i++)
+	{
+		const LsTeamDeath &d = s_teamDeaths[i];
+		if (d.map == map && d.team == pVictim->m_iTeam && now - d.when < 0.5f && (d.at - pVictim->pev->origin).IsLengthLessThan(64.0f))
+			return;
+	}
+	s_teamDeaths[s_teamDeathNext].at = pVictim->pev->origin;
+	s_teamDeaths[s_teamDeathNext].when = now;
+	s_teamDeaths[s_teamDeathNext].team = pVictim->m_iTeam;
+	s_teamDeaths[s_teamDeathNext].map = map;
+	s_teamDeathNext = (s_teamDeathNext + 1) % 16;
 }
 
 void CCSBot::LsNoteDeath(CBasePlayer *pKiller)
@@ -6143,7 +6186,9 @@ bool CCSBot::LsOutOfRange(CBasePlayer *pEnemy, float range)
 	if (LsKnownHurt(pEnemy, m_iTeam, &hp) && hp < 30.0f)
 		return false;
 	// (it's shooting at it: no standing there taking it - fire back)
-	if (GetAttacker() == pEnemy && GetTimeSinceAttacked() < 1.5f)
+	// (a slow tapper hits every couple of seconds: the window covers it, not just the instant
+	// after a hit)
+	if (GetAttacker() == pEnemy && GetTimeSinceAttacked() < 4.0f)
 		return false;
 	// (the patient close in; rushers and the impatient spray from there now and then - a steady
 	// lean per bot, not a coin each think)

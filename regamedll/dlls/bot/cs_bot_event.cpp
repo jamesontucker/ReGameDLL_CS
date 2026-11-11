@@ -66,6 +66,10 @@ void CCSBot::OnEvent(GameEventType event, CBaseEntity *pEntity, CBaseEntity *pOt
 	// Loner-Strike: its own death (where, by whom), noted before the alive check below
 	if (event == EVENT_PLAYER_DIED && pEntity == this && LsFight())
 		LsNoteDeath((pOther && pOther->IsPlayer()) ? static_cast<CBasePlayer *>(pOther) : nullptr);
+	// (and a person's, which no bot notes for itself: human teammates count as much)
+	else if (event == EVENT_PLAYER_DIED && pEntity && pEntity != this && LsFight() && static_cast<CBasePlayer *>(pEntity)->IsPlayer()
+		&& !static_cast<CBasePlayer *>(pEntity)->IsBot())
+		LsNoteAnyDeath(static_cast<CBasePlayer *>(pEntity));
 
 	if (!IsAlive())
 		return;
@@ -159,6 +163,20 @@ void CCSBot::OnEvent(GameEventType event, CBaseEntity *pEntity, CBaseEntity *pOt
 				// check that attacker is an enemy (for friendly fire, etc)
 				if (pKiller && pKiller->IsPlayer() && BotRelationship(pKiller) == BOT_ENEMY)
 				{
+					// Loner-Strike: a teammate killed close by but out of sight - the shots heard, the
+					// kill feed, where they were on the radar: the same reaction as seeing it (a look
+					// the killer's way as heard, and by who it is, holding the angle or going to help),
+					// not carrying on with its back to it
+					// (same level: on nuke, a death on the floor below is heard but isn't round the
+					// corner)
+					if (LsFight() && !IsSniper() && !IsVisible(&pVictim->pev->origin) && (pVictim->pev->origin - pev->origin).IsLengthLessThan(900.0f)
+						&& Q_abs(pVictim->pev->origin.z - pev->origin.z) < 140.0f && !IsVisible(pKiller, true))
+					{
+						// (no return: the kill feed, the death noted near it and the rest below still
+						// happen for this death)
+						LsAvenge(pVictim, pKiller);
+					}
+
 					// check if we saw our friend die - dont check FOV - assume we're aware of our surroundings in combat
 					// snipers stay put
 					if (!IsSniper() && IsVisible(&pVictim->pev->origin))

@@ -219,11 +219,48 @@ bool CCSBot::UpdateLookAtNoise()
 				return false;
 
 			spot.z += HalfHumanHeight;
+
+			// Loner-Strike: a bend that ends on the wall right beside it (dropping into CT spawn,
+			// a big wall to the left) is no look at all: staring at bare wall while on the move.
+			// It's let go, and the eyes stay on the way ahead and the angles that matter
+			if (LsFight())
+			{
+				Vector eye = pev->origin + pev->view_ofs;
+				TraceResult tr;
+				UTIL_TraceLine(eye, spot, ignore_monsters, ENT(pev), &tr);
+				float len = float((spot - eye).Length());
+				if (len * tr.flFraction < 160.0f && (tr.flFraction < 1.0f || len < 160.0f))
+					return false;
+			}
 		}
 		else
 		{
 			// prior bend failed
 			return false;
+		}
+	}
+
+	// Loner-Strike: a bent or edge spot that came out close by and well above eye level, for a
+	// sound about level with it, is a wall or a rooftop right beside it, not where the sound is:
+	// eyes go the way the noise is, level, instead (a teammate's fight down long, not the wall
+	// over its head)
+	if (LsFight())
+	{
+		Vector eye = pev->origin + pev->view_ofs;
+		Vector to = spot - eye;
+		float across = float(to.Length2D());
+		// (only when the sound itself was about level with it: someone really up there, close -
+		// boxes overhead, a catwalk, nuke's levels - is still looked up at)
+		bool noiseLevel = Q_abs(m_noisePosition.z - GetFeetZ()) < 80.0f;
+		if (noiseLevel && across < 250.0f && to.z > 0.45f * Q_max(across, 32.0f))
+		{
+			Vector way = m_noisePosition - pev->origin;
+			way.z = 0.0f;
+			if (!way.IsZero())
+			{
+				way = way.Normalize();
+				spot = eye + way * 400.0f;
+			}
 		}
 	}
 

@@ -365,6 +365,18 @@ void HideState::OnUpdate(CCSBot *me)
 			}
 
 			// pick another hiding spot near where we were planning on hiding
+			// (Loner-Strike: for what was left of the time it meant to be there - a quick step out
+			// of a grenade's way, a teammate already in the spot, turned into the default 30-60 s
+			// camp: a T sat in its own spawn for most of a minute)
+			if (LsFight())
+			{
+				float left = m_duration > 0.0f ? Q_max(1.5f, m_duration - (gpGlobals->time - me->GetStateTimestamp())) : -1.0f;
+				int retry = m_retry;
+				bool hold = m_isHoldingPosition;
+				me->Hide(TheNavAreaGrid.GetNavArea(&m_hidingSpot), left, 750.0f, hold);
+				m_retry = retry;
+				return;
+			}
 			me->Hide(TheNavAreaGrid.GetNavArea(&m_hidingSpot));
 			return;
 		}

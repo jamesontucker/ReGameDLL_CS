@@ -336,7 +336,16 @@ void CCSBot::LsTeamTick()
 			m_lsSwapBox = nullptr;
 		else if ((pBox->pev->origin - pev->origin).IsLengthLessThan(90.0f))
 		{
-			if (pMine)
+			// (a pistol lying there: only one fits, so an empty one of its own goes first)
+			const char *model = STRING(pBox->pev->model);
+			bool pistol = model && (Q_strstr(model, "w_glock") || Q_strstr(model, "w_usp") || Q_strstr(model, "w_deagle") || Q_strstr(model, "w_p228")
+				|| Q_strstr(model, "w_elite") || Q_strstr(model, "w_fiveseven"));
+			CBasePlayerItem *pSide = m_rgpPlayerItems[PISTOL_SLOT];
+			if (pistol && pSide && LsOutOfAmmo())
+			{
+				DropPlayerItem(STRING(pSide->pev->classname));
+			}
+			else if (pMine && !pistol)
 			{
 				DropPlayerItem(STRING(pMine->pev->classname));
 				m_lsSwapDropAt = now;
@@ -413,15 +422,20 @@ void CCSBot::LsTeamTick()
 					continue;
 				// (one try at each: it went for this one and didn't end up with it - can't take it,
 				// or something else pulled it away - it doesn't keep going back and forth)
-				if (static_cast<CBaseEntity *>(m_lsSwapLast) == pBox && now - m_lsSwapLastAt < 15.0f)
+				bool tried = false;
+				for (int r = 0; r < 4; r++)
+					if (static_cast<CBaseEntity *>(m_lsSwapLast[r]) == pBox && now - m_lsSwapLastAt[r] < 20.0f)
+						tried = true;
+				if (tried)
 					continue;
 				Vector to = pBox->pev->origin;
 				MoveTo(&to, FASTEST_ROUTE);
 				if (!HasPath())
 					continue;
 				m_lsSwapBox = pBox;
-				m_lsSwapLast = pBox;
-				m_lsSwapLastAt = now;
+				m_lsSwapLast[m_lsSwapLastSlot] = pBox;
+				m_lsSwapLastAt[m_lsSwapLastSlot] = now;
+				m_lsSwapLastSlot = (m_lsSwapLastSlot + 1) % 4;
 				m_lsSwapUntil = now + 6.0f;
 				LsWhy("swap-gun");
 				break;
@@ -1157,6 +1171,10 @@ void CCSBot::LsEarlyPick(CBasePlayer *pVictim, CBasePlayer *pKiller)
 // fell rather than straight at the killer (which would look like it sees through walls)
 void CCSBot::LsAvenge(CBasePlayer *pVictim, CBasePlayer *pKiller)
 {
+	// (never off a plant, a defuse, a run from the bomb, or hostages in tow - nor pulled off a
+	// person's order)
+	if (m_state == &m_plantBombState || m_state == &m_defuseBombState || IsEscapingFromBomb() || m_hostageEscortCount > 0 || LsOrderActive())
+		return;
 	float away = float((pKiller->pev->origin - pev->origin).Length());
 	float err = away * (0.15f - 0.08f * LsSkill());
 	Vector heard = pKiller->pev->origin + Vector(RANDOM_FLOAT(-err, err), RANDOM_FLOAT(-err, err), HalfHumanHeight);
@@ -1175,7 +1193,12 @@ void CCSBot::LsAvenge(CBasePlayer *pVictim, CBasePlayer *pKiller)
 	{
 		float secs = RANDOM_FLOAT(3.0f, 6.0f) * (0.7f + 0.6f * (1.0f - LsAggro())) * (lean > 1.2f ? 1.4f : 1.0f);
 		Hide(GetLastKnownArea(), secs, 250.0f, true);
-		LsPreAim(heard, RANDOM_FLOAT(3.0f, 5.0f));
+		// (the eyes stay on that angle for the hold, not just the first glance: the glance
+		// above would block the pre-aim's lower priority)
+		float watch = RANDOM_FLOAT(3.0f, 5.0f);
+		ClearLookAt();
+		if (!LsPreAim(heard, watch))
+			SetLookAt("Loner-Strike: where the shots came from", &heard, PRIORITY_HIGH, watch);
 		LsWhy("avenge: holding the angle");
 		return;
 	}

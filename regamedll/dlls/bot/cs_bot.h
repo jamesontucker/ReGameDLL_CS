@@ -1478,8 +1478,9 @@ private:
 	int m_lsMoraleHideRound = -1;					// the round it hid on low morale (once is enough)
 	float m_lsSwapCheckAt = 0.0f;
 	EntityHandle<CBaseEntity> m_lsSwapBox;		// the gun it's walking over to swap for
-	EntityHandle<CBaseEntity> m_lsSwapLast;		// the last one it went for (one try each)
-	float m_lsSwapLastAt = 0.0f;
+	EntityHandle<CBaseEntity> m_lsSwapLast[4];	// the last few it went for (one try each)
+	float m_lsSwapLastAt[4] = {};
+	int m_lsSwapLastSlot = 0;
 	float m_lsCoverPickAt = 0.0f;					// when it last picked a spot to take cover at
 	Vector m_lsLastCornerLook;						// the last corner it checked, and when
 	float m_lsLastCornerLookAt = 0.0f;
@@ -1694,6 +1695,7 @@ const Vector *LsEnemySpawn(int team);	// the middle of the other team's spawn (n
 float LsArrival(const CNavArea *area, int team);	// seconds that team needs, running from its spawn, to get there (-1 unknown)
 enum { LSG_NONE, LSG_PISTOL, LSG_DEAGLE, LSG_SMG, LSG_SHOTGUN, LSG_RIFLE, LSG_SNIPER, LSG_MG };
 int LsGunClass(CBasePlayer *pPlayer);
+void LsNoteAnyDeath(CBasePlayer *pVictim);		// a person's death for the "died there" memory (bots note their own)
 bool LsRecentDeathNear(int team, const Vector &at, float range, float secs);	// a player of that side died near there lately	// what kind of gun someone has out
 void LsCallHurt(CBasePlayer *pEnemy, int team, float hp, const Vector &where);	// a team was told an enemy's hurt ("he's lit", "1 low"), and where
 bool LsKnownHurt(CBasePlayer *pEnemy, int team, float *hp = nullptr, Vector *where = nullptr, float *when = nullptr);	// ...and still knows it (no healing in CS)

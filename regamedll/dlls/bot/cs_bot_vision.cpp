@@ -515,10 +515,15 @@ void CCSBot::SetLookAt(const char *desc, const Vector *pos, PriorityType pri, fl
 	// Loner-Strike: no looking up at nothing. A spot well above eye level is only worth it
 	// where someone could actually stand up there - a ledge, a window, a balcony: below the
 	// spot there's floor within about a player's height. Out in the open (long A, the sky over
-	// a courtyard) the look comes down to head height on the same line. Enemies and grenades
-	// in the air aren't touched: only looks around (low and medium priority)
+	// a courtyard) the look comes down to head height on the same line. Any look round, noises
+	// included; looks that do something (below) and aiming at an enemy aren't touched
 	Vector lsLevelled;
-	if (LsFight() && pri <= PRIORITY_MEDIUM)
+	// (looks that do something are never levelled or capped: a grenade lob, shooting out a
+	// grate or pressing a button overhead, a ladder's top, someone just noticed)
+	bool lsDoing = !desc || !Q_strncmp(desc, "Grenade", 7) || !Q_strncmp(desc, "Breakable", 9) || !Q_strncmp(desc, "Use entity", 10)
+		|| !Q_strncmp(desc, "Loner-Strike: breaking", 22) || !Q_strncmp(desc, "Loner-Strike: button", 20)
+		|| !Q_strncmp(desc, "Loner-Strike: ladder", 20) || !Q_strncmp(desc, "Loner-Strike: caught", 20);
+	if (LsFight() && !lsDoing)
 	{
 		Vector eye = pev->origin + pev->view_ofs;
 		Vector to = *pos - eye;
@@ -539,15 +544,25 @@ void CCSBot::SetLookAt(const char *desc, const Vector *pos, PriorityType pri, fl
 	// (and no look round - a noise up on the level above included - steeper than about 40
 	// degrees up: people look up to the edge it came from, not straight overhead for seconds;
 	// grenade throws lob high on purpose and are left alone)
-	if (LsFight() && desc && Q_strncmp(desc, "Grenade", 7))
+	// (up to about 60 where there's really somewhere to stand up there - floor just below the
+	// spot: heaven over nuke's A from right under it - but bare sky and walls stay at 40)
+	if (LsFight() && !lsDoing)
 	{
 		Vector eye = pev->origin + pev->view_ofs;
 		Vector to = *pos - eye;
 		float across = Q_max(48.0f, float(to.Length2D()));
+		float steepest = 0.84f;
 		if (to.z > 0.84f * across)
 		{
+			TraceResult tr;
+			UTIL_TraceLine(*pos, *pos - Vector(0, 0, 110.0f), ignore_monsters, ENT(pev), &tr);
+			if (tr.flFraction < 1.0f && !tr.fAllSolid && !tr.fStartSolid)
+				steepest = 1.73f;
+		}
+		if (to.z > steepest * across)
+		{
 			lsLevelled = *pos;
-			lsLevelled.z = eye.z + 0.84f * across;
+			lsLevelled.z = eye.z + steepest * across;
 			pos = &lsLevelled;
 		}
 	}
