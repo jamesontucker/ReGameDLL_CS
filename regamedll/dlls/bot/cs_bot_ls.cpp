@@ -46,6 +46,8 @@
 #include <utility>
 #include <queue>
 #include <functional>
+
+int g_lsNavLoads = 0;	// navs loaded so far (nav_file.cpp counts them)
 #include <cmath>
 #include <cstdio>
 #ifdef _WIN32
@@ -3863,7 +3865,6 @@ namespace
 char s_kindMap[64] = {};
 int s_kind = LSMAP_OBJECTIVE;
 int s_mapSerial = 0;
-int g_lsNavLoads = 0;
 static int s_kindNavLoads = -1;
 Vector s_spawn[2];
 bool s_hasSpawn[2] = {};
