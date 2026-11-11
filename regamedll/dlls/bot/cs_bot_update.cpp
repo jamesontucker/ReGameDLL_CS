@@ -697,11 +697,15 @@ void CCSBot::Update()
 
 	// TODO: This doesn't work if we are restricted to just knives and sniper rifles because we cant use the rifle at close range
 	// (Loner-Strike: not a knife a plugin put out on purpose, while nobody's in sight)
-	if (!IsSafe() && !IsUsingGrenade() && IsUsingKnife() && !IsEscapingFromBomb()
-		&& !(LsFight() && gpGlobals->time < m_lsKnifeOkUntil && !IsEnemyVisible() && !IsAttacking()))
+	// (Loner-Strike: and in the early safe time too, at the first sign of trouble - an enemy, a
+	// fight, a noise close by, somewhere they could already be: no charging in with a knife)
+	bool lsDanger = LsFight() && LsKnifeDanger();
+	if ((!IsSafe() || lsDanger) && !IsUsingGrenade() && IsUsingKnife() && !IsEscapingFromBomb() && !LsKnifeOnly()
+		&& !(LsFight() && gpGlobals->time < m_lsKnifeOkUntil && !lsDanger))
 	{
-		EquipBestWeapon();
+		EquipBestWeapon(lsDanger ? MUST_EQUIP : false);
 	}
+	LsNoteWhereItIs();
 
 	// if we haven't seen an enemy in awhile, and we switched to our pistol during combat,
 	// switch back to our primary weapon (if it still has ammo left)

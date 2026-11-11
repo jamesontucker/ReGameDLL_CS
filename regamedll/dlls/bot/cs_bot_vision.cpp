@@ -499,7 +499,7 @@ void CCSBot::SetLookAt(const char *desc, const Vector *pos, PriorityType pri, fl
 	// couple of seconds in an area, a look around (low priority: a hiding spot, an approach
 	// point, a corner) well behind the way it's going is let go; a reaction (a noise, an enemy,
 	// being shot at: medium and up) still turns it
-	if (pri == PRIORITY_LOW && LsFight() && !IsNotMoving() && !IsAttacking() && gpGlobals->time - m_lsScanInAt < 2.0f)
+	if (pri == PRIORITY_LOW && LsFight() && !IsNotMoving() && !IsAttacking() && (gpGlobals->time - m_lsScanInAt < 2.0f || LsAboutToEnter()))
 	{
 		float heading = UTIL_VecToYaw(pev->velocity);
 		if (Q_abs(NormalizeAngle(UTIL_VecToYaw(*pos - pev->origin) - heading)) > 100.0f)

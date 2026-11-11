@@ -72,7 +72,8 @@ void IdleState::OnUpdate(CCSBot *me)
 		if ((LsFight() && !LsSolo() && !me->LsNadeDumper()) || !me->EquipGrenade())
 		{
 			// high-skill bots run with the knife
-			if (me->GetProfile()->GetSkill() > 0.33f)
+			// (Loner-Strike: not where trouble could already be)
+			if (me->GetProfile()->GetSkill() > 0.33f && !(LsFight() && me->LsKnifeDanger()))
 			{
 				me->EquipKnife();
 			}

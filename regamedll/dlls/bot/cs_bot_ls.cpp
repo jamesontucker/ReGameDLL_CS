@@ -1505,6 +1505,10 @@ CNavArea *CCSBot::LsPickHuntArea()
 
 			const Vector *c = area->GetCenter();
 			float score = RANDOM_FLOAT(0.0f, 500.0f);
+			// (not back where it's been the last half minute, unless it's holding a place
+			// - Ts at the hostages - where pacing is the point)
+			if (!kept && LsBeenNear(*c, 600.0f))
+				score -= 2000.0f;
 
 			// somewhere to go, not where it is
 			float fromMe = (*c - pev->origin).Length2D();
@@ -4048,7 +4052,7 @@ bool CCSBot::LsScanAngles(bool holding)
 	}
 	bool dm = LsSolo();
 	const Vector *enemyHome = dm ? nullptr : LsEnemySpawn(m_iTeam);
-	bool fresh = now - m_lsScanInAt < 2.0f;
+	bool fresh = now - m_lsScanInAt < 2.0f || LsAboutToEnter();
 	Vector eye = GetEyePosition();
 	float heading = pev->velocity.Length2D() > 60.0f ? UTIL_VecToYaw(pev->velocity) : pev->v_angle.y;
 	bool noiseFresh = IsNoiseHeard() && now - m_noiseTimestamp < 5.0f;
@@ -5872,6 +5876,9 @@ CNavArea *CCSBot::LsObjectiveHuntArea()
 		float home = float((*own - c).Length2D());
 		if (home < myHome - 150.0f)
 			continue;
+		// (not back where it's been the last half minute: no circling round)
+		if (LsBeenNear(c, 600.0f))
+			continue;
 		float score = Q_min(60.0f, gpGlobals->time - a->GetClearedTimestamp(m_iTeam - 1)) * 10.0f;
 		score += 0.3f * (home - myHome);
 		if (site)
@@ -5934,4 +5941,51 @@ bool CCSBot::LsBangChest()
 	TraceResult first;
 	m_lsBangChest = LsBulletGetsThrough(this, pGun->m_iId, GetEyePosition(), chest, &first);
 	return m_lsBangChest;
+}
+
+// A reason to have the gun out right now, in the early safe time too: an enemy seen or fought,
+// shot at, a noise close and fresh, or standing somewhere the other side could already have
+// reached (their earliest arrival, with a few seconds to spare)
+bool CCSBot::LsKnifeDanger()
+{
+	float now = gpGlobals->time;
+	if (IsAttacking() || IsEnemyVisible() || GetTimeSinceLastSawEnemy() < 4.0f || GetTimeSinceAttacked() < 4.0f || now - m_lsShotAtAt < 4.0f)
+		return true;
+	if (IsNoiseHeard() && now - m_noiseTimestamp < 4.0f && (m_noisePosition - pev->origin).IsLengthLessThan(1500.0f))
+		return true;
+	if (LsSolo() || !m_lastKnownArea || !TheCSBots())
+		return false;
+	float arrive = LsArrival(m_lastKnownArea, m_iTeam == CT ? TERRORIST : CT);
+	return arrive >= 0.0f && TheCSBots()->GetElapsedRoundTime() + 4.0f > arrive;
+}
+
+// Right at a doorway or round a corner into somewhere it can't see from here: the next area on
+// its path, close, and out of this one's sight (people face where they're going in)
+bool CCSBot::LsAboutToEnter()
+{
+	if (!HasPath() || m_pathIndex < 0 || m_pathIndex >= m_pathLength || !m_lastKnownArea || !LsSightReady())
+		return false;
+	const CNavArea *next = m_path[m_pathIndex].area;
+	if (!next || next == m_lastKnownArea || (m_path[m_pathIndex].pos - pev->origin).IsLengthGreaterThan(250.0f))
+		return false;
+	return !LsSees(m_lastKnownArea, next);
+}
+
+// Where it's been: a spot every few seconds, the last eight (about half a minute)
+void CCSBot::LsNoteWhereItIs()
+{
+	float now = gpGlobals->time;
+	if (now < m_lsRecentAt && now >= m_lsRecentAt - 10.0f)
+		return;
+	m_lsRecentAt = now + 4.0f;
+	m_lsRecent[m_lsRecentNext] = pev->origin;
+	m_lsRecentNext = (m_lsRecentNext + 1) % 8;
+}
+
+bool CCSBot::LsBeenNear(const Vector &at, float range) const
+{
+	for (int i = 0; i < 8; i++)
+		if ((m_lsRecent[i] - at).Make2D().IsLengthLessThan(range))
+			return true;
+	return false;
 }

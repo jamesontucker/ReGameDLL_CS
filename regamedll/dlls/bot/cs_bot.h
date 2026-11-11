@@ -1259,7 +1259,14 @@ public:
 	bool LsBangChest();								// only a head showing over something a bullet goes through: the chest, through it
 	float m_lsBangChestAt = 0.0f;
 	bool m_lsBangChest = false;
-	void LsTraceAttack();							// bot_ls_trace: a fight starting, and how long it took to react					// the round it picked its way into a retake
+	void LsTraceAttack();
+	bool LsKnifeDanger();							// a reason to have the gun out now, knife run or not
+	bool LsAboutToEnter();							// right at a doorway or corner into somewhere it can't see yet
+	Vector m_lsRecent[8];							// where it's been lately (every few seconds), so hunting doesn't circle back
+	int m_lsRecentNext = 0;
+	float m_lsRecentAt = 0.0f;
+	void LsNoteWhereItIs();
+	bool LsBeenNear(const Vector &at, float range) const;							// bot_ls_trace: a fight starting, and how long it took to react					// the round it picked its way into a retake
 	void LsRetakeApproach();				// mid jump-peek (in the air: still the jiggle)					// a smoke for the AWP lane it just got out of, thrown from cover then
 	Vector m_lsSmokeLaneSpot;
 	void LsSmokeLaneTick();

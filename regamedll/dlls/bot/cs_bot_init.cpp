@@ -226,6 +226,10 @@ void CCSBot::ResetValues()
 	m_lsRetakeWayRound = -1;
 	m_lsBangChestAt = 0.0f;
 	m_lsBangChest = false;
+	for (int i = 0; i < 8; i++)
+		m_lsRecent[i] = Vector(99999.0f, 99999.0f, 99999.0f);
+	m_lsRecentNext = 0;
+	m_lsRecentAt = 0.0f;
 	// (a respawn that doesn't go through RoundRespawn: no order or plugin marks carried over)
 	if (LsFight())
 	{
