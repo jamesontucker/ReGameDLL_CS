@@ -1040,15 +1040,7 @@ void Bot_LsServerCommand()
 	{
 		if (!me->IsAlive() || me->IsAttacking() || !LsFight())
 			return;
-		Vector at(LsArg(3), LsArg(4), LsArg(5));
-		CNavArea *area = TheNavAreaGrid.GetNearestNavArea(&at);
-		if (area && (!me->IsNoiseHeard() || me->GetNoisePriority() <= PRIORITY_MEDIUM))
-		{
-			me->m_noisePosition = at;
-			me->m_noiseArea = area;
-			me->m_noisePriority = PRIORITY_MEDIUM;
-			me->m_noiseTimestamp = now;
-		}
+		me->LsTold(Vector(LsArg(3), LsArg(4), LsArg(5)));
 		return;
 	}
 	// knife <secs>: a plugin put the knife out on purpose (showing off after a kill, a knife
@@ -2762,59 +2754,6 @@ unsigned int LsNavKey()
 	return h;
 }
 
-// A line through sky: traces go straight through sky brushes, but people see the sky there - a
-// wall. Some maps cap rooftops and gaps with them (inferno: two lines in three over its roofs),
-// so a "clear" trace through one isn't seen through. Checked every few units along the line
-bool LsCrossesSky(const Vector &from, const Vector &to, float step)
-{
-	Vector d = to - from;
-	float len = float(d.Length());
-	if (len < step * 2.0f)
-		return false;
-	int steps = int(len / step);
-	for (int i = 1; i < steps; i++)
-	{
-		Vector p = from + d * (float(i) / float(steps));
-		if (POINT_CONTENTS(p) == CONTENTS_SKY)
-			return true;
-	}
-	return false;
-}
-
-// Whether this map has sky brushes inside the playing space (between places people stand): one
-// look per map at a few hundred lines between nav areas; most maps don't, and then the bots'
-// sight checks skip the sky test
-bool LsSkyInPlay()
-{
-	static int s_serial = -1;
-	static bool s_sky = false;
-	if (s_serial == LsMapSerial())
-		return s_sky;
-	s_serial = LsMapSerial();
-	s_sky = false;
-	int n = (int)TheNavAreaList.size();
-	if (n < 2 || TheCSBots()->IsLearningMap())
-	{
-		s_serial = -1;	// (no nav yet: looked at again once there is one)
-		return false;
-	}
-	std::vector<CNavArea *> list(TheNavAreaList.begin(), TheNavAreaList.end());
-	unsigned int seed = 12345u;
-	auto next = [&seed]() { seed = seed * 1103515245u + 12345u; return (seed >> 8) & 0xffffff; };
-	for (int t = 0; t < 400 && !s_sky; t++)
-	{
-		const CNavArea *a = list[next() % n], *b = list[next() % n];
-		Vector ea = *a->GetCenter() + Vector(0, 0, 64.0f), eb = *b->GetCenter() + Vector(0, 0, 64.0f);
-		if ((ea - eb).IsLengthGreaterThan(3000.0f) || (ea - eb).IsLengthLessThan(300.0f))
-			continue;
-		TraceResult tr;
-		UTIL_TraceLine(ea, eb, ignore_monsters, ignore_glass, nullptr, &tr);
-		if (tr.flFraction >= 1.0f && LsCrossesSky(ea, eb, 48.0f))
-			s_sky = true;
-	}
-	return s_sky;
-}
-
 bool SeeThrough(edict_t *hit)
 {
 	CBaseEntity *pHit = hit ? CBaseEntity::Instance(hit) : nullptr;
@@ -3503,6 +3442,60 @@ void Reset()
 	}
 }
 } // namespace
+
+// A line through sky: traces go straight through sky brushes, but people see the sky there - a
+// wall. Some maps cap rooftops and gaps with them (inferno: two lines in three over its roofs),
+// so a "clear" trace through one isn't seen through. Checked every few units along the line
+bool LsCrossesSky(const Vector &from, const Vector &to, float step)
+{
+	Vector d = to - from;
+	float len = float(d.Length());
+	if (len < step * 2.0f)
+		return false;
+	int steps = int(len / step);
+	for (int i = 1; i < steps; i++)
+	{
+		Vector p = from + d * (float(i) / float(steps));
+		if (POINT_CONTENTS(p) == CONTENTS_SKY)
+			return true;
+	}
+	return false;
+}
+
+// Whether this map has sky brushes inside the playing space (between places people stand): one
+// look per map at a few hundred lines between nav areas; most maps don't, and then the bots'
+// sight checks skip the sky test
+bool LsSkyInPlay()
+{
+	static int s_serial = -1;
+	static bool s_sky = false;
+	if (s_serial == LsMapSerial())
+		return s_sky;
+	s_serial = LsMapSerial();
+	s_sky = false;
+	int n = (int)TheNavAreaList.size();
+	if (n < 2 || TheCSBots()->IsLearningMap())
+	{
+		s_serial = -1;	// (no nav yet: looked at again once there is one)
+		return false;
+	}
+	std::vector<CNavArea *> list(TheNavAreaList.begin(), TheNavAreaList.end());
+	unsigned int seed = 12345u;
+	auto next = [&seed]() { seed = seed * 1103515245u + 12345u; return (seed >> 8) & 0xffffff; };
+	for (int t = 0; t < 400 && !s_sky; t++)
+	{
+		const CNavArea *a = list[next() % n], *b = list[next() % n];
+		Vector ea = *a->GetCenter() + Vector(0, 0, 64.0f), eb = *b->GetCenter() + Vector(0, 0, 64.0f);
+		if ((ea - eb).IsLengthGreaterThan(3000.0f) || (ea - eb).IsLengthLessThan(300.0f))
+			continue;
+		TraceResult tr;
+		UTIL_TraceLine(ea, eb, ignore_monsters, ignore_glass, nullptr, &tr);
+		if (tr.flFraction >= 1.0f && LsCrossesSky(ea, eb, 48.0f))
+			s_sky = true;
+	}
+	return s_sky;
+}
+
 
 // A little more of the map's knowledge, within this frame's budget (CCSBotManager::StartFrame)
 void LsSightStep()
@@ -5431,6 +5424,44 @@ bool CCSBot::LsAwpKnownToward(const Vector &dir2d) const
 	return len > 300.0f && float(DotProduct(to, dir2d)) / len > 0.3f;
 }
 
+// A custom map's feel from its map knowledge: from the contested places (both teams can get
+// there within a few seconds of each other: where fights happen), how far the longest clear view
+// goes - the upper quarter of them, as players judge a map by its long lanes. Measured on the
+// stock maps: cbble 2180, awp_india 2120 (long); italy 1270, scoutzknivez 1255, vertigo 1130
+// (close); dust2, office, nuke and train sit between and get no lean. Only a clear end leans
+static int LsMapOpenness()
+{
+	static int s_serial = -1, s_lean = 0;
+	if (!s_know.ready || s_know.stage < STAGE_AREAS)
+		return 0;
+	if (s_serial == LsMapSerial())
+		return s_lean;
+	s_serial = LsMapSerial();
+	s_lean = 0;
+	std::vector<float> far;
+	for (size_t i = 0; i < s_know.count && i < s_know.inView.size(); i++)
+	{
+		const CNavArea *a = s_know.areas[i];
+		float t = LsArrival(a, TERRORIST), c = LsArrival(a, CT);
+		if (t < 0.0f || c < 0.0f || fabs(t - c) > 6.0f)
+			continue;
+		float best = 0.0f;
+		for (const auto &v : s_know.inView[i])
+		{
+			if (v.second < 170 || v.first >= s_know.count)
+				continue;
+			best = Q_max(best, float((*s_know.areas[v.first]->GetCenter() - *a->GetCenter()).Length()));
+		}
+		far.push_back(best);
+	}
+	if (far.size() < 20)
+		return 0;
+	std::sort(far.begin(), far.end());
+	float q = far[(size_t)(far.size() * 0.75f)];
+	s_lean = q > 2050.0f ? 1 : q < 1300.0f ? -1 : 0;
+	return s_lean;
+}
+
 // The stock maps people know as long (rifles and AWPs) or close (SMGs and shotguns); awp_ maps
 // are all AWP. A custom map is neither: its feel isn't guessed
 int LsMapLean()
@@ -5446,5 +5477,19 @@ int LsMapLean()
 	for (const char *m : closeMaps)
 		if (!Q_stricmp(map, m))
 			return -1;
-	return 0;
+	return LsMapOpenness();
+}
+
+// Told where an enemy is (a teammate's callout): as if it heard them there - unless it's on
+// something louder and fresher already
+void CCSBot::LsTold(const Vector &at)
+{
+	Vector spot = at;
+	CNavArea *area = TheNavAreaGrid.GetNearestNavArea(&spot);
+	if (!area || (IsNoiseHeard() && GetNoisePriority() > PRIORITY_MEDIUM && gpGlobals->time - m_noiseTimestamp < 3.0f))
+		return;
+	m_noisePosition = spot;
+	m_noiseArea = area;
+	m_noisePriority = PRIORITY_MEDIUM;
+	m_noiseTimestamp = gpGlobals->time;
 }
