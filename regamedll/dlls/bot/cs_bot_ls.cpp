@@ -2015,7 +2015,7 @@ void CCSBot::LsShotAt(CBasePlayer *pShooter, const Vector &impact)
 		if (RANDOM_FLOAT(0.0f, 1.0f) < odds && LsTakeCoverFrom(m_lsShotFrom, 64.0f))
 		{
 			if (sniper && m_lastKnownArea)
-				LsForceBadArea(m_lastKnownArea, 25.0f);
+				LsForceBadArea(m_lastKnownArea, 8.0f + 10.0f * LsSkill());
 		}
 	}
 	CNavArea *area = TheNavAreaGrid.GetNavArea(&m_lsShotFrom);
@@ -4450,7 +4450,7 @@ bool CCSBot::LsMatchup(CBasePlayer *pEnemy)
 	if (!LsTakeCoverFrom(pEnemy->pev->origin, 64.0f, true))
 		return false;
 	if (here)
-		LsForceBadArea(here, 20.0f);
+		LsForceBadArea(here, 6.0f + 8.0f * LsSkill());
 	LsWhy(theirs == LSG_SNIPER ? "out of the AWP's lane" : "wrong gun for this range");
 	return true;
 }
@@ -4473,7 +4473,7 @@ void CCSBot::LsHurtBy(CBasePlayer *pAttacker)
 	if (RANDOM_FLOAT(0.0f, 1.0f) > 0.25f + 0.7f * LsSkill())
 		return;
 	if (m_lastKnownArea)
-		LsForceBadArea(m_lastKnownArea, 30.0f);
+		LsForceBadArea(m_lastKnownArea, 8.0f + 7.0f * LsSkill());
 	if (LsTakeCoverFrom(pAttacker->pev->origin, 150.0f))
 		LsWhy("wallbanged: moving");
 }
