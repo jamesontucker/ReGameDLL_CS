@@ -4766,7 +4766,15 @@ bool CCSBot::LsMatchup(CBasePlayer *pEnemy, bool crouchAndHold)
 	}
 	// (most of the time, more often the better it is: not every reload like a script; decided
 	// once per reload)
-	if (IsReloading() && !crouchAndHold && skill > 0.4f && now > m_lsReloadCrouchAt)
+	// one called hurt, in view: the ones who listen to callouts push it (it's one shot)
+	float hurtHp = 100.0f;
+	if (LsKnownHurt(pEnemy, m_iTeam, &hurtHp) && hurtHp < 40.0f && now > m_lsPushUntil && !IsUsingSniperRifle() && !LsSolo()
+		&& range < 1000.0f && RANDOM_FLOAT(0.0f, 1.0f) < 0.25f + 0.5f * skill * LsTeamwork() + 0.25f * LsAggro())
+	{
+		m_lsPushUntil = now + RANDOM_FLOAT(0.8f, 1.5f);
+		LsWhy("pushing a hurt one");
+	}
+		if (IsReloading() && !crouchAndHold && skill > 0.4f && now > m_lsReloadCrouchAt)
 	{
 		m_lsReloadCrouchAt = now + 3.0f;
 		if (RANDOM_FLOAT(0.0f, 1.0f) < 0.45f + 0.5f * skill && LsLowCoverToward(pEnemy->pev->origin))
@@ -4787,7 +4795,8 @@ bool CCSBot::LsMatchup(CBasePlayer *pEnemy, bool crouchAndHold)
 	bool farGun = theirs == LSG_RIFLE || theirs == LSG_SNIPER || theirs == LSG_MG;
 	if (farGun && ((mine == LSG_SMG && range > 1300.0f) || (mine == LSG_SHOTGUN && range > 800.0f) || (mine == LSG_PISTOL && range > 1100.0f)))
 		bad = true;
-	if (!bad || pEnemy->pev->health < 45.0f || skill < 0.35f)
+	// (hurt as far as it knows: called out, or its own hits)
+	if (!bad || LsKnownHurt(pEnemy, m_iTeam) || skill < 0.35f)
 		return false;
 	if (m_state == &m_plantBombState || m_state == &m_defuseBombState || IsEscapingFromBomb())
 		return false;
@@ -5043,6 +5052,9 @@ void CCSBot::LsFeed(CBasePlayer *pVictim, CBasePlayer *pKiller)
 	m_lsFeedSpot = pVictim->pev->origin;
 	m_lsFeedAt = gpGlobals->time;
 	m_lsFeedSniper = pKiller && pKiller != pVictim && BotRelationship(pKiller) == BOT_ENEMY && LsGunClass(pKiller) == LSG_SNIPER;
+	// (the teammate's last words: "1 low" - the killer's hurt)
+	if (pKiller && pKiller != pVictim && pKiller->IsAlive() && BotRelationship(pKiller) == BOT_ENEMY && pKiller->pev->health < 40.0f)
+		LsCallHurt(pKiller, m_iTeam, pKiller->pev->health);
 	// (killed by an AWP there: that lane's covered - the better ones keep off it a while)
 	if (m_lsFeedSniper && skill > 0.45f)
 	{
@@ -5144,4 +5156,68 @@ Vector CCSBot::LsDefuseSpot(const Vector &bomb)
 		}
 	}
 	return best;
+}
+
+// What a team's been told about hurt enemies: by whom, how low, when. CS has no healing, so it
+// stays true the rest of their life (a new life, a new round: forgotten)
+static float s_hurtAt[2][MAX_CLIENTS + 1];
+static float s_hurtHp[2][MAX_CLIENTS + 1];
+static int s_hurtRound[2][MAX_CLIENTS + 1];
+
+void LsCallHurt(CBasePlayer *pEnemy, int team, float hp)
+{
+	int t = team == TERRORIST ? 0 : team == CT ? 1 : -1;
+	int i = pEnemy ? pEnemy->entindex() : 0;
+	if (t < 0 || i < 1 || i > MAX_CLIENTS)
+		return;
+	s_hurtAt[t][i] = gpGlobals->time;
+	s_hurtHp[t][i] = hp;
+	s_hurtRound[t][i] = LsRoundSerial();
+}
+
+bool LsKnownHurt(CBasePlayer *pEnemy, int team, float *hp)
+{
+	int t = team == TERRORIST ? 0 : team == CT ? 1 : -1;
+	int i = pEnemy ? pEnemy->entindex() : 0;
+	if (t < 0 || i < 1 || i > MAX_CLIENTS || s_hurtRound[t][i] != LsRoundSerial() || s_hurtAt[t][i] > gpGlobals->time
+		|| gpGlobals->time - s_hurtAt[t][i] > 40.0f || !pEnemy->IsAlive())
+		return false;
+	if (hp)
+		*hp = s_hurtHp[t][i];
+	return true;
+}
+
+// An enemy called hurt somewhere it isn't (out of its sight): a free bot not far off, bold or a
+// team player, goes after them - to where they were, quickly (newer players don't listen)
+void CCSBot::LsHurtCallTick()
+{
+	float now = gpGlobals->time;
+	if (!LsFight() || LsSolo() || now - m_lsHurtPushAt < 6.0f || !LsFree() || IsHiding() || LsRushing() || TheCSBots()->IsBombPlanted())
+		return;
+	m_lsHurtPushAt = now - 4.0f;	// (looked at once every two seconds or so)
+	for (int i = 1; i <= gpGlobals->maxClients; i++)
+	{
+		CBasePlayer *pEnemy = UTIL_PlayerByIndex(i);
+		float hp = 100.0f;
+		if (!pEnemy || !pEnemy->IsAlive() || !IsEnemy(pEnemy) || !LsKnownHurt(pEnemy, m_iTeam, &hp) || hp > 35.0f)
+			continue;
+		int t = m_iTeam == TERRORIST ? 0 : 1;
+		if (now - s_hurtAt[t][i] > 6.0f)
+			continue;
+		Vector at = pEnemy->pev->origin;	// (where the callout said: they were just hit there)
+		float d = float((at - pev->origin).Length());
+		if (d > 1300.0f || d < 200.0f)
+			continue;
+		if (RANDOM_FLOAT(0.0f, 1.0f) > (0.15f + 0.45f * LsSkill()) * (0.5f + 0.5f * LsTeamwork() + 0.5f * LsAggro()))
+		{
+			m_lsHurtPushAt = now;
+			return;
+		}
+		m_lsHurtPushAt = now;
+		Run();
+		Hurry(3.0f);
+		MoveTo(&at, FASTEST_ROUTE);
+		LsWhy("going after a hurt one");
+		return;
+	}
 }

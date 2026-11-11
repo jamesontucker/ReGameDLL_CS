@@ -80,6 +80,13 @@ void CCSBot::OnEvent(GameEventType event, CBaseEntity *pEntity, CBaseEntity *pOt
 	if (event == EVENT_PLAYER_TOOK_DAMAGE && pOther == this)
 		m_lsShotsNoHit = 0;
 
+	// Loner-Strike: one of its own team hit an enemy who's still up and hurt: "he's lit" (called
+	// by the shooter; once per hit for the whole team, from the first bot that hears it)
+	if (event == EVENT_PLAYER_TOOK_DAMAGE && pEntity && pEntity->IsPlayer() && pOther && pOther->IsPlayer() && pOther != this && LsFight()
+		&& static_cast<CBasePlayer *>(pOther)->m_iTeam == m_iTeam && IsEnemy(static_cast<CBasePlayer *>(pEntity)) && pEntity->IsAlive()
+		&& pEntity->pev->health < 60.0f)
+		LsCallHurt(static_cast<CBasePlayer *>(pEntity), m_iTeam, pEntity->pev->health);
+
 	// Loner-Strike: hit: from someone it can't see, through a wall?
 	if (event == EVENT_PLAYER_TOOK_DAMAGE && pEntity == this && pOther && pOther->IsPlayer())
 	{

@@ -210,6 +210,7 @@ void CCSBot::ResetValues()
 	m_lsFeedSniper = false;
 	m_lsTempoAt = -999.0f;
 	m_lsImpactAt = -999.0f;
+	m_lsHurtPushAt = -999.0f;
 	// (a new map: its avoided areas were the last map's)
 	if (m_lsBadMap != LsMapSerial())
 	{

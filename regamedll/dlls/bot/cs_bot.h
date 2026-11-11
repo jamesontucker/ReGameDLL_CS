@@ -1208,6 +1208,7 @@ public:
 	bool LsPreAim(const Vector &heard, float secs, CBasePlayer *who = nullptr);	// look where a sound will come out (the area's angles)
 	bool LsTakeCoverFrom(const Vector &threat, float minMove, bool fromFight = false, float holdSecs = -1.0f);	// to the nearest spot out of its sight, a short hold there
 	bool LsMatchup(CBasePlayer *pEnemy, bool crouchAndHold);		// mid-fight: the wrong gun for this range (an AWP down a lane): out of it
+	Vector LsDefuseSpot(const Vector &bomb);		// beside the bomb, the side away from the threat
 	bool LsLowCoverToward(const Vector &at);	// low cover right by it that way (crouch behind it)
 	float LsFallMargin();						// how close to dying from a drop it'll go (pros never close)
 	EntityHandle<CBasePlayer> m_lsMatchupEnemy;	// the enemy whose matchup it weighed (once a fight)
@@ -1230,6 +1231,8 @@ public:
 	int m_lsBadMap = -1;							// the map its avoided areas are from
 	float m_lsTempo = 0.0f, m_lsTempoAt = -999.0f;
 	float m_lsImpactAt = -999.0f;
+	float m_lsHurtPushAt = -999.0f;					// last went after an enemy called hurt
+	void LsHurtCallTick();
 	bool m_lsTap = false;						// a semi-automatic's trigger: pressed on every other think, let go between
 	bool LsPuppetOwnsLook() const;
 	bool LsTriggerTap() { m_lsTap = !m_lsTap; return m_lsTap; }
@@ -1418,7 +1421,6 @@ private:
 	void LsExecuteGo(const CCSBotManager::Zone *site);
 	int LsPickRole();
 	bool LsTakePerch(const CCSBotManager::Zone *site, bool tSide);
-	Vector LsDefuseSpot(const Vector &bomb);		// beside the bomb, the side away from the threat
 	float m_lsDefuseNoticeAt = -1.0f;				// when it takes in the defuse it hears
 	int m_lsWinReloadRound = -1;
 	int m_lsMoraleHideRound = -1;					// the round it hid on low morale (once is enough)
@@ -1629,6 +1631,8 @@ const Vector *LsEnemySpawn(int team);	// the middle of the other team's spawn (n
 float LsArrival(const CNavArea *area, int team);	// seconds that team needs, running from its spawn, to get there (-1 unknown)
 enum { LSG_NONE, LSG_PISTOL, LSG_DEAGLE, LSG_SMG, LSG_SHOTGUN, LSG_RIFLE, LSG_SNIPER, LSG_MG };
 int LsGunClass(CBasePlayer *pPlayer);	// what kind of gun someone has out
+void LsCallHurt(CBasePlayer *pEnemy, int team, float hp);	// a team was told an enemy's hurt ("he's lit", "1 low")
+bool LsKnownHurt(CBasePlayer *pEnemy, int team, float *hp = nullptr);	// ...and still knows it (no healing in CS)
 int LsAlive(int team);					// how many of a team are alive (the scoreboard shows it)
 bool LsHabitNear(const Vector &at, float range);	// a person's spot this map (where they killed a bot from)
 int LsMapSerial();						// changes when the map does
