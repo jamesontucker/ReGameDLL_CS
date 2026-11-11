@@ -1232,6 +1232,11 @@ public:
 	float m_lsTempo = 0.0f, m_lsTempoAt = -999.0f;
 	float m_lsImpactAt = -999.0f;
 	float m_lsHurtPushAt = -999.0f;					// last went after an enemy called hurt
+	void LsFlashWatch();							// a flashbang about to pop in front of it: turn away (the better ones)
+	float m_lsFlashCheckAt = 0.0f, m_lsFlashAwayUntil = 0.0f;
+	bool LsLadderExposed() const;					// enemies about: a ladder is a bad place to be
+	bool LsAwpKnownToward(const Vector &dir2d) const;	// an AWPer known (heard, the feed) roughly that way
+	bool m_lsJumpPeek = false;						// this corner's jiggle is a jump-peek (baiting an AWP)
 	void LsHurtCallTick();
 	bool m_lsTap = false;						// a semi-automatic's trigger: pressed on every other think, let go between
 	bool LsPuppetOwnsLook() const;
@@ -1636,7 +1641,8 @@ bool LsKnownHurt(CBasePlayer *pEnemy, int team, float *hp = nullptr);	// ...and 
 int LsAlive(int team);					// how many of a team are alive (the scoreboard shows it)
 bool LsHabitNear(const Vector &at, float range);	// a person's spot this map (where they killed a bot from)
 int LsMapSerial();						// changes when the map does
-float LsMapSafeTime();					// how long the round's early "safe" part lasts on this map
+float LsMapSafeTime();
+int LsMapLean();						// +1 a long map (rifles, AWPs), -1 a close one (SMGs, shotguns), 0 neither or unknown					// how long the round's early "safe" part lasts on this map
 void LsExposurePoint(const CNavArea *area, int point, Vector *out);	// one of 9 across it (the outer ones by its edges), on the floor
 bool LsMatch();
 bool LsSolo();
@@ -2248,6 +2254,10 @@ public:
 				dist = ladderPenalty * ladder->m_length;
 				if (m_bot->LsBadLadder(ladder))
 					dist *= 20.0f;
+				// (Loner-Strike: with enemies about, a ladder - slow, no gun up - is avoided by the
+				// ones who know better)
+				if (m_lsTaste && m_bot->LsLadderExposed())
+					dist *= 4.0f;
 
 				// if we are currently escorting hostages, avoid ladders (hostages are confused by them)
 				//if (m_bot->GetHostageEscortCount())

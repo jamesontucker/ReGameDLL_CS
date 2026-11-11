@@ -337,6 +337,22 @@ void BuyState::OnUpdate(CCSBot *me)
 
 			int weaponPreference = me->GetProfile()->GetWeaponPreference(m_prefIndex);
 
+			// Loner-Strike: the map's feel, for players who know it: on a close map a sniper
+			// rifle is often passed over, on a long one an SMG or a shotgun (the next favourite
+			// instead); decided once per favourite per round
+			if (LsFight() && !LsSolo() && m_prefRetries == 0 && me->LsKnows(CCSBot::LSK_ECONOMY))
+			{
+				int lean = LsMapLean();
+				const char *alias = WeaponIDToAlias(weaponPreference);
+				WeaponType kind = alias ? GetWeaponType(alias) : PISTOL;
+				bool skip = (lean < 0 && kind == SNIPER_RIFLE) || (lean > 0 && (kind == SUB_MACHINE_GUN || kind == SHOTGUN));
+				if (skip && m_prefIndex + 1 < me->GetProfile()->GetWeaponPreferenceCount() && RANDOM_FLOAT(0.0f, 1.0f) < 0.55f)
+				{
+					m_prefIndex++;
+					return;
+				}
+			}
+
 			// don't buy it again if we still have one from last round
 			CBasePlayerWeapon *pCurrentWeapon = me->GetActiveWeapon();
 			if (pCurrentWeapon && pCurrentWeapon->m_iId == weaponPreference)

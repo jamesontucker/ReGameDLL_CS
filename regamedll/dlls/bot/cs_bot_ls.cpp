@@ -1035,6 +1035,22 @@ void Bot_LsServerCommand()
 		me->LsCallBuy(int(LsArg(3, 0.0f)));
 		return;
 	}
+	// callout <x> <y> <z>: told where an enemy is (a teammate's call in chat): heard there
+	if (FStrEq(what, "callout"))
+	{
+		if (!me->IsAlive() || me->IsAttacking() || !LsFight())
+			return;
+		Vector at(LsArg(3), LsArg(4), LsArg(5));
+		CNavArea *area = TheNavAreaGrid.GetNearestNavArea(&at);
+		if (area && (!me->IsNoiseHeard() || me->GetNoisePriority() <= PRIORITY_MEDIUM))
+		{
+			me->m_noisePosition = at;
+			me->m_noiseArea = area;
+			me->m_noisePriority = PRIORITY_MEDIUM;
+			me->m_noiseTimestamp = now;
+		}
+		return;
+	}
 	// knife <secs>: a plugin put the knife out on purpose (showing off after a kill, a knife
 	// run): left in its hand that long, unless an enemy shows up (the gun comes back then)
 	if (FStrEq(what, "knife"))
@@ -3849,6 +3865,7 @@ bool CCSBot::LsScanAngles(bool holding)
 
 	float bestScore = -1.0f, scores[LS_KNOW_ANGLES];
 	bool behind[LS_KNOW_ANGLES] = {};
+	bool smoked[LS_KNOW_ANGLES] = {};
 	int bestA = -1;
 	Vector at[LS_KNOW_ANGLES];
 	for (int a = 0; a < k->angleCount; a++)
@@ -3867,6 +3884,12 @@ bool CCSBot::LsScanAngles(bool holding)
 		// (somewhere the enemy can't have got to yet this round matters less; the kill feed's
 		// spot - a teammate just died there - more; a person's favourite spots, to a veteran)
 		score *= LsTimingWeight(target);
+		// (behind a smoke: nothing to see there - not held through it)
+		if (TheCSBots()->IsLineBlockedBySmoke(&eye, &at[a]))
+		{
+			smoked[a] = true;
+			score *= 0.25f;
+		}
 		if (now - m_lsFeedAt < 12.0f && (tc - m_lsFeedSpot).IsLengthLessThan(700.0f))
 			score *= m_lsFeedSniper ? 2.0f : 1.6f;
 		if (skill > 0.55f && LsHabitNear(tc, 450.0f))
@@ -3951,6 +3974,37 @@ bool CCSBot::LsScanAngles(bool holding)
 		return false;
 	}
 	Vector look = at[bestA];
+	// (a busy angle smoked off: the better ones watch the smoke's near edge, where a push
+	// comes out of it)
+	if (skill > 0.45f)
+	{
+		int top = -1;
+		for (int a = 0; a < k->angleCount; a++)
+			if (smoked[a] && (top < 0 || k->angles[a].weight > k->angles[top].weight))
+				top = a;
+		if (top >= 0 && RANDOM_FLOAT(0.0f, 1.0f) < 0.5f)
+		{
+			Vector step = at[top] - eye;
+			float len = float(step.Length());
+			if (len > 1.0f)
+			{
+				step = step * (48.0f / len);
+				Vector p = eye;
+				for (int i = 0; i < 40 && (p - eye).IsLengthLessThan(len); i++)
+				{
+					Vector next = p + step;
+					if (TheCSBots()->IsInsideSmokeCloud(&next))
+						break;
+					p = next;
+				}
+				if ((p - eye).IsLengthGreaterThan(100.0f))
+				{
+					look = p;
+					bestA = top;
+				}
+			}
+		}
+	}
 	LsLookableSpot(&look);
 	// how long on it: a good player a quick, sure check; careful ones and campers longer; holding
 	// a spot, longer still
@@ -4598,10 +4652,16 @@ bool CCSBot::LsTakeCoverFrom(const Vector &threat, float minMove, bool fromFight
 			for (int i = 0; i < n && tail < 48; i++)
 			{
 				CNavArea *adj = area->GetAdjacentArea((NavDirType)dir, i);
+				if (!adj)
+					continue;
+				// (not down a drop that would kill it, or leave it nearly dead)
+				float drop = float(area->GetCenter()->z - adj->GetCenter()->z);
+				if (drop > 60.0f && GetApproximateFallDamage(drop) + LsFallMargin() >= pev->health)
+					continue;
 				bool seen = false;
 				for (int j = 0; j < tail && !seen; j++)
 					seen = queue[j] == adj;
-				if (adj && !seen)
+				if (!seen)
 					queue[tail++] = adj;
 			}
 		}
@@ -5220,4 +5280,118 @@ void CCSBot::LsHurtCallTick()
 		LsWhy("going after a hurt one");
 		return;
 	}
+}
+
+// ---- flashes, ladders, AWPers known ------------------------------------------------------
+
+// The flashbangs in the air about to go off, looked up once a tenth of a second for all the bots
+struct LsFlashSeen { Vector at; float pop; edict_t *owner; };
+static LsFlashSeen s_flashes[8];
+static int s_flashCount = 0;
+static float s_flashScanAt = -1.0f;
+
+static void LsScanFlashes()
+{
+	float now = gpGlobals->time;
+	if (now - s_flashScanAt < 0.1f && now >= s_flashScanAt)
+		return;
+	s_flashScanAt = now;
+	s_flashCount = 0;
+	CBaseEntity *pEnt = nullptr;
+	while ((pEnt = UTIL_FindEntityByClassname(pEnt, "grenade")) != nullptr && s_flashCount < 8)
+	{
+		if (static_cast<CGrenade *>(pEnt)->m_bIsC4 || FStringNull(pEnt->pev->model) || !FStrEq(STRING(pEnt->pev->model), "models/w_flashbang.mdl"))
+			continue;
+		float pop = pEnt->pev->dmgtime;
+		if (pop < now)
+			continue;
+		s_flashes[s_flashCount].at = pEnt->pev->origin;
+		s_flashes[s_flashCount].pop = pop;
+		s_flashes[s_flashCount].owner = pEnt->pev->owner;
+		s_flashCount++;
+	}
+}
+
+// A flashbang in front of it, in view and close, about to pop (anyone's but its own, which it
+// handles when it throws): the better players turn their back to it; newer ones eat it
+void CCSBot::LsFlashWatch()
+{
+	float now = gpGlobals->time;
+	if (!LsFight() || now < m_lsFlashCheckAt || now < m_lsFlashAwayUntil || IsBlind())
+		return;
+	m_lsFlashCheckAt = now + 0.1f;
+	LsScanFlashes();
+	if (!s_flashCount)
+		return;
+	Vector eye = GetEyePosition();
+	UTIL_MakeVectors(pev->v_angle);
+	Vector fwd = gpGlobals->v_forward;
+	for (int i = 0; i < s_flashCount; i++)
+	{
+		const LsFlashSeen &f = s_flashes[i];
+		if (f.owner == edict() || f.pop - now > 0.7f)
+			continue;
+		Vector to = f.at - eye;
+		float d = float(to.Length());
+		if (d < 1.0f || d > 1000.0f || float(DotProduct(to, fwd)) / d < 0.3f)
+			continue;
+		TraceResult tr;
+		UTIL_TraceLine(eye, f.at, ignore_monsters, ignore_glass, ENT(pev), &tr);
+		if (tr.flFraction < 1.0f)
+			continue;
+		m_lsFlashAwayUntil = now + 1.2f;
+		if (RANDOM_FLOAT(0.0f, 1.0f) > 0.15f + 0.75f * LsSkill())
+			return;
+		Vector away = eye - to * (200.0f / d);
+		away.z = eye.z;
+		if (IsAimingAtEnemy())
+			LsUrgentTurn(away, 0.9f, nullptr);
+		else
+			SetLookAt("Loner-Strike: turned from a flash", &away, PRIORITY_UNINTERRUPTABLE, 0.9f);
+		LsWhy("turned from a flash");
+		return;
+	}
+}
+
+bool CCSBot::LsLadderExposed() const
+{
+	if (!LsFight() || LsSkill() < 0.35f)
+		return false;
+	return GetTimeSinceLastSawEnemy() < 8.0f || (IsNoiseHeard() && GetNoisePriority() >= PRIORITY_MEDIUM && gpGlobals->time - m_noiseTimestamp < 6.0f);
+}
+
+// An AWPer known to be out that way (heard scoping or firing lately, or a teammate killed by one
+// in the feed), roughly in the given direction
+bool CCSBot::LsAwpKnownToward(const Vector &dir2d) const
+{
+	float now = gpGlobals->time;
+	Vector spot;
+	if (now - m_lsSniperHeardAt < 20.0f)
+		spot = m_lsSniperSpot;
+	else if (m_lsFeedSniper && now - m_lsFeedAt < 20.0f)
+		spot = m_lsFeedSpot;
+	else
+		return false;
+	Vector to = spot - pev->origin;
+	to.z = 0.0f;
+	float len = float(to.Length2D());
+	return len > 300.0f && float(DotProduct(to, dir2d)) / len > 0.3f;
+}
+
+// The stock maps people know as long (rifles and AWPs) or close (SMGs and shotguns); awp_ maps
+// are all AWP. A custom map is neither: its feel isn't guessed
+int LsMapLean()
+{
+	const char *map = STRING(gpGlobals->mapname);
+	if (!Q_strnicmp(map, "awp_", 4))
+		return 2;
+	static const char *longMaps[] = { "de_dust", "de_dust2", "de_aztec", "de_train", "de_cbble", "de_prodigy", "de_inferno" };
+	static const char *closeMaps[] = { "cs_office", "cs_italy", "cs_militia", "cs_747", "cs_estate", "cs_backalley", "cs_siege", "de_vertigo", "de_piranesi" };
+	for (const char *m : longMaps)
+		if (!Q_stricmp(map, m))
+			return 1;
+	for (const char *m : closeMaps)
+		if (!Q_stricmp(map, m))
+			return -1;
+	return 0;
 }

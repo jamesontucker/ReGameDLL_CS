@@ -222,6 +222,15 @@ bool CCSBot::LsCornerMoves(Vector *goal)
 	{
 		m_lsCornerAt = corner;
 		m_lsCornerPlan = LsPickCornerPlan();
+		m_lsJumpPeek = false;
+		// (an AWPer known out past this corner: a good player jump-peeks it, to draw the shot
+		// without giving it a still target)
+		if (LsSkill() > 0.6f && LsAwpKnownToward(Vector(out.x, out.y, 0.0f)) && now >= m_lsNextJiggle
+			&& RANDOM_FLOAT(0.0f, 1.0f) < 0.4f + 0.5f * LsSkill())
+		{
+			m_lsCornerPlan = LS_CORNER_JIGGLE;
+			m_lsJumpPeek = true;
+		}
 		m_lsCornerShift = Vector2D(0, 0);
 		m_lsCornerBlind = false;
 		if (m_lsCornerPlan == LS_CORNER_WIDE || m_lsCornerPlan == LS_CORNER_OUTSIDE)
@@ -273,7 +282,13 @@ bool CCSBot::LsCornerMoves(Vector *goal)
 		// (the better ones sometimes do it twice)
 		m_lsJiggleLeft = (LsSkill() > 0.75f && RANDOM_FLOAT(0.0f, 1.0f) < 0.35f) ? 2 : 1;
 		m_lsJiggleUntil = now + 1.2f;
-		LsWhy("jiggle");
+		LsWhy(m_lsJumpPeek ? "jump-peek" : "jiggle");
+		if (m_lsJumpPeek)
+		{
+			Jump(MUST_JUMP);
+			m_lsJiggleLeft = 1;
+			m_lsJumpPeek = false;
+		}
 		Vector to = pev->origin + Vector(out.x, out.y, 0.0f) * 100.0f;
 		MoveTowardsPosition(&to);
 		SetLookAt(LS_PEEK, &m_lsJiggleLook, PRIORITY_LOW, 0.5f, true);
@@ -820,7 +835,13 @@ bool CCSBot::LsBadArea(const CNavArea *area) const
 	for (int i = 0; i < 4; i++)
 	{
 		if (m_lsBadAreas[i] == area && gpGlobals->time < m_lsBadAreaUntil[i])
+		{
+			// (smoked off now: crossed under the smoke, as people do with an AWP lane)
+			Vector mid = *area->GetCenter() + Vector(0, 0, HalfHumanHeight);
+			if (TheCSBots() && TheCSBots()->IsInsideSmokeCloud(&mid))
+				return false;
 			return true;
+		}
 	}
 	return false;
 }

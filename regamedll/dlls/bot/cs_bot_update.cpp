@@ -69,7 +69,11 @@ void CCSBot::Upkeep()
 
 				// (Loner-Strike: people place their crosshair at head height whatever their skill;
 				// only the big guns go for the body)
-				if (IsUsingAWP() || IsUsingShotgun() || IsUsingMachinegun()
+				// (and one called nearly dead: any hit finishes him, so the bigger target, for a
+				// player who listens to callouts)
+				float lsHurtHp = 100.0f;
+				bool lsFinish = LsFight() && LsSkill() > 0.4f && LsKnownHurt(static_cast<CBasePlayer *>(m_enemy), m_iTeam, &lsHurtHp) && lsHurtHp < 30.0f;
+				if (IsUsingAWP() || IsUsingShotgun() || IsUsingMachinegun() || lsFinish
 					|| (!LsFight() && (GetProfile()->GetSkill() < sharpshooter || (IsActiveWeaponRecoilHigh() && !IsUsingPistol() && !IsUsingSniperRifle()))))
 				{
 					if (IsEnemyPartVisible(CHEST))
@@ -389,6 +393,7 @@ void CCSBot::Update()
 	LsDoorButton();
 	LsRushHoldTick();
 	LsHurtCallTick();
+	LsFlashWatch();
 
 	// (Loner-Strike: who it's fighting, for the plugins to follow (gm_humanbots times its
 	// reaction and aim for the same one): pev->euser4, nothing else uses it)
