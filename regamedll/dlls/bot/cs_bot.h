@@ -1216,6 +1216,9 @@ public:
 	float m_lsDuckAt = -999.0f;
 	float m_lsReloadCrouchAt = 0.0f;			// whether to crouch for this reload was decided (until then)
 	float m_lsKnifeOkUntil = 0.0f;
+	bool m_lsTap = false;						// a semi-automatic's trigger: pressed on every other think, let go between
+	bool LsPuppetOwnsLook() const;
+	bool LsTriggerTap() { m_lsTap = !m_lsTap; return m_lsTap; }
 	float m_lsRushHoldUntil = 0.0f;			// in cover from a rush, waiting for its team, until (at most)
 	float m_lsRushHoldCheckAt = 0.0f;
 	void LsRushHoldTick();				// a plugin's knife out on purpose, left alone until then

@@ -706,13 +706,23 @@ bool CCSBot::LsOrderBusy() const
 		|| GetHostageEscortCount() > 0 || (IsCarryingBomb() && !(CSGameRules() && CSGameRules()->IsFreezePeriod()));
 }
 
+// The look on now is the puppet's own (still running, and nothing more urgent took over)
+bool CCSBot::LsPuppetOwnsLook() const
+{
+	const LsPuppet &p = m_lsPuppet;
+	if (gpGlobals->time >= p.lookUntil || m_lookAtSpotState == NOT_LOOKING_AT_SPOT)
+		return false;
+	return p.urgent ? m_lookAtSpotPriority == PRIORITY_UNINTERRUPTABLE : m_lookAtSpotPriority <= PRIORITY_LOW;
+}
+
 void CCSBot::LsPuppetRelease()
 {
 	if (m_lsPuppet.crouchUntil > 0.0f)
 		StandUp();
 	if (m_lsPuppet.followUntil > 0.0f && IsFollowing())
 		StopFollowing();
-	if (m_lsPuppet.lookUntil > 0.0f)
+	// (only its own look, still on: not the reaction - a sound, a shot - that ended the hold)
+	if (LsPuppetOwnsLook())
 		ClearLookAt();
 	if (m_lsPuppet.walkUntil > 0.0f)
 		Run();
@@ -1112,7 +1122,7 @@ void CCSBot::LsPuppetCommand(const char *what, float now)
 		{
 			if (p.crouchUntil > 0.0f)
 				StandUp();
-			if (p.lookUntil > 0.0f && !p.urgent)
+			if (!p.urgent && LsPuppetOwnsLook())
 				ClearLookAt();
 			p.holdUntil = p.crouchUntil = 0.0f;
 			if (!p.urgent)
@@ -2221,7 +2231,7 @@ bool CCSBot::LsBangTick()
 	UTIL_MakeVectors(pev->v_angle + pev->punchangle);
 	// (a semi-automatic needs the trigger let go between shots)
 	bool semi = pWeapon->m_iId == WEAPON_DEAGLE || pWeapon->m_iId == WEAPON_AWP || pWeapon->m_iId == WEAPON_SCOUT;
-	if (DotProduct(gpGlobals->v_forward, dir) > 0.996f && (!semi || int(now * 8.0f) % 2 == 0))
+	if (DotProduct(gpGlobals->v_forward, dir) > 0.996f && (!semi || LsTriggerTap()))
 		PrimaryAttack();
 	return true;
 }
@@ -4028,7 +4038,12 @@ float s_buttonPressedAt[MAX_EDICTS] = {};		// by entity index, when a bot last p
 float &ButtonPressed(int index)
 {
 	static float none = 0.0f;
-	return (index > 0 && index < int(sizeof(s_buttonPressedAt) / sizeof(s_buttonPressedAt[0]))) ? s_buttonPressedAt[index] : none;
+	if (!(index > 0 && index < int(sizeof(s_buttonPressedAt) / sizeof(s_buttonPressedAt[0]))))
+		return none;
+	// (a time from the last map - the clock restarts on a new one - is forgotten)
+	if (s_buttonPressedAt[index] > gpGlobals->time)
+		s_buttonPressedAt[index] = -999.0f;
+	return s_buttonPressedAt[index];
 }
 
 Vector BrushCenter(CBaseEntity *pEnt)
@@ -4107,7 +4122,7 @@ void CCSBot::LsDoorButton()
 		{
 			// (a pistol or a pump needs the trigger let go between shots)
 			bool semi = IsUsingPistol() || IsUsingShotgun();
-			if (!semi || int(now * 8.0f) % 2 == 0)
+			if (!semi || LsTriggerTap())
 				PrimaryAttack();
 		}
 		return;

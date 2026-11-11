@@ -32,6 +32,7 @@
 void AttackState::OnEnter(CCSBot *me)
 {
 	me->m_lsDuckUntil = 0.0f;	// Loner-Strike: no duck left over from the last fight
+	me->m_lsMatchupEnemy = nullptr;	// (the matchup is weighed once a fight)
 	me->m_lsReloadCrouched = false;
 	me->LsFightBegins();	// Loner-Strike
 	CBasePlayer *pEnemy = me->GetEnemy();

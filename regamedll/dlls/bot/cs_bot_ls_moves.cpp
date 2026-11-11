@@ -506,7 +506,7 @@ static void LsPrefireTick(CCSBot *me, const Vector &at, float &until, float &fir
 	}
 	// (a pistol or a pump needs the trigger let go between shots)
 	bool semi = me->IsUsingPistol() || me->IsUsingShotgun();
-	if (!semi || int(now * 8.0f) % 2 == 0)
+	if (!semi || me->LsTriggerTap())
 		me->PrimaryAttack();
 }
 
