@@ -1977,6 +1977,15 @@ bool CCSBot::IsNoticable(const CBasePlayer *pPlayer, unsigned char visibleParts)
 
 	// scale by skill level
 	noticeChance *= (0.5f + 0.5f * GetProfile()->GetSkill());
+	// (Loner-Strike: and by who it is: the watchful take in a bit more, the rushers a bit less)
+	if (LsFight())
+	{
+		int lsStyle = LsStyle();
+		if (lsStyle == LS_STYLE_CAREFUL || lsStyle == LS_STYLE_CAMPER || lsStyle == LS_STYLE_AWPER)
+			noticeChance *= 1.15f;
+		else if (lsStyle == LS_STYLE_RUSHER || lsStyle == LS_STYLE_KNIFER)
+			noticeChance *= 0.9f;
+	}
 
 	// Loner-Strike: where in the view: someone near the middle of it is seen at once, one at the
 	// edge of the view less readily (attention, as a person's)
