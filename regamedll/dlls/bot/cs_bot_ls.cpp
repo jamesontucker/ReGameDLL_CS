@@ -4980,6 +4980,14 @@ bool CCSBot::LsMatchup(CBasePlayer *pEnemy, bool crouchAndHold)
 		return false;
 	if (here)
 		LsForceBadArea(here, 6.0f + 8.0f * LsSkill());
+	// (an AWP's lane: from cover, a smoke across it - then the lane, smoked, is crossed)
+	if (theirs == LSG_SNIPER && skill > 0.5f && !LsSolo() && LsHasNade(WEAPON_SMOKEGRENADE))
+	{
+		Vector to = pEnemy->pev->origin - pev->origin;
+		float len = float(to.Length());
+		m_lsSmokeLaneSpot = pev->origin + to * (Q_min(700.0f, len * 0.5f) / Q_max(len, 1.0f));
+		m_lsSmokeLaneAt = now + RANDOM_FLOAT(1.5f, 2.5f);
+	}
 	LsWhy(theirs == LSG_SNIPER ? "out of the AWP's lane" : "wrong gun for this range");
 	return true;
 }
@@ -5419,7 +5427,7 @@ void CCSBot::LsHurtCallTick()
 // ---- flashes, ladders, AWPers known ------------------------------------------------------
 
 // The flashbangs in the air about to go off, looked up once a tenth of a second for all the bots
-struct LsFlashSeen { Vector at; float pop; edict_t *owner; };
+struct LsFlashSeen { Vector at; float pop; edict_t *owner; bool he; };
 static LsFlashSeen s_flashes[8];
 static int s_flashCount = 0;
 static float s_flashScanAt = -1.0f;
@@ -5434,7 +5442,10 @@ static void LsScanFlashes()
 	CBaseEntity *pEnt = nullptr;
 	while ((pEnt = UTIL_FindEntityByClassname(pEnt, "grenade")) != nullptr && s_flashCount < 8)
 	{
-		if (static_cast<CGrenade *>(pEnt)->m_bIsC4 || FStringNull(pEnt->pev->model) || !FStrEq(STRING(pEnt->pev->model), "models/w_flashbang.mdl"))
+		if (static_cast<CGrenade *>(pEnt)->m_bIsC4 || FStringNull(pEnt->pev->model))
+			continue;
+		bool he = FStrEq(STRING(pEnt->pev->model), "models/w_hegrenade.mdl");
+		if (!he && !FStrEq(STRING(pEnt->pev->model), "models/w_flashbang.mdl"))
 			continue;
 		float pop = pEnt->pev->dmgtime;
 		if (pop < now)
@@ -5442,6 +5453,7 @@ static void LsScanFlashes()
 		s_flashes[s_flashCount].at = pEnt->pev->origin;
 		s_flashes[s_flashCount].pop = pop;
 		s_flashes[s_flashCount].owner = pEnt->pev->owner;
+		s_flashes[s_flashCount].he = he;
 		s_flashCount++;
 	}
 }
@@ -5463,6 +5475,17 @@ void CCSBot::LsFlashWatch()
 	for (int i = 0; i < s_flashCount; i++)
 	{
 		const LsFlashSeen &f = s_flashes[i];
+		// an HE landing close (heard bouncing, seen): out of its reach - behind something from
+		// it - the better ones; newer players often stand in it
+		if (f.he)
+		{
+			if (f.owner == edict() || f.pop - now > 1.6f || (f.at - pev->origin).IsLengthGreaterThan(350.0f))
+				continue;
+			m_lsFlashAwayUntil = now + 1.5f;
+			if (RANDOM_FLOAT(0.0f, 1.0f) < 0.15f + 0.7f * LsSkill() && LsTakeCoverFrom(f.at, 120.0f, IsAttacking(), 0.5f))
+				LsWhy("away from the grenade");
+			return;
+		}
 		if (f.owner == edict() || f.pop - now > 0.7f)
 			continue;
 		Vector to = f.at - eye;
@@ -5679,4 +5702,16 @@ void CCSBot::LsAimMapTick()
 	float hold = style == LS_STYLE_RUSHER ? RANDOM_FLOAT(1.5f, 3.0f) : (style == LS_STYLE_CAREFUL || style == LS_STYLE_CAMPER) ? RANDOM_FLOAT(6.0f, 10.0f) : RANDOM_FLOAT(3.5f, 7.0f);
 	Hide(spot, hold, true);
 	LsWhy("aim map: to the next cover");
+}
+
+// The smoke for an AWP's lane, thrown once it's in cover (if it still has one, and isn't fighting)
+void CCSBot::LsSmokeLaneTick()
+{
+	if (m_lsSmokeLaneAt <= 0.0f || gpGlobals->time < m_lsSmokeLaneAt)
+		return;
+	m_lsSmokeLaneAt = 0.0f;
+	if (!LsFight() || IsAttacking() || IsEnemyVisible() || !LsHasNade(WEAPON_SMOKEGRENADE) || m_isWaitingToTossGrenade || IsUsingLadder())
+		return;
+	LsNadeStart(WEAPON_SMOKEGRENADE, m_lsSmokeLaneSpot, RANDOM_FLOAT(4.0f, 8.0f));
+	LsWhy("smoking the AWP's lane");
 }

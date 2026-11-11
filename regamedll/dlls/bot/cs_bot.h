@@ -1248,6 +1248,9 @@ public:
 	bool m_lsCoverPeekUp = false;
 	void LsAimMapTick();							// aim_/fy_ maps: from cover to cover, pushing only on an edge
 	float m_lsAimMapAt = 0.0f;
+	float m_lsSmokeLaneAt = 0.0f;					// a smoke for the AWP lane it just got out of, thrown from cover then
+	Vector m_lsSmokeLaneSpot;
+	void LsSmokeLaneTick();
 	void LsFlashWatch();							// a flashbang about to pop in front of it: turn away (the better ones)
 	float m_lsFlashCheckAt = 0.0f, m_lsFlashAwayUntil = 0.0f;
 	bool LsLadderExposed() const;					// enemies about: a ladder is a bad place to be

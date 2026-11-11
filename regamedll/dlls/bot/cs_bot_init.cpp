@@ -220,6 +220,7 @@ void CCSBot::ResetValues()
 	m_lsCoverPeekUntil = 0.0f;
 	m_lsCoverPeekUp = false;
 	m_lsAimMapAt = 0.0f;
+	m_lsSmokeLaneAt = 0.0f;
 	pev->vuser1.y = 0.0f;
 	m_lsFlashCheckAt = 0.0f;
 	m_lsFlashAwayUntil = 0.0f;
