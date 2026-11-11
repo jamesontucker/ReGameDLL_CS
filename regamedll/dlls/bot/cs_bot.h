@@ -1205,7 +1205,7 @@ public:
 	void LsShotAt(CBasePlayer *pShooter, const Vector &impact);	// enemy bullets landing or passing close
 	void LsHeardBreak(CBaseEntity *pBreak);		// glass, a vent cover, a board breaking: someone's there
 	void LsHurtBy(CBasePlayer *pAttacker);		// hit: through a wall? that spot's not safe
-	bool LsPreAim(const Vector &heard, float secs);	// look where a sound will come out (the area's angles)
+	bool LsPreAim(const Vector &heard, float secs, CBasePlayer *who = nullptr);	// look where a sound will come out (the area's angles)
 	bool LsTakeCoverFrom(const Vector &threat, float minMove, bool fromFight = false, float holdSecs = -1.0f);	// to the nearest spot out of its sight, a short hold there
 	bool LsMatchup(CBasePlayer *pEnemy, bool crouchAndHold);		// mid-fight: the wrong gun for this range (an AWP down a lane): out of it
 	bool LsLowCoverToward(const Vector &at);	// low cover right by it that way (crouch behind it)
@@ -1216,6 +1216,20 @@ public:
 	float m_lsDuckAt = -999.0f;
 	float m_lsReloadCrouchAt = 0.0f;			// whether to crouch for this reload was decided (until then)
 	float m_lsKnifeOkUntil = 0.0f;
+	// round knowledge (batch 3): the kill feed and radar, its own last death, the numbers
+	void LsFeed(CBasePlayer *pVictim, CBasePlayer *pKiller);	// a teammate died (radar spot, the gun in the feed)
+	void LsNoteDeath(CBasePlayer *pKiller);			// it died: where (avoided next round), and a person's spot
+	void LsImpactNearMate(CBasePlayer *pShooter, const Vector &impact);	// enemy bullets landing on a teammate: a fight there
+	float LsTempo();								// its side's alive count minus theirs (what the scoreboard says)
+	float LsTimingWeight(const CNavArea *area);		// <1 for somewhere the enemy can't have reached yet this round
+	Vector m_lsFeedSpot;
+	float m_lsFeedAt = -999.0f;
+	bool m_lsFeedSniper = false;
+	const CNavArea *m_lsDiedArea = nullptr;
+	int m_lsDiedMap = -1, m_lsDiedRound = -1;
+	int m_lsBadMap = -1;							// the map its avoided areas are from
+	float m_lsTempo = 0.0f, m_lsTempoAt = -999.0f;
+	float m_lsImpactAt = -999.0f;
 	bool m_lsTap = false;						// a semi-automatic's trigger: pressed on every other think, let go between
 	bool LsPuppetOwnsLook() const;
 	bool LsTriggerTap() { m_lsTap = !m_lsTap; return m_lsTap; }
@@ -1602,6 +1616,9 @@ bool LsExposureReady();
 enum { LSMAP_OBJECTIVE, LSMAP_AIM, LSMAP_FY, LSMAP_AWP, LSMAP_KNIFE, LSMAP_OTHER };
 int LsMapKind();
 const Vector *LsEnemySpawn(int team);	// the middle of the other team's spawn (null if none)
+float LsArrival(const CNavArea *area, int team);	// seconds that team needs, running from its spawn, to get there (-1 unknown)
+int LsAlive(int team);					// how many of a team are alive (the scoreboard shows it)
+bool LsHabitNear(const Vector &at, float range);	// a person's spot this map (where they killed a bot from)
 int LsMapSerial();						// changes when the map does
 float LsMapSafeTime();					// how long the round's early "safe" part lasts on this map
 void LsExposurePoint(const CNavArea *area, int point, Vector *out);	// one of 9 across it (the outer ones by its edges), on the floor

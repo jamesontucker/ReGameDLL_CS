@@ -63,10 +63,18 @@ void CCSBot::OnEvent(GameEventType event, CBaseEntity *pEntity, CBaseEntity *pOt
 #endif
 	}
 
+	// Loner-Strike: its own death (where, by whom), noted before the alive check below
+	if (event == EVENT_PLAYER_DIED && pEntity == this && LsFight())
+		LsNoteDeath((pOther && pOther->IsPlayer()) ? static_cast<CBasePlayer *>(pOther) : nullptr);
+
 	if (!IsAlive())
 		return;
 
 	CBasePlayer *pPlayer = static_cast<CBasePlayer *>(pEntity);
+
+	// Loner-Strike: a teammate down: the radar shows where, the kill feed with what
+	if (event == EVENT_PLAYER_DIED && pPlayer && pPlayer != this && pPlayer->IsPlayer() && LsFight())
+		LsFeed(pPlayer, (pOther && pOther->IsPlayer()) ? static_cast<CBasePlayer *>(pOther) : nullptr);
 
 	// Loner-Strike: a hit of its own: not whiffing
 	if (event == EVENT_PLAYER_TOOK_DAMAGE && pOther == this)
@@ -92,7 +100,10 @@ void CCSBot::OnEvent(GameEventType event, CBaseEntity *pEntity, CBaseEntity *pOt
 	if (event == EVENT_BULLET_IMPACT)
 	{
 		if (LsFight() && pPlayer && pOther)
+		{
 			LsShotAt(pPlayer, *reinterpret_cast<Vector *>(pOther));
+			LsImpactNearMate(pPlayer, *reinterpret_cast<Vector *>(pOther));
+		}
 		return;
 	}
 

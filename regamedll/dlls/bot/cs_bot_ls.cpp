@@ -44,6 +44,8 @@
 #include <vector>
 #include <algorithm>
 #include <utility>
+#include <queue>
+#include <functional>
 #include <cmath>
 #include <cstdio>
 #ifdef _WIN32
@@ -1809,8 +1811,22 @@ void CCSBot::LsSneak()
 			m_lsSneakLateEnd = 25.0f + RANDOM_FLOAT(20.0f, 60.0f);
 		}
 		bool lateRound = elapsed > 25.0f && elapsed < m_lsSneakLateEnd;
-		want = danger > 0.1f || (lateRound && m_lsSneakLate) || IsNoiseHeard();
+		// (round about when the enemy could first be here - the first contact - a careful
+		// player goes quiet; one who knows the timings, not on its way in with the team)
+		bool contact = false;
+		if (GetLastKnownArea() && LsKnows(LSK_TIMINGS) && !LsRushing())
+		{
+			float arrive = LsArrival(GetLastKnownArea(), m_iTeam == CT ? TERRORIST : CT);
+			contact = arrive > 0.0f && elapsed > arrive - 2.0f && elapsed < arrive + 10.0f;
+		}
+		want = danger > 0.1f || (lateRound && m_lsSneakLate) || IsNoiseHeard() || contact;
 	}
+	// the last one alive against some of them, with time for it: quiet (a clutch is won by
+	// not being heard), whoever it is, once it's not a newer player
+	if (!want && !(IsHurrying() || GetTimeSinceAttacked() < 5.0f || GetTimeSinceLastSawEnemy() < 4.0f || IsSafe() || GetHostageEscortCount() > 0)
+		&& LsSkill() > 0.35f && (m_iTeam == CT || m_iTeam == TERRORIST) && LsAlive(m_iTeam) == 1 && LsAlive(m_iTeam == CT ? TERRORIST : CT) >= 1
+		&& LsTimeLeft() > 30.0f && !(m_iTeam == CT && TheCSBots()->IsBombPlanted() && !quietRetake))
+		want = true;
 
 	// (only its own walk is undone: a state may want walking for its own reasons)
 	if (want && IsRunning())
@@ -2428,6 +2444,20 @@ void CCSBot::LsHeard(GameEventType event, CBasePlayer *pPlayer, float dist)
 		m_lsFightHeard = pPlayer->pev->origin;
 		m_lsFightHeardAt = now;
 	}
+	// (a sniper rifle's shot is known by its sound, from anywhere on the map: there's an
+	// AWPer, roughly there - the further off, the rougher)
+	if (event == EVENT_WEAPON_FIRED)
+	{
+		CBasePlayerWeapon *pShot = static_cast<CBasePlayerWeapon *>(pPlayer->m_pActiveItem);
+		if (pShot && (pShot->m_iId == WEAPON_AWP || pShot->m_iId == WEAPON_SCOUT || pShot->m_iId == WEAPON_G3SG1 || pShot->m_iId == WEAPON_SG550)
+			&& RANDOM_FLOAT(0.0f, 1.0f) < 0.4f + 0.6f * skill)
+		{
+			float err = dist * 0.12f;
+			m_lsSniperHeard = pPlayer;
+			m_lsSniperSpot = pPlayer->pev->origin + Vector(RANDOM_FLOAT(-err, err), RANDOM_FLOAT(-err, err), 0.0f);
+			m_lsSniperHeardAt = now;
+		}
+	}
 	// (a plugin's hold or look gives way to an enemy heard close by)
 	// (not a person's "wait" or "follow me": those only give way to what an order does)
 	if (LsPuppetActive() && dist < 700.0f && !(now < m_lsPuppet.followUntil || FStrEq(m_lsPuppet.holdTag, "bc")))
@@ -2557,7 +2587,7 @@ void CCSBot::LsHeard(GameEventType event, CBasePlayer *pPlayer, float dist)
 		&& RANDOM_FLOAT(0.0f, 1.0f) < (coming ? 0.6f + 0.4f * skill : 0.4f + 0.5f * skill))
 	{
 		m_lsPreAimAt = now;
-		if (LsPreAim(heard, RANDOM_FLOAT(1.5f, 3.0f)))
+		if (LsPreAim(heard, RANDOM_FLOAT(1.5f, 3.0f), pPlayer))
 			return;
 		Vector eye = pev->origin + pev->view_ofs;
 		Vector from = heard + Vector(0, 0, HalfHumanHeight);
@@ -3526,6 +3556,88 @@ static int LsKnowIndex(const CNavArea *a)
 	return s_know.index[a->GetID()];
 }
 
+// How long a team needs, running from its spawn, to reach each area: a shortest walk over the
+// nav (ladders too), at a knife's running speed so it's the earliest anyone could be there. Built
+// once a map per team, the first time it's asked (a few milliseconds), once the map knowledge
+// (which numbers the areas) is in
+static std::vector<float> s_arrive[2];
+static int s_arriveSerial[2] = { -1, -1 };
+
+float LsArrival(const CNavArea *area, int team)
+{
+	int t = team == TERRORIST ? 0 : team == CT ? 1 : -1;
+	int idx = LsKnowIndex(area);
+	if (t < 0 || idx < 0 || !s_know.ready)
+		return -1.0f;
+	if (s_arriveSerial[t] != LsMapSerial() || s_arrive[t].size() != (size_t)s_know.count)
+	{
+		s_arriveSerial[t] = LsMapSerial();
+		std::vector<float> &d = s_arrive[t];
+		d.assign((size_t)s_know.count, -1.0f);
+		// (that team's own spawn: LsEnemySpawn gives the other side's)
+		const Vector *home = LsEnemySpawn(team == TERRORIST ? CT : TERRORIST);
+		if (!home)
+			return -1.0f;
+		Vector h = *home;
+		int si = LsKnowIndex(TheNavAreaGrid.GetNearestNavArea(&h));
+		if (si < 0)
+			return -1.0f;
+		typedef std::pair<float, int> Item;
+		std::priority_queue<Item, std::vector<Item>, std::greater<Item>> open;
+		d[si] = 0.0f;
+		open.push(Item(0.0f, si));
+		const float speed = 250.0f;
+		auto relax = [&](float at, const CNavArea *to, float extra) {
+			int j = LsKnowIndex(to);
+			if (j < 0)
+				return;
+			if (d[j] < 0.0f || at + extra < d[j])
+			{
+				d[j] = at + extra;
+				open.push(Item(d[j], j));
+			}
+		};
+		while (!open.empty())
+		{
+			Item it = open.top();
+			open.pop();
+			if (it.first > d[it.second])
+				continue;
+			const CNavArea *a = s_know.areas[it.second];
+			const Vector &ac = *a->GetCenter();
+			for (int dir = 0; dir < NUM_DIRECTIONS; dir++)
+			{
+				int n = a->GetAdjacentCount((NavDirType)dir);
+				for (int i = 0; i < n; i++)
+				{
+					const CNavArea *b = a->GetAdjacentArea((NavDirType)dir, i);
+					if (!b)
+						continue;
+					const Vector &bc = *b->GetCenter();
+					// (a jump up costs a moment)
+					float extra = float((bc - ac).Length()) / speed + (bc.z - ac.z > 20.0f ? 0.3f : 0.0f);
+					relax(it.first, b, extra);
+				}
+			}
+			for (int ld = 0; ld < 2; ld++)
+			{
+				const NavLadderList *list = a->GetLadderList((LadderDirectionType)ld);
+				for (NavLadderList::const_iterator li = list->begin(); li != list->end(); ++li)
+				{
+					const CNavLadder *ladder = *li;
+					// (climbing is slow: about half running speed, plus getting on and off)
+					float climb = ladder->m_length / 130.0f + 0.5f;
+					const CNavArea *ends[5] = { ladder->m_topForwardArea, ladder->m_topLeftArea, ladder->m_topRightArea, ladder->m_topBehindArea, ladder->m_bottomArea };
+					for (int e = 0; e < 5; e++)
+						if (ends[e] && ends[e] != a)
+							relax(it.first, ends[e], climb);
+				}
+			}
+		}
+	}
+	return s_arrive[t][(size_t)idx];
+}
+
 // Whether someone in one area could see into the other (false until the map's are ready)
 bool LsSees(const CNavArea *a, const CNavArea *b)
 {
@@ -3751,6 +3863,13 @@ bool CCSBot::LsScanAngles(bool holding)
 		// (the enemy's side of the map first)
 		if (enemyHome)
 			score *= (tc - *enemyHome).Length2D() < (pev->origin - *enemyHome).Length2D() ? 1.5f : 0.7f;
+		// (somewhere the enemy can't have got to yet this round matters less; the kill feed's
+		// spot - a teammate just died there - more; a person's favourite spots, to a veteran)
+		score *= LsTimingWeight(target);
+		if (now - m_lsFeedAt < 12.0f && (tc - m_lsFeedSpot).IsLengthLessThan(700.0f))
+			score *= m_lsFeedSniper ? 2.0f : 1.6f;
+		if (skill > 0.55f && LsHabitNear(tc, 450.0f))
+			score *= 1.5f;
 		// (where an AWPer was heard scoping lately: the better ones keep an eye on it)
 		if (skill > 0.4f && now - m_lsSniperHeardAt < 15.0f && (tc - m_lsSniperSpot).IsLengthLessThan(600.0f))
 			score *= 1.8f;
@@ -4324,10 +4443,40 @@ float LsMapSafeTime()
 
 // Where a sound will come out: of the angles enemies appear from here (map knowledge), the
 // one leading to where it was heard. False if none fits (the old walk-back trace is used)
-bool CCSBot::LsPreAim(const Vector &heard, float secs)
+bool CCSBot::LsPreAim(const Vector &heard, float secs, CBasePlayer *who)
 {
 	if (!m_lastKnownArea)
 		return false;
+	// someone on a ladder (its clank): they'll come off the end on this side of it - the top
+	// if it's above, the bottom if below - when that end's in view from here
+	if (who && who->IsOnLadder())
+	{
+		const CNavLadder *best = nullptr;
+		float bestD = 250.0f;
+		for (NavLadderList::const_iterator li = TheNavLadderList.begin(); li != TheNavLadderList.end(); ++li)
+		{
+			const CNavLadder *ladder = *li;
+			Vector mid = (ladder->m_top + ladder->m_bottom) * 0.5f;
+			float d = float((Vector(mid.x, mid.y, who->pev->origin.z) - who->pev->origin).Length2D());
+			if (d < bestD)
+			{
+				bestD = d;
+				best = ladder;
+			}
+		}
+		if (best)
+		{
+			bool above = pev->origin.z > (best->m_top.z + best->m_bottom.z) * 0.5f;
+			Vector end = (above ? best->m_top : best->m_bottom) + Vector(0, 0, above ? 20.0f : HalfHumanHeight);
+			TraceResult tr;
+			UTIL_TraceLine(GetEyePosition(), end, ignore_monsters, ENT(pev), &tr);
+			if (tr.flFraction >= 1.0f)
+			{
+				SetLookAt("Loner-Strike: ladder", &end, PRIORITY_MEDIUM, secs);
+				return true;
+			}
+		}
+	}
 	const LsAreaKnow *k = LsKnow(m_lastKnownArea);
 	if (!k || !k->angleCount)
 		return false;
@@ -4343,6 +4492,12 @@ bool CCSBot::LsPreAim(const Vector &heard, float secs)
 		// (an angle the sound's area can see into is the way it'd come)
 		if (ha && t != ha && LsSightReady() && LsSees(ha, t))
 			d *= 0.6f;
+		// (footsteps in a vent or a crawlspace - a low ceiling over them - come out where the
+		// low ceiling ends: an angle onto a low-ceilinged spot is the vent's mouth)
+		const LsAreaKnow *hk = ha ? LsKnow(ha) : nullptr;
+		const LsAreaKnow *tk = LsKnow(t);
+		if (hk && tk && hk->ceiling * 4 < 60 && tk->ceiling * 4 < 90)
+			d *= 0.5f;
 		if (d < bestD)
 		{
 			bestD = d;
@@ -4461,6 +4616,12 @@ bool CCSBot::LsTakeCoverFrom(const Vector &threat, float minMove, bool fromFight
 		hold *= 1.3f;
 	else if (style == LS_STYLE_RUSHER)
 		hold *= 0.6f;
+	// (ahead on numbers: back out sooner; behind: warier)
+	if (LsSkill() > 0.3f)
+	{
+		float tempo = LsTempo();
+		hold *= tempo >= 2.0f ? 0.7f : tempo <= -2.0f ? 1.3f : 1.0f;
+	}
 	if (holdSecs >= 0.0f)
 		hold = holdSecs;
 	// (a dash: no sneaking, crouch-walking or pausing on the way; a slow route gets more time)
@@ -4748,6 +4909,12 @@ bool CCSBot::LsRushed(const Vector *threat)
 	float odds = 0.15f + 0.8f * skill;
 	if (LsStyle() == LS_STYLE_RUSHER)
 		odds *= 0.6f;
+	// (the scoreboard: well ahead on numbers it holds its ground more, well behind it's warier)
+	if (skill > 0.3f)
+	{
+		float tempo = LsTempo();
+		odds *= tempo >= 2.0f ? 0.6f : tempo <= -2.0f ? 1.2f : 1.0f;
+	}
 	if (RANDOM_FLOAT(0.0f, 1.0f) > odds)
 		return false;
 	Vector from = sum * (1.0f / float(count));
@@ -4795,4 +4962,139 @@ void CCSBot::LsRushHoldTick()
 		Idle();
 		LsWhy(mate ? "team's here: out of cover" : "gone quiet: out of cover");
 	}
+}
+
+// ---- round knowledge (batch 3) ---------------------------------------------------------
+
+// A person's spots this map: where they stood when they killed a bot (a veteran expects them
+// there again). The last dozen
+struct LsHabit { Vector at; int map; };
+static LsHabit s_habits[12];
+static int s_habitNext = 0;
+
+bool LsHabitNear(const Vector &at, float range)
+{
+	int map = LsMapSerial();
+	for (int i = 0; i < 12; i++)
+		if (s_habits[i].map == map && (s_habits[i].at - at).IsLengthLessThan(range))
+			return true;
+	return false;
+}
+
+int LsAlive(int team)
+{
+	int n = 0;
+	for (int i = 1; i <= gpGlobals->maxClients; i++)
+	{
+		CBasePlayer *pPlayer = UTIL_PlayerByIndex(i);
+		if (pPlayer && !FNullEnt(pPlayer->pev) && pPlayer->IsAlive() && pPlayer->m_iTeam == team)
+			n++;
+	}
+	return n;
+}
+
+float CCSBot::LsTempo()
+{
+	float now = gpGlobals->time;
+	if (now - m_lsTempoAt > 0.5f || now < m_lsTempoAt)
+	{
+		m_lsTempoAt = now;
+		int other = m_iTeam == CT ? TERRORIST : CT;
+		m_lsTempo = (m_iTeam == CT || m_iTeam == TERRORIST) && !LsSolo() ? float(LsAlive(m_iTeam) - LsAlive(other)) : 0.0f;
+	}
+	return m_lsTempo;
+}
+
+// Somewhere the enemy can't have reached yet this round (the earliest they could, from their
+// spawn, is still a few seconds off): a good player doesn't watch it yet. Newer players don't
+// time it, and it means nothing in deathmatch or once the round's well on
+float CCSBot::LsTimingWeight(const CNavArea *area)
+{
+	if (!area || LsSolo() || !LsKnows(LSK_TIMINGS) || !TheCSBots())
+		return 1.0f;
+	float elapsed = TheCSBots()->GetElapsedRoundTime();
+	if (elapsed > 60.0f)
+		return 1.0f;
+	float arrive = LsArrival(area, m_iTeam == CT ? TERRORIST : CT);
+	if (arrive < 0.0f)
+		return 1.0f;
+	// (a margin: a newer player's sense of it is rougher)
+	float slack = 2.0f + 3.0f * (1.0f - LsSkill());
+	return elapsed + slack < arrive ? 0.25f : 1.0f;
+}
+
+void CCSBot::LsFeed(CBasePlayer *pVictim, CBasePlayer *pKiller)
+{
+	if (LsSolo() || BotRelationship(pVictim) != BOT_TEAMMATE)
+		return;
+	// (newer players hardly look at the radar and the feed)
+	float skill = LsSkill();
+	if (RANDOM_FLOAT(0.0f, 1.0f) > 0.25f + 0.75f * skill)
+		return;
+	m_lsFeedSpot = pVictim->pev->origin;
+	m_lsFeedAt = gpGlobals->time;
+	m_lsFeedSniper = pKiller && pKiller != pVictim && BotRelationship(pKiller) == BOT_ENEMY && LsGunClass(pKiller) == LSG_SNIPER;
+	// (killed by an AWP there: that lane's covered - the better ones keep off it a while)
+	if (m_lsFeedSniper && skill > 0.45f)
+	{
+		Vector at = pVictim->pev->origin;
+		CNavArea *area = TheNavAreaGrid.GetNearestNavArea(&at);
+		if (area && area != m_lastKnownArea)
+			LsForceBadArea(area, 10.0f + 12.0f * skill);
+	}
+}
+
+void CCSBot::LsNoteDeath(CBasePlayer *pKiller)
+{
+	m_lsDiedArea = m_lastKnownArea;
+	m_lsDiedMap = LsMapSerial();
+	m_lsDiedRound = LsRoundSerial();
+	// (a person who killed it: where they were - a spot they like)
+	if (pKiller && pKiller != this && !pKiller->IsBot() && BotRelationship(pKiller) == BOT_ENEMY)
+	{
+		s_habits[s_habitNext].at = pKiller->pev->origin;
+		s_habits[s_habitNext].map = LsMapSerial();
+		s_habitNext = (s_habitNext + 1) % 12;
+	}
+}
+
+// An enemy's bullets landing by a teammate it can't see shooting: a fight's going on there.
+// Free and not too far, it turns that way and treats it as gunfire there (to help or keep
+// clear, as the stock noise handling and the trade decide); newer players often miss it
+void CCSBot::LsImpactNearMate(CBasePlayer *pShooter, const Vector &impact)
+{
+	float now = gpGlobals->time;
+	if (now - m_lsImpactAt < 2.0f || !pShooter->IsPlayer() || !pShooter->IsAlive() || !IsEnemy(pShooter) || IsAttacking() || LsSolo())
+		return;
+	if ((impact - pev->origin).IsLengthLessThan(150.0f) || (impact - pev->origin).IsLengthGreaterThan(1300.0f))
+		return;
+	bool mate = false;
+	LsForTeammates(this, [&](CBasePlayer *pPlayer) {
+		if ((pPlayer->pev->origin - impact).IsLengthLessThan(120.0f))
+			mate = true;
+	});
+	if (!mate)
+		return;
+	m_lsImpactAt = now;
+	if (RANDOM_FLOAT(0.0f, 1.0f) > 0.3f + 0.7f * LsSkill())
+		return;
+	// (the shooter as heard, roughly)
+	float err = float((pShooter->pev->origin - pev->origin).Length()) * 0.12f;
+	Vector heard = pShooter->pev->origin + Vector(RANDOM_FLOAT(-err, err), RANDOM_FLOAT(-err, err), 0.0f);
+	CNavArea *area = TheNavAreaGrid.GetNearestNavArea(&heard);
+	if (!area)
+		return;
+	if (!IsNoiseHeard() || GetNoisePriority() <= PRIORITY_MEDIUM)
+	{
+		m_noisePosition = heard;
+		m_noiseArea = area;
+		m_noisePriority = PRIORITY_MEDIUM;
+		m_noiseTimestamp = now;
+	}
+	if (!LsPreAim(heard, RANDOM_FLOAT(1.0f, 2.0f)))
+	{
+		Vector look = impact;
+		SetLookAt("Loner-Strike: teammate under fire", &look, PRIORITY_MEDIUM, RANDOM_FLOAT(0.8f, 1.5f));
+	}
+	LsWhy("teammate under fire");
 }

@@ -625,6 +625,9 @@ float CCSBot::LsExecPatience()
 		wait -= 1.5f;
 	else if (style == LS_STYLE_CAREFUL || style == LS_STYLE_CAMPER)
 		wait += 1.5f;
+	// (well ahead on numbers: no point waiting long)
+	if (LsTempo() >= 2.0f)
+		wait *= 0.6f;
 	return Q_max(2.0f, wait);
 }
 
@@ -744,7 +747,9 @@ bool CCSBot::LsPlayForTime()
 		float bold = LsAggro();
 		// (campers and careful players hold back; rushers and knifers go in)
 		float lean = (LsStyle() == LS_STYLE_CAMPER || LsStyle() == LS_STYLE_CAREFUL) ? 1.3f : (LsStyle() == LS_STYLE_RUSHER || LsStyle() == LS_STYLE_KNIFER) ? 0.5f : 1.0f;
-		m_lsForTimeRoll = RANDOM_FLOAT(0.0f, 1.0f) < Q_min(0.95f, (LsMatch() ? 0.8f : 0.55f) * (1.2f - bold) * lean) ? 1 : 0;
+		// (its team well ahead on numbers: help's coming, but so is the win - fewer wait)
+		float numbers = LsTempo() >= 2.0f ? 0.6f : 1.0f;
+		m_lsForTimeRoll = RANDOM_FLOAT(0.0f, 1.0f) < Q_min(0.95f, (LsMatch() ? 0.8f : 0.55f) * (1.2f - bold) * lean * numbers) ? 1 : 0;
 	}
 	return m_lsForTimeRoll == 1;
 }

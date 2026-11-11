@@ -206,6 +206,26 @@ void CCSBot::ResetValues()
 	m_lsDuckAt = -999.0f;
 	m_lsReloadCrouchAt = 0.0f;
 	m_lsKnifeOkUntil = 0.0f;
+	m_lsFeedAt = -999.0f;
+	m_lsFeedSniper = false;
+	m_lsTempoAt = -999.0f;
+	m_lsImpactAt = -999.0f;
+	// (a new map: its avoided areas were the last map's)
+	if (m_lsBadMap != LsMapSerial())
+	{
+		m_lsBadMap = LsMapSerial();
+		for (int i = 0; i < 4; i++)
+		{
+			m_lsBadAreas[i] = nullptr;
+			m_lsBadAreaUntil[i] = 0.0f;
+		}
+		m_lsDiedArea = nullptr;
+	}
+	// (where it died last round: the better players don't walk back into it the same way;
+	// not in deathmatch, where everyone respawns all the time)
+	if (LsFight() && !LsSolo() && m_lsDiedArea && m_lsDiedMap == LsMapSerial() && LsRoundSerial() - m_lsDiedRound <= 1 && LsSkill() > 0.3f)
+		LsForceBadArea(m_lsDiedArea, 20.0f + 25.0f * LsSkill());
+	m_lsDiedArea = nullptr;
 	m_lsRushHoldUntil = 0.0f;
 	m_lsRushHoldCheckAt = 0.0f;
 	m_lsReloadCrouched = false;
