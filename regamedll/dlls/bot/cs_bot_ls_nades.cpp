@@ -1175,7 +1175,12 @@ void CCSBot::LsSaveCheck()
 			m_lsSaveShot = false;
 			SetDisposition(SELF_DEFENSE);
 			if (RANDOM_FLOAT(0.0f, 1.0f) < 0.3f + 0.6f * LsSkill())
+			{
 				TryToRetreat();
+				LsTraceNote("saving: moved off after the shot");
+			}
+			else
+				LsTraceNote("saving: stayed put after the shot");
 			return;
 		}
 		// (a shot it was waiting to take is let go once they're out of view)
@@ -1294,8 +1299,16 @@ bool CCSBot::LsSaveFreeShot(CBasePlayer *pEnemy)
 	if (!fresh)
 		return false;
 	m_lsSaveShotWho = who;
-	if (IsPlayerLookingAtMe(pEnemy) || GetEnemiesRemaining() > 3)
+	if (IsPlayerLookingAtMe(pEnemy))
+	{
+		LsTraceNote("free shot: they're looking its way");
 		return false;
+	}
+	if (GetEnemiesRemaining() > 3)
+	{
+		LsTraceNote("free shot: too many of them left");
+		return false;
+	}
 	CBasePlayerWeapon *pGun = GetActiveWeapon();
 	if (!pGun)
 		return false;
@@ -1310,7 +1323,10 @@ bool CCSBot::LsSaveFreeShot(CBasePlayer *pEnemy)
 	default: return false;
 	}
 	if ((pEnemy->pev->origin - pev->origin).IsLengthGreaterThan(reach))
+	{
+		LsTraceNote("free shot: out of the gun's reach");
 		return false;
+	}
 	float skill = LsSkill();
 	float chance = (0.1f + 0.65f * skill) * (0.75f + 0.5f * LsAggro());
 	int style = LsStyle();
@@ -1321,7 +1337,11 @@ bool CCSBot::LsSaveFreeShot(CBasePlayer *pEnemy)
 	int left = GetEnemiesRemaining();
 	chance *= left <= 2 ? 1.2f : 0.7f;
 	if (RANDOM_FLOAT(0.0f, 1.0f) >= Q_min(0.95f, chance))
+	{
+		LsTraceNote("free shot: let them pass");
 		return false;
+	}
+	LsTraceNote("free shot: waiting for the moment");
 	// (the moment: a newer one fires straight away, a better one lets them come out a little)
 	m_lsSaveShotAt = now + RANDOM_FLOAT(0.05f, 0.25f) + RANDOM_FLOAT(0.2f, 0.9f) * skill;
 	m_lsSaveNext = now + 0.1f;

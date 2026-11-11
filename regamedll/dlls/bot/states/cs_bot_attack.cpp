@@ -677,6 +677,15 @@ void AttackState::OnUpdate(CCSBot *me)
 			me->Run();
 	}
 
+	// (Loner-Strike trace: its stop habit, the first time in a fight it would shoot on the move)
+	if (LsFight() && lsRange > 350.0f && me->LsStopGun() && me->pev->velocity.Length2D() > 0.5f * me->pev->maxspeed
+		&& gpGlobals->time - me->m_lsStopNoteAt > 8.0f)
+	{
+		static const char *const lsStops[] = { "stop: runs and guns", "stop: crouches", "stop: walks (shift)", "stop: counter-strafes" };
+		me->m_lsStopNoteAt = gpGlobals->time;
+		me->LsTraceNote(lsStops[me->LsStopStyle()]);
+	}
+
 	if (gpGlobals->time > m_reacquireTimestamp && !lsHoldFire)
 		me->FireWeaponAtEnemy();
 

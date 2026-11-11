@@ -2412,6 +2412,19 @@ void CCSBot::LsWhy(const char *why)
 	fflush(f);
 }
 
+// A line in the trace (as a #why) for something it did on the side, without making it the
+// reason for what it's doing now (the per-bot rows keep showing that)
+void CCSBot::LsTraceNote(const char *note)
+{
+	if (cv_bot_ls_trace.value <= 0.0f || !note || !note[0])
+		return;
+	FILE *f = LsTraceFile();
+	if (!f)
+		return;
+	fprintf(f, "#why,%.2f,%d,%d,%.0f,%.0f,%.0f,%s\n", gpGlobals->time, entindex(), m_iTeam, pev->origin.x, pev->origin.y, pev->origin.z, note);
+	fflush(f);
+}
+
 // ls_mark [note]: a moment the person playing flagged (a key bound to it): found again later
 // among the bots' lines around that time
 void CCSBot::LsTraceAttack()

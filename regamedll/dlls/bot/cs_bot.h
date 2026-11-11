@@ -1346,6 +1346,8 @@ public:
 	bool LsPickSteady();
 	bool LsMayBackOff(const Vector &toEnemy);
 	bool LsHoldFireToStop(float range);
+	void LsTraceNote(const char *note);				// a line in the trace (a #why) without changing what it's doing
+	float m_lsStopNoteAt = -10.0f;					// trace: when its stop habit was last noted
 	int LsStopStyle();								// its habit for stopping to shoot: 0 run, 1 crouch, 2 walk, 3 counter-strafe
 	bool LsStopGun() const;							// a gun worth stopping for (rifles, the Deagle)
 	void LsCrouchStop();							// a crouch to stop for the shot
