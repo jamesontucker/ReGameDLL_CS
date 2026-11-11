@@ -232,6 +232,19 @@ void AttackState::OnUpdate(CCSBot *me)
 		me->LsWhy("out of ammo: away");
 		return;
 	}
+	// Loner-Strike: reloading with them in view and not right on top of it: out of sight while
+	// the gun's useless (decided once a reload) - the good ones nearly always, newer ones often
+	// just stand there reloading
+	if (LsFight() && !LsSolo() && me->IsActiveWeaponReloading() && me->IsEnemyVisible()
+		&& (pEnemy->pev->origin - me->pev->origin).IsLengthGreaterThan(400.0f) && gpGlobals->time - me->m_lsReloadRollAt > 5.0f)
+	{
+		me->m_lsReloadRollAt = gpGlobals->time;
+		if (RANDOM_FLOAT(0.0f, 1.0f) < me->LsReloadCoverChance() && me->LsTakeCoverFrom(pEnemy->pev->origin, 0.0f, true))
+		{
+			me->LsWhy("reloading: out of sight");
+			return;
+		}
+	}
 	if (LsFight() && me->LsMatchup(pEnemy, m_crouchAndHold))
 		return;
 
@@ -654,6 +667,16 @@ void AttackState::OnUpdate(CCSBot *me)
 			m_dodge = true;
 	}
 
+	// (Loner-Strike: the walkers slow to a walk to shoot at range with a rifle, back to a run after)
+	if (LsFight() && !me->IsUsingKnife() && me->LsStopStyle() == 2)
+	{
+		bool lsWalk = lsRange > 350.0f && me->LsStopGun() && me->IsEnemyVisible() && !lsClosing;
+		if (lsWalk && me->IsRunning())
+			me->Walk();
+		else if (!lsWalk && !me->IsRunning())
+			me->Run();
+	}
+
 	if (gpGlobals->time > m_reacquireTimestamp && !lsHoldFire)
 		me->FireWeaponAtEnemy();
 
@@ -669,6 +692,11 @@ void AttackState::OnUpdate(CCSBot *me)
 	if (LsFight() && !m_dodge && !m_crouchAndHold && !lsDucked && me->GetTimeSinceAttacked() < 1.0f)
 		m_dodge = true;
 
+	// Loner-Strike: on top of a teammate, a step aside first
+	// (not one crouched to hold or ducked behind cover to reload: that stays put)
+	if (LsFight() && !m_crouchAndHold && !lsDucked && !me->IsUsingSniperRifle() && me->LsSpaceOut())
+		return;
+
 	// do dodge behavior
 	// If sniping or crouching, stand still.
 	if (m_dodge && !me->IsUsingSniperRifle() && !m_crouchAndHold && !lsDucked)
@@ -679,7 +707,11 @@ void AttackState::OnUpdate(CCSBot *me)
 		// Loner-Strike: stopping to shoot ends the strafe now (with a counter-strafe)
 		if (lsHoldFire && !lsClosing && m_dodgeState != STEADY_ON)
 		{
-			me->LsCounterStrafe(m_dodgeState == SLIDE_LEFT ? 1 : 2);
+			// (a crouch-stopper crouches instead of the counter-strafe)
+			if (me->LsStopStyle() == 1)
+				me->LsCrouchStop();
+			else
+				me->LsCounterStrafe(m_dodgeState == SLIDE_LEFT ? 1 : 2);
 			m_dodgeState = STEADY_ON;
 			m_nextDodgeStateTimestamp = gpGlobals->time + me->LsDodgeDuration(true);
 		}
@@ -708,9 +740,12 @@ void AttackState::OnUpdate(CCSBot *me)
 		}
 		else if (lsHoldFire && !lsClosing)
 		{
-			// Loner-Strike: stopping dead to shoot: keys against its own slide
+			// Loner-Strike: stopping dead to shoot: keys against its own slide (or a crouch)
 			m_dodgeState = STEADY_ON;
-			me->LsStopDead();
+			if (me->LsStopStyle() == 1)
+				me->LsCrouchStop();
+			else
+				me->LsStopDead();
 		}
 		else if (gpGlobals->time >= m_nextDodgeStateTimestamp)
 		{

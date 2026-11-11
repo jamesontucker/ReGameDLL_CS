@@ -73,6 +73,9 @@ void CCSBot::LsNadeReset()
 	m_lsNadeCornerRolled = false;
 	m_lsSaving = false;
 	m_lsSaveDecided = false;
+	m_lsSaveShot = false;
+	m_lsSaveShotAt = 0.0f;
+	m_lsSaveShotWho = 0;
 	m_lsPlantHideSince = 0.0f;
 	m_lsSmokeUntil = 0.0f;
 }
@@ -1160,6 +1163,26 @@ void CCSBot::LsSaveCheck()
 		}
 		if (IsDefusingBomb())
 			return;
+		// the free shot it chose to take, seen through; then off that spot (the shots gave it
+		// away) - the better ones move, the newer ones often stay put
+		if (m_lsSaveShot)
+		{
+			if (IsAttacking())
+			{
+				m_lsSaveNext = now + 0.2f;
+				return;
+			}
+			m_lsSaveShot = false;
+			SetDisposition(SELF_DEFENSE);
+			if (RANDOM_FLOAT(0.0f, 1.0f) < 0.3f + 0.6f * LsSkill())
+				TryToRetreat();
+			return;
+		}
+		// (a shot it was waiting to take is let go once they're out of view)
+		if (!IsEnemyVisible())
+			m_lsSaveShotAt = 0.0f;
+		if (!IsAttacking() && IsEnemyVisible() && GetEnemy() && LsSaveFreeShot(GetEnemy()))
+			return;
 		// spotted while saving: out of their sight, not standing there tracking them
 		if (IsAttacking() || IsEnemyVisible())
 		{
@@ -1233,6 +1256,76 @@ void CCSBot::LsSaveCheck()
 	m_lsSaveNext = now;
 	LsWhy("saving its gun");
 	PrintIfWatched("Alone against too many: saving my gun.\n");
+}
+
+// Saving its gun with an enemy in view who hasn't seen it: a free kill some take - it can turn
+// a 1v2 into a 1v1, and the gun is still kept if it works. Decided once each time someone comes
+// into view: the good and the bold mostly take it (the better ones wait a beat for them to come
+// out into the open), careful ones and campers mostly let them walk past, newer ones mostly
+// stay hidden. Not at someone looking its way, out of the gun's reach, or with four or more
+// left. True while it's taking it (or waiting for the moment).
+bool CCSBot::LsSaveFreeShot(CBasePlayer *pEnemy)
+{
+	float now = gpGlobals->time;
+	int who = pEnemy->entindex();
+	if (who < 1 || who > MAX_CLIENTS)
+		return false;
+	// (a fresh sighting: this one out of view a couple of seconds or more)
+	bool fresh = now - m_lsSaveSeenAt[who - 1] > 2.0f;
+	m_lsSaveSeenAt[who - 1] = now;
+	if (m_lsSaveShotAt > 0.0f)
+	{
+		// (chosen for someone else, who's out of view now: let it go)
+		if (who != m_lsSaveShotWho)
+			m_lsSaveShotAt = 0.0f;
+		else
+		{
+			m_lsSaveNext = now + 0.1f;
+			if (now < m_lsSaveShotAt)
+				return true;
+			m_lsSaveShotAt = 0.0f;
+			m_lsSaveShot = true;
+			SetDisposition(ENGAGE_AND_INVESTIGATE);
+			Attack(pEnemy);
+			LsWhy("saving: a free shot");
+			return true;
+		}
+	}
+	if (!fresh)
+		return false;
+	m_lsSaveShotWho = who;
+	if (IsPlayerLookingAtMe(pEnemy) || GetEnemiesRemaining() > 3)
+		return false;
+	CBasePlayerWeapon *pGun = GetActiveWeapon();
+	if (!pGun)
+		return false;
+	float reach;
+	switch (WeaponIDToWeaponClass(pGun->m_iId))
+	{
+	case WEAPONCLASS_SNIPERRIFLE: reach = 3000.0f; break;
+	case WEAPONCLASS_RIFLE: case WEAPONCLASS_MACHINEGUN: reach = 1600.0f; break;
+	case WEAPONCLASS_SUBMACHINEGUN: reach = 900.0f; break;
+	case WEAPONCLASS_PISTOL: reach = 700.0f; break;
+	case WEAPONCLASS_SHOTGUN: reach = 450.0f; break;
+	default: return false;
+	}
+	if ((pEnemy->pev->origin - pev->origin).IsLengthGreaterThan(reach))
+		return false;
+	float skill = LsSkill();
+	float chance = (0.1f + 0.65f * skill) * (0.75f + 0.5f * LsAggro());
+	int style = LsStyle();
+	if (style == LS_STYLE_CAREFUL || style == LS_STYLE_CAMPER)
+		chance *= 0.55f;
+	else if (style == LS_STYLE_RUSHER || style == LS_STYLE_KNIFER)
+		chance *= 1.3f;
+	int left = GetEnemiesRemaining();
+	chance *= left <= 2 ? 1.2f : 0.7f;
+	if (RANDOM_FLOAT(0.0f, 1.0f) >= Q_min(0.95f, chance))
+		return false;
+	// (the moment: a newer one fires straight away, a better one lets them come out a little)
+	m_lsSaveShotAt = now + RANDOM_FLOAT(0.05f, 0.25f) + RANDOM_FLOAT(0.2f, 0.9f) * skill;
+	m_lsSaveNext = now + 0.1f;
+	return true;
 }
 
 // Deathmatch with nothing but a knife and grenades (Gun Game's HE level): the grenade stays

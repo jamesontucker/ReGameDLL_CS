@@ -1841,23 +1841,222 @@ bool CCSBot::LsMayBackOff(const Vector &toEnemy)
 // players do. Newer ones (skill under a half) run and gun like pub players did
 bool CCSBot::LsHoldFireToStop(float range)
 {
-	if (LsSkill() < 0.5f || range < 500.0f)
+	// (by its habit: the counter-strafers and crouch-stoppers hold the shot to stop; the walkers
+	// slow down instead (shift), the run-and-gunners just shoot. Up close everyone just shoots)
+	int stop = LsStopStyle();
+	if (stop == 0 || stop == 2 || range < (stop == 3 ? 500.0f : 350.0f) || !LsStopGun())
 		return false;
+	// moving fast enough to spoil the shot (half its top speed: follows a mode's speeds)
+	return pev->velocity.Length2D() > 0.5f * pev->maxspeed;
+}
 
-	CBasePlayerWeapon *pWeapon = GetActiveWeapon();
-	if (!pWeapon)
-		return false;
-
-	switch (pWeapon->m_iId)
+// A gun worth stopping (or slowing) for at range: the rifles and the Deagle
+bool CCSBot::LsStopGun() const
+{
+	CBasePlayerWeapon *pWeapon = static_cast<CBasePlayerWeapon *>(m_pActiveItem);
+	switch (pWeapon ? pWeapon->m_iId : 0)
 	{
 	case WEAPON_AK47: case WEAPON_M4A1: case WEAPON_GALIL: case WEAPON_FAMAS:
 	case WEAPON_SG552: case WEAPON_AUG: case WEAPON_DEAGLE:
-		break;
-	default:
+		return true;
+	}
+	return false;
+}
+
+// How it stops to shoot with a rifle on the move, its own habit: 0 runs and guns, 1 crouches to
+// stop, 2 walks (shift) and shoots, 3 stops dead with a counter-strafe. The better players mostly
+// counter-strafe; the middling ones walk or crouch about as often as they stop properly; the
+// newer ones split between walking, crouching and running and gunning. The bold run more, the
+// careful less
+int CCSBot::LsStopStyle()
+{
+	float skill = LsSkill();
+	float counter = Q_max(0.0f, Q_min(0.9f, 1.3f * skill - 0.3f));
+	float walk = 0.3f * (1.0f - counter);
+	float crouch = (0.15f + 0.25f * (1.0f - skill)) * (1.0f - counter);
+	float run = Q_max(0.0f, 1.0f - counter - walk - crouch);
+	int style = LsStyle();
+	if (style == LS_STYLE_RUSHER || style == LS_STYLE_KNIFER)
+		run += 0.25f;
+	else if (style == LS_STYLE_CAREFUL || style == LS_STYLE_CAMPER || style == LS_STYLE_AWPER)
+		run *= 0.4f;
+	float t = LsTrait(98) * (counter + walk + crouch + run);
+	if (t < counter)
+		return 3;
+	t -= counter;
+	if (t < walk)
+		return 2;
+	t -= walk;
+	return t < crouch ? 1 : 0;
+}
+
+// A crouch to stop for the shot (crouching slows it at once): a short one, then up again
+void CCSBot::LsCrouchStop()
+{
+	if (m_lsCrouchBurstUntil > gpGlobals->time || !(pev->flags & FL_ONGROUND))
+		return;
+	m_lsCrouchBurstUntil = gpGlobals->time + RANDOM_FLOAT(0.3f, 0.6f);
+	Crouch();
+}
+
+// In a fight right on top of a teammate (the entry it came in behind, a trader on the same spot)
+// or in their line of fire: two on one spot are one spray's work, so a step off to the side -
+// the better players nearly always, the newer ones now and then (pubs do bunch up)
+bool CCSBot::LsSpaceOut()
+{
+	float now = gpGlobals->time;
+	if (now < m_lsSpaceUntil)
+	{
+		if (m_lsSpaceDir > 0)
+			StrafeRight();
+		else
+			StrafeLeft();
+		return true;
+	}
+	if (now < m_lsSpaceCheckAt)
+		return false;
+	m_lsSpaceCheckAt = now + RANDOM_FLOAT(0.4f, 0.7f);
+	CBasePlayer *pMate = nullptr;
+	float best = 110.0f;
+	LsForTeammates(this, [&](CBasePlayer *pPlayer) {
+		Vector d = pPlayer->pev->origin - pev->origin;
+		if (Q_abs(d.z) > 60.0f)
+			return;
+		float len = float(d.Length2D());
+		if (len < best)
+		{
+			best = len;
+			pMate = pPlayer;
+		}
+	});
+	if (!pMate)
+		return false;
+	float chance = 0.15f + 0.7f * LsSkill();
+	int style = LsStyle();
+	if (style == LS_STYLE_CAREFUL || style == LS_STYLE_CAMPER || style == LS_STYLE_AWPER)
+		chance *= 1.15f;
+	else if (style == LS_STYLE_RUSHER)
+		chance *= 0.8f;
+	if (RANDOM_FLOAT(0.0f, 1.0f) >= chance)
+	{
+		// (left as it is: not asked again every moment)
+		m_lsSpaceCheckAt = now + RANDOM_FLOAT(1.5f, 3.0f);
 		return false;
 	}
-	// moving fast enough to spoil the shot (half its top speed: follows a mode's speeds)
-	return pev->velocity.Length2D() > 0.5f * pev->maxspeed;
+	// away from them, across its own view (a teammate on its left: a step right) - if there's
+	// room that way (no wall, no drop), else the other way, else it stays
+	float yaw = pev->v_angle.y;
+	Vector2D left2(-BotSIN(yaw), BotCOS(yaw));
+	Vector d = pMate->pev->origin - pev->origin;
+	float left = d.x * left2.x + d.y * left2.y;
+	int dir = left > 8.0f ? 1 : left < -8.0f ? -1 : (RANDOM_LONG(0, 1) ? 1 : -1);
+	auto room = [&](int side) -> bool {
+		Vector step = Vector(-left2.x, -left2.y, 0.0f) * (72.0f * side);		// (+1: to the right)
+		Vector knee = pev->origin + Vector(0, 0, -HalfHumanHeight + 20.0f);
+		TraceResult tr;
+		UTIL_TraceLine(knee, knee + step, ignore_monsters, ENT(pev), &tr);
+		if (tr.flFraction < 1.0f)
+			return false;
+		UTIL_TraceLine(knee + step, knee + step + Vector(0, 0, -60.0f), ignore_monsters, ENT(pev), &tr);
+		return tr.flFraction < 1.0f;
+	};
+	if (!room(dir))
+	{
+		dir = -dir;
+		if (!room(dir))
+		{
+			m_lsSpaceCheckAt = now + RANDOM_FLOAT(1.5f, 3.0f);
+			return false;
+		}
+	}
+	m_lsSpaceDir = dir;
+	m_lsSpaceUntil = now + RANDOM_FLOAT(0.35f, 0.7f);
+	// (and not straight into another step: a moment to settle first)
+	m_lsSpaceCheckAt = m_lsSpaceUntil + 1.0f;
+	LsWhy("spacing out");
+	if (m_lsSpaceDir > 0)
+		StrafeRight();
+	else
+		StrafeLeft();
+	return true;
+}
+
+// How likely it gets out of sight to reload with an enemy about: a good player nearly always,
+// a newer one often just stands there reloading; the careful more, the bold less
+float CCSBot::LsReloadCoverChance()
+{
+	float chance = 0.15f + 0.75f * LsSkill();
+	int style = LsStyle();
+	if (style == LS_STYLE_CAREFUL || style == LS_STYLE_CAMPER || style == LS_STYLE_AWPER)
+		chance *= 1.2f;
+	else if (style == LS_STYLE_RUSHER || style == LS_STYLE_KNIFER)
+		chance *= 0.6f;
+	return Q_min(0.97f, chance);
+}
+
+// Only a gun sticking out past cover in view (the body hidden): people notice it now and then -
+// the better and the watchful more, the newer ones mostly not, less when it's far off or out at
+// the edge of the view. Noticed, it knows someone's there: the eyes go to the edge they'd peek
+// from, and one with the wallbang habit and a gun that goes through may spray the cover where
+// they must be
+void CCSBot::LsBarrelCheck(CBasePlayer *pPlayer)
+{
+	// (nor a bot a plugin is steering: a steered mode keeps its own view)
+	if (IsBlind() || IsAttacking() || LsPuppetActive() || !pPlayer->IsAlive() || !IsEnemy(pPlayer))
+		return;
+	// (not over something it's already turned to look at for a reason)
+	if (m_lookAtSpotState != NOT_LOOKING_AT_SPOT && m_lookAtSpotPriority >= PRIORITY_HIGH)
+		return;
+	float now = gpGlobals->time;
+	int idx = pPlayer->entindex() - 1;
+	if (idx < 0 || idx >= MAX_CLIENTS || now < m_lsBarrelCheckAt[idx])
+		return;
+	m_lsBarrelCheckAt[idx] = now + 0.3f;
+	CBasePlayerItem *pGun = pPlayer->m_pActiveItem;
+	if (!pGun)
+		return;
+	float len;
+	switch (WeaponIDToWeaponClass(pGun->m_iId))
+	{
+	case WEAPONCLASS_PISTOL: len = 18.0f; break;
+	case WEAPONCLASS_SNIPERRIFLE: len = 40.0f; break;
+	case WEAPONCLASS_RIFLE: case WEAPONCLASS_MACHINEGUN: case WEAPONCLASS_SHOTGUN: len = 34.0f; break;
+	case WEAPONCLASS_SUBMACHINEGUN: len = 26.0f; break;
+	default: return;
+	}
+	Vector fwd;
+	UTIL_MakeVectorsPrivate(pPlayer->pev->v_angle, fwd, nullptr, nullptr);
+	Vector theirEye = pPlayer->pev->origin + pPlayer->pev->view_ofs;
+	Vector tip = theirEye + fwd * len + Vector(0, 0, -6.0f);
+	Vector eye = pev->origin + pev->view_ofs;
+	float dist = float((tip - eye).Length());
+	if (dist > 2500.0f || !IsVisible(&tip, CHECK_FOV))
+		return;
+	// (how far from where it's looking)
+	Vector look;
+	UTIL_MakeVectorsPrivate(pev->v_angle, look, nullptr, nullptr);
+	float cosA = float(DotProduct((tip - eye) * (1.0f / Q_max(1.0f, dist)), look));
+	float skill = LsSkill();
+	float p = 0.02f + 0.3f * skill * skill;
+	p *= cosA > 0.978f ? 1.0f : cosA > 0.866f ? 0.45f : 0.15f;		// within 12 deg, 30 deg, the rest
+	p *= Q_max(0.25f, 1.0f - Q_max(0.0f, dist - 600.0f) / 2000.0f);
+	int style = LsStyle();
+	if (style == LS_STYLE_CAREFUL || style == LS_STYLE_CAMPER || style == LS_STYLE_AWPER)
+		p *= 1.3f;
+	else if (style == LS_STYLE_RUSHER || style == LS_STYLE_KNIFER)
+		p *= 0.75f;
+	if (RANDOM_FLOAT(0.0f, 1.0f) >= p)
+		return;
+	// noticed: not again for this one for a moment
+	m_lsBarrelCheckAt[idx] = now + RANDOM_FLOAT(3.0f, 5.0f);
+	SetLookAt("Loner-Strike: a gun sticking out", &tip, PRIORITY_HIGH, RANDOM_FLOAT(1.5f, 3.0f));
+	LsWhy("a gun sticking out");
+	// (where they must be: just behind the barrel, a guess - closer for the better ones)
+	float err = 8.0f + 24.0f * (1.0f - skill);
+	Vector body = theirEye + Vector(RANDOM_FLOAT(-err, err), RANDOM_FLOAT(-err, err), RANDOM_FLOAT(-6.0f, 6.0f));
+	if (LsFree() && LsTrait(32) <= 0.175f + 0.575f * skill
+		&& RANDOM_FLOAT(0.0f, 1.0f) < (0.2f + 0.35f * skill) * (0.7f + 0.6f * LsAggro()))
+		LsBangThrough(body);
 }
 
 // How likely this bot crouches to hold in a fight (most never do, a few always try)

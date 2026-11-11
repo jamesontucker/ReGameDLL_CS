@@ -1319,7 +1319,10 @@ void CCSBot::LsHandUpdate(float goalYaw, float goalPitch, float dt)
 			// fight. Keeps the faster flicks from becoming inhuman snaps)
 			// (batch 23: a person flicks past 90 deg per 0.1 s once or twice a minute; the bots
 			// almost never did)
-			float vmax = (fight || backAhead) ? 700.0f + 450.0f * skill : 520.0f + 260.0f * skill;
+			// (a wider range by skill: a top player's flicks are snappy, a newer one's slower; and
+			// its own hand - the bold a touch quicker than the careful)
+			float lsPace = 0.9f + 0.2f * LsAggro();
+			float vmax = ((fight || backAhead) ? 560.0f + 620.0f * skill : 440.0f + 360.0f * skill) * lsPace;
 			dur = Q_max(dur, 1.875f * off / vmax);
 			if (m_lsPuppet.fast && now < m_lsPuppet.lookUntil)
 				dur *= 0.6f;

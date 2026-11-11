@@ -1346,6 +1346,13 @@ public:
 	bool LsPickSteady();
 	bool LsMayBackOff(const Vector &toEnemy);
 	bool LsHoldFireToStop(float range);
+	int LsStopStyle();								// its habit for stopping to shoot: 0 run, 1 crouch, 2 walk, 3 counter-strafe
+	bool LsStopGun() const;							// a gun worth stopping for (rifles, the Deagle)
+	void LsCrouchStop();							// a crouch to stop for the shot
+	bool LsSpaceOut();								// in a fight on top of a teammate: a step aside (true while stepping)
+	float LsReloadCoverChance();					// how likely it gets out of sight to reload
+	bool LsSaveFreeShot(CBasePlayer *pEnemy);		// saving its gun: a free shot at one who hasn't seen it
+	void LsBarrelCheck(CBasePlayer *pPlayer);		// only a gun sticking out in view: now and then noticed
 	float LsCrouchFactor();
 	float LsPinnedDownTime();
 	void LsFightHabits(float range, bool crouchAndHold);	// crouch bursts, jump peeks
@@ -1460,6 +1467,15 @@ private:
 	float m_lsNextHabit = 0.0f;
 	float m_lsCounterUntil = 0.0f;
 	float m_lsHoldSince = 0.0f;						// stopping to shoot since (0: not)
+	float m_lsSpaceCheckAt = 0.0f;					// next look at whether it's on top of a teammate
+	float m_lsSpaceUntil = 0.0f;					// stepping aside until
+	int m_lsSpaceDir = 0;							// +1 right, -1 left
+	float m_lsReloadRollAt = -10.0f;				// the reload it decided about (getting out of sight)
+	bool m_lsSaveShot = false;						// saving its gun, but taking this free shot
+	int m_lsSaveShotWho = 0;
+	float m_lsSaveSeenAt[MAX_CLIENTS] = {};			// saving: when each enemy was last in view (a fresh sighting rolls)
+	float m_lsSaveShotAt = 0.0f;					// when it fires the free shot (0: not taking one)
+	float m_lsBarrelCheckAt[MAX_CLIENTS] = {};		// per enemy: next look for a gun sticking out
 	float m_lsPushUntil = 0.0f;						// running at them until
 	float m_lsYaw = 0.0f;							// eased heading
 	float m_lsYawAt = 0.0f;							// when it was last eased

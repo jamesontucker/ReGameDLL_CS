@@ -777,11 +777,16 @@ void CCSBot::ReloadCheck()
 	if (GetNearbyEnemyCount() && !(LsFight() && LsSolo()))
 	{
 		// avoid enemies while reloading (above 0.75 skill always hide to reload)
-		const float hideChance = (25.0f + 100.0f * GetProfile()->GetSkill()) * (LsFight() ? 0.5f : 1.0f);
+		// (Loner-Strike: by skill and personality: cs_bot_ls.cpp LsReloadCoverChance)
+		const float hideChance = LsFight() ? 100.0f * LsReloadCoverChance() : 25.0f + 100.0f * GetProfile()->GetSkill();
 
+		// (Loner-Strike: the one roll for this reload: the fight's own check doesn't roll again)
+		if (LsFight())
+			m_lsReloadRollAt = gpGlobals->time;
 		if (!IsHiding() && RANDOM_FLOAT(0.0f, 100.0f) < hideChance)
 		{
-			const float safeTime = LsFight() ? 2.0f : 5.0f;
+			// (Loner-Strike: the better ones count on someone still being about for longer)
+			const float safeTime = LsFight() ? 2.0f + 2.0f * LsSkill() : 5.0f;
 			if (GetTimeSinceLastSawEnemy() < safeTime)
 			{
 				PrintIfWatched("Retreating to a safe spot to reload!\n");

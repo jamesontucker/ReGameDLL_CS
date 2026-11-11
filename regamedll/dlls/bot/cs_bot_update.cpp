@@ -536,7 +536,9 @@ void CCSBot::Update()
 				// attack if enemy very close
 				if (!doAttack)
 				{
-					const float selfDefenseRange = 750.0f;
+					// (Loner-Strike: saving its gun, only someone right on top of it: further off,
+					// whether to shoot is its own choice, LsSaveFreeShot)
+					const float selfDefenseRange = (LsFight() && m_lsSaving) ? 250.0f : 750.0f;
 					doAttack = (pev->origin - threat->pev->origin).IsLengthLessThan(selfDefenseRange);
 				}
 				break;

@@ -1342,7 +1342,12 @@ CBasePlayer *CCSBot::FindMostDangerousThreat()
 			// check if this enemy is fully
 			unsigned char visParts;
 			if (!IsVisible(pPlayer, CHECK_FOV, &visParts))
+			{
+				// (Loner-Strike: only their gun sticking out past cover: now and then noticed)
+				if (LsFight())
+					LsBarrelCheck(pPlayer);
 				continue;
+			}
 
 #ifdef REGAMEDLL_ADD
 			// do we notice this enemy? (always notice current enemy)
