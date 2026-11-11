@@ -205,6 +205,7 @@ void CCSBot::ResetValues()
 	m_lsDuckUntil = 0.0f;
 	m_lsDuckAt = -999.0f;
 	m_lsReloadCrouchAt = 0.0f;
+	m_lsKnifeOkUntil = 0.0f;
 	m_lsReloadCrouched = false;
 	for (int i = 0; i < MAX_CLIENTS; i++)
 		m_lsRushHeardAt[i] = -999.0f;
@@ -217,6 +218,8 @@ void CCSBot::ResetValues()
 	m_lsBreak = nullptr;
 	m_lsBreakUntil = 0.0f;
 	m_lsDoorBackUntil = 0.0f;
+	m_lsDoor = nullptr;
+	m_lsDoorCheckAt = 0.0f;
 	for (int r = 0; r < 4; r++)
 	{
 		m_lsScanArea[r] = 0;

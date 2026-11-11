@@ -997,7 +997,11 @@ void CCSBot::LsFlankCheck()
 		return;
 	}
 	Vector at = pFlanker->pev->origin + Vector(0, 0, HalfHumanHeight);
-	SetLookAt("Loner-Strike: shot from the side", &at, PRIORITY_HIGH, RANDOM_FLOAT(0.3f, 0.6f));
+	// (mid-fight the aim holds the view; a quick turn gets past it)
+	if (IsAimingAtEnemy())
+		LsUrgentTurn(at, RANDOM_FLOAT(0.3f, 0.6f), nullptr);
+	else
+		SetLookAt("Loner-Strike: shot from the side", &at, PRIORITY_HIGH, RANDOM_FLOAT(0.3f, 0.6f));
 }
 
 // The enemy's position as this bot's eyes and hand estimate it: what it saw a moment ago (60 ms
@@ -1268,6 +1272,16 @@ void CCSBot::LsForceBadArea(const CNavArea *area, float secs)
 {
 	if (!area)
 		return;
+	float until = gpGlobals->time + secs;
+	// (already listed: just a longer while)
+	for (int i = 0; i < 4; i++)
+	{
+		if (m_lsBadAreas[i] == area)
+		{
+			m_lsBadAreaUntil[i] = Q_max(m_lsBadAreaUntil[i], until);
+			return;
+		}
+	}
 	int slot = 0;
 	for (int i = 1; i < 4; i++)
 	{
@@ -1275,5 +1289,5 @@ void CCSBot::LsForceBadArea(const CNavArea *area, float secs)
 			slot = i;
 	}
 	m_lsBadAreas[slot] = area;
-	m_lsBadAreaUntil[slot] = gpGlobals->time + secs;
+	m_lsBadAreaUntil[slot] = until;
 }

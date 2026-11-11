@@ -85,7 +85,8 @@ bool LsMatch()
 // to it: people spread out to hold a place, they don't stand shoulder to shoulder
 bool LsSpotCrowded(CBaseEntity *me, const Vector *pos)
 {
-	if (!LsFight() || !me || !me->IsPlayer())
+	// (free-for-all: nobody's a teammate)
+	if (!LsFight() || !me || !me->IsPlayer() || (CSGameRules() && CSGameRules()->IsFreeForAll()))
 		return false;
 	const float apart = 220.0f;
 	int team = static_cast<CBasePlayer *>(me)->m_iTeam;
@@ -598,7 +599,7 @@ void CCSBot::LsShiftPortalPoint(const CNavArea *from, const CNavArea *to, NavDir
 	float side = Q_max(-1.0f, Q_min(1.0f, habit + jitter));
 	// (one who knows to stay out of sight leans to the side the dangerous angles can't see:
 	// the left wall of a catwalk away from the doors; in deathmatch nobody bothers)
-	if (LsFight() && LsTeamGame() && LsKnows(LSK_EXPOSURE))
+	if (LsFight() && !LsSolo() && LsKnows(LSK_EXPOSURE))
 	{
 		float safe = LsSafeSide(to, dir);
 		float lean = 0.5f + 0.4f * LsSkill();
@@ -755,7 +756,10 @@ void CCSBot::LsPuppetUpdate()
 		LsPuppetRelease();
 		return;
 	}
-	if (m_isEnemyVisible || IsOnLadder() || !LsPuppetActive() || (!urgent && (IsAttacking() || (order ? LsOrderBusy() : LsBusy()) || IsBlind())))
+	// (a plugin's hold - not a person's order - gives way once something's going on: a noise,
+	// an enemy seen lately)
+	if (m_isEnemyVisible || IsOnLadder() || !LsPuppetActive() || (!urgent && (IsAttacking() || (order ? LsOrderBusy() : LsBusy()) || IsBlind()))
+		|| (!order && !urgent && LsFight() && !LsCalm(false)))
 	{
 		LsPuppetRelease();
 		return;
@@ -798,7 +802,15 @@ void CCSBot::LsPuppetUpdate()
 			float rise = Q_max(12.0f, range * 0.45f);
 			at.z += ((int((now - p.lookStart) / p.nodEvery) % 2) == 0) ? rise : -rise;
 		}
-		SetLookAt("Loner-Strike", &at, p.urgent ? PRIORITY_UNINTERRUPTABLE : PRIORITY_HIGH, 0.3f, false, 2.0f);
+		// (an urgent one, while aiming at someone: a quick turn that beats the aim; a hold's look
+		// is only a scan, which noises and pre-aims win over)
+		if (p.urgent && IsAimingAtEnemy())
+		{
+			if (now >= m_lsRunnerUntil)
+				LsUrgentTurn(at, 0.35f, nullptr);
+		}
+		else
+			SetLookAt("Loner-Strike", &at, p.urgent ? PRIORITY_UNINTERRUPTABLE : PRIORITY_LOW, 0.3f, false, 2.0f);
 	}
 
 	if (p.jumpsLeft > 0 && now >= p.nextJump)
@@ -1008,6 +1020,13 @@ void Bot_LsServerCommand()
 		me->LsCallBuy(int(LsArg(3, 0.0f)));
 		return;
 	}
+	// knife <secs>: a plugin put the knife out on purpose (showing off after a kill, a knife
+	// run): left in its hand that long, unless an enemy shows up (the gun comes back then)
+	if (FStrEq(what, "knife"))
+	{
+		me->m_lsKnifeOkUntil = now + Q_min(LsArg(3, 2.0f), 15.0f);
+		return;
+	}
 	// throw <flash | smoke | he> <x> <y> <z>: a person asked for one there ("flash for me",
 	// "smoke mid"): one it has, not in a fight, nor busy with the bomb or a ladder
 	if (FStrEq(what, "throw"))
@@ -1089,7 +1108,13 @@ void CCSBot::LsPuppetCommand(const char *what, float now)
 		}
 		if (FStrEq(tag, p.holdTag))
 		{
+			if (p.crouchUntil > 0.0f)
+				StandUp();
+			if (p.lookUntil > 0.0f && !p.urgent)
+				ClearLookAt();
 			p.holdUntil = p.crouchUntil = 0.0f;
+			if (!p.urgent)
+				p.lookUntil = 0.0f;
 			p.holdTag[0] = '\0';
 		}
 		return;
@@ -2025,7 +2050,7 @@ void CCSBot::LsShotAt(CBasePlayer *pShooter, const Vector &impact)
 		if (pSniper == pShooter && gpGlobals->time - m_lsSniperHeardAt < 20.0f)
 			sniper = true;
 		// (never every time: good players sometimes swing straight back to trade)
-		float odds = Q_min(0.75f, 0.1f + 0.65f * LsSkill() + (sniper ? 0.15f : 0.0f)) * (LsTeamGame() ? 1.0f : 0.5f) * (LsStyle() == LS_STYLE_RUSHER ? 0.6f : 1.0f);
+		float odds = Q_min(0.75f, 0.1f + 0.65f * LsSkill() + (sniper ? 0.15f : 0.0f)) * (!LsSolo() ? 1.0f : 0.5f) * (LsStyle() == LS_STYLE_RUSHER ? 0.6f : 1.0f);
 		if (RANDOM_FLOAT(0.0f, 1.0f) < odds && LsTakeCoverFrom(m_lsShotFrom, 64.0f))
 		{
 			if (sniper && m_lastKnownArea)
@@ -3685,7 +3710,7 @@ bool CCSBot::LsScanAngles(bool holding)
 		m_lsScanNext = now + RANDOM_FLOAT(0.8f, 1.6f);
 		return false;
 	}
-	bool dm = !LsTeamGame();
+	bool dm = LsSolo();
 	const Vector *enemyHome = dm ? nullptr : LsEnemySpawn(m_iTeam);
 	bool fresh = now - m_lsScanInAt < 2.0f;
 	Vector eye = GetEyePosition();
@@ -3731,7 +3756,7 @@ bool CCSBot::LsScanAngles(bool holding)
 		for (int m = 1; m <= gpGlobals->maxClients && !covered; m++)
 		{
 			CBasePlayer *mate = UTIL_PlayerByIndex(m);
-			if (!mate || mate == this || !mate->IsAlive() || mate->m_iTeam != m_iTeam || (mate->pev->origin - pev->origin).IsLengthGreaterThan(1200.0f))
+			if (!mate || mate == this || !mate->IsAlive() || BotRelationship(mate) != BOT_TEAMMATE || (mate->pev->origin - pev->origin).IsLengthGreaterThan(1200.0f))
 				continue;
 			float toYaw = UTIL_VecToYaw(tc - mate->pev->origin);
 			if (Q_abs(NormalizeAngle(toYaw - mate->pev->v_angle.y)) < 25.0f)
@@ -3773,6 +3798,12 @@ bool CCSBot::LsScanAngles(bool holding)
 		int pick = RANDOM_LONG(0, k->angleCount - 1);
 		if (scores[pick] >= 0.0f && !(fresh && behind[pick]))
 			bestA = pick;
+	}
+	// (all it's got is behind it, just walked in: nothing now, and nothing marked as checked)
+	if (fresh && behind[bestA] && !holding)
+	{
+		m_lsScanNext = now + 0.3f;
+		return false;
 	}
 	Vector look = at[bestA];
 	LsLookableSpot(&look);
@@ -3850,7 +3881,7 @@ int CCSBot::LsCrowdAreas(CNavArea **out, int max, float *cost)
 	for (int m = 1; m <= gpGlobals->maxClients && n < max; m++)
 	{
 		CBasePlayer *mate = UTIL_PlayerByIndex(m);
-		if (!mate || mate == this || !mate->IsAlive() || mate->m_iTeam != m_iTeam)
+		if (!mate || mate == this || !mate->IsAlive() || BotRelationship(mate) != BOT_TEAMMATE)
 			continue;
 		CNavArea *area = mate->IsBot() ? static_cast<CCSBot *>(mate)->GetLastKnownArea() : TheNavAreaGrid.GetNavArea(&mate->pev->origin);
 		if (area)
@@ -3912,7 +3943,7 @@ void CCSBot::LsCrouchWalk()
 			StandUp();
 		}
 	};
-	if (!LsFight() || !LsTeamGame() || !LsExposureReady() || IsAttacking() || IsHurrying() || IsNotMoving() || GetTimeSinceLastSawEnemy() < 3.0f
+	if (!LsFight() || LsSolo() || !LsExposureReady() || IsAttacking() || IsHurrying() || IsNotMoving() || IsSafe() || GetTimeSinceLastSawEnemy() < 3.0f
 		|| TheCSBots()->IsBombPlanted() || IsCarryingBomb() || IsUsingLadder() || !m_lastKnownArea || LsStyle() == LS_STYLE_RUSHER || !LsKnows(LSK_EXPOSURE))
 	{
 		stop();
@@ -4000,6 +4031,9 @@ Vector BrushCenter(CBaseEntity *pEnt)
 }
 } // namespace
 
+// when each breakable was last given up on (it doesn't break: round it, not again for a while)
+static float s_breakTriedAt[MAX_EDICTS];
+
 void CCSBot::LsDoorButton()
 {
 	if (!LsFight() || !IsAlive() || IsAttacking() || IsUsingLadder())
@@ -4023,23 +4057,53 @@ void CCSBot::LsDoorButton()
 		return;
 	}
 
+	// a door it pressed for: did it open? (a delay on the button: a couple of seconds' grace)
+	if (m_lsDoorCheckAt > 0.0f && now >= m_lsDoorCheckAt)
+	{
+		m_lsDoorCheckAt = 0.0f;
+		CBaseToggle *pDoor = static_cast<CBaseToggle *>((CBaseEntity *)m_lsDoor);
+		if (pDoor && pDoor->m_toggle_state == TS_AT_BOTTOM)
+		{
+			giveUp();
+			LsWhy("door didn't open: another way");
+		}
+		m_lsDoor = nullptr;
+		m_lsButtonBehind = nullptr;
+	}
+
 	// breaking something in the way (a grate, a board, a window on its path)
 	CBaseEntity *pBreak = m_lsBreak;
 	if (pBreak)
 	{
-		if (now > m_lsBreakUntil || pBreak->pev->health <= 0.0f || pBreak->pev->solid == SOLID_NOT || GetTimeSinceLastSawEnemy() < 2.0f)
+		bool broken = pBreak->pev->health <= 0.0f || pBreak->pev->solid == SOLID_NOT;
+		if (broken || now > m_lsBreakUntil || GetTimeSinceLastSawEnemy() < 2.0f)
 		{
+			// (not broken in time: round it, and not tried again for a while)
+			if (!broken && now > m_lsBreakUntil)
+			{
+				s_breakTriedAt[pBreak->entindex()] = now;
+				giveUp();
+			}
 			m_lsBreak = nullptr;
+			m_lsButtonBehind = nullptr;
 			ResetStuckMonitor();
 			return;
 		}
 		// (a newer player stands there a moment before it clicks, and its shots are sloppier)
 		if (now < m_lsBreakStartAt)
 			return;
+		// (a knife-run bot gets its gun out for it; never with a teammate in the way)
+		if (IsUsingKnife() && !IsUsingGrenade())
+			EquipBestWeapon(MUST_EQUIP);
 		Vector at = BrushCenter(pBreak);
 		SetLookAt("Loner-Strike: breaking it", &at, PRIORITY_HIGH, 0.4f);
-		if (IsLookingAtPosition(&at, 6.0f + 14.0f * (1.0f - LsSkill())) && !IsActiveWeaponReloading())
-			PrimaryAttack();
+		if (IsLookingAtPosition(&at, 6.0f + 14.0f * (1.0f - LsSkill())) && !IsActiveWeaponReloading() && !IsActiveWeaponClipEmpty() && !IsFriendInLineOfFire())
+		{
+			// (a pistol or a pump needs the trigger let go between shots)
+			bool semi = IsUsingPistol() || IsUsingShotgun();
+			if (!semi || int(now * 8.0f) % 2 == 0)
+				PrimaryAttack();
+		}
 		return;
 	}
 
@@ -4063,8 +4127,13 @@ void CCSBot::LsDoorButton()
 			{
 				UseEnvironment();
 				ButtonPressed(pButton->entindex()) = now;
+				CBaseEntity *pDoor = m_lsDoor;
+				if (pDoor)
+				{
+					ButtonPressed(pDoor->entindex()) = now;
+					m_lsDoorCheckAt = now + 2.0f;
+				}
 				m_lsButton = nullptr;
-				m_lsButtonBehind = nullptr;
 				LsWhy("opened the door");
 				ResetStuckMonitor();
 			}
@@ -4082,7 +4151,7 @@ void CCSBot::LsDoorButton()
 	}
 
 	// held up? (stuck, or barely moving on a path) - a few times a second at most
-	if (now < m_lsButtonCheckAt)
+	if (now < m_lsButtonCheckAt || m_lsDoorCheckAt > 0.0f)
 		return;
 	m_lsButtonCheckAt = now + 0.3f;
 	if (!m_isStuck && !(HasPath() && pev->velocity.Length2D() < 40.0f))
@@ -4092,10 +4161,15 @@ void CCSBot::LsDoorButton()
 	Vector eye = GetEyePosition();
 	Vector dirs[2];
 	int nd = 0;
-	UTIL_MakeVectors(pev->v_angle);
-	dirs[nd++] = gpGlobals->v_forward;
+	// (the way its path goes; the way it's facing only when it's stuck with no path - not a
+	// window it happens to be looking at while it pauses)
 	if (HasPath() && m_pathIndex >= 0 && m_pathIndex < m_pathLength)
 		dirs[nd++] = m_path[m_pathIndex].pos - pev->origin;
+	else if (m_isStuck)
+	{
+		UTIL_MakeVectors(pev->v_angle);
+		dirs[nd++] = gpGlobals->v_forward;
+	}
 	CBaseEntity *pHit = nullptr;
 	Vector ahead;
 	for (int i = 0; i < nd && !pHit; i++)
@@ -4116,8 +4190,15 @@ void CCSBot::LsDoorButton()
 	// something breakable on its way (not one only the map can break)
 	if (FClassnameIs(pHit->pev, "func_breakable"))
 	{
-		if (pHit->pev->takedamage != DAMAGE_NO && !(pHit->pev->spawnflags & SF_BREAK_TRIGGER_ONLY) && pHit->pev->health > 0.0f)
+		// (one that really breaks - not unbreakable glass, not a "wall" with a mountain of health
+		// - and not one it gave up on lately)
+		CBreakable *pB = static_cast<CBreakable *>(pHit);
+		if (pHit->pev->takedamage != DAMAGE_NO && !(pHit->pev->spawnflags & SF_BREAK_TRIGGER_ONLY) && pHit->pev->health > 0.0f
+			&& pHit->pev->health <= 300.0f && pB->IsBreakable()
+			&& (s_breakTriedAt[pHit->entindex()] <= 0.0f || s_breakTriedAt[pHit->entindex()] > now || now - s_breakTriedAt[pHit->entindex()] > 20.0f))
 		{
+			Vector beyond = BrushCenter(pHit) + ahead * 64.0f;
+			m_lsButtonBehind = TheNavAreaGrid.GetNearestNavArea(&beyond);
 			float hesitate = RANDOM_FLOAT(0.3f, 1.4f) * (1.0f - LsSkill());
 			m_lsBreak = pHit;
 			m_lsBreakStartAt = now + hesitate;
@@ -4146,10 +4227,12 @@ void CCSBot::LsDoorButton()
 	m_lsButtonBehind = TheNavAreaGrid.GetNearestNavArea(&behind);
 
 	// a door opened by pressing use on it
+	// (one it pressed for a moment ago: still opening)
+	if (now - ButtonPressed(pHit->entindex()) < 3.0f)
+		return;
+	m_lsDoor = pHit;
 	if (pHit->pev->spawnflags & SF_DOOR_USE_ONLY)
 	{
-		if (now - ButtonPressed(pHit->entindex()) < 3.0f)
-			return;
 		m_lsButton = pHit;
 		m_lsButtonUntil = now + 4.0f;
 		LsWhy("opening the door");
@@ -4340,10 +4423,12 @@ bool CCSBot::LsTakeCoverFrom(const Vector &threat, float minMove, bool fromFight
 	if (!best)
 		return false;
 	Vector spot = *best->GetCenter();
+	// (on the way there it doesn't stop to fight - until it's hit, which ends that at once)
+	float travel = float((spot - pev->origin).Length2D()) / 230.0f;
 	if (fromFight)
 	{
 		StopAttacking();
-		IgnoreEnemies(LsTeamGame() ? 0.8f : 0.5f);
+		IgnoreEnemies(Q_min(2.5f, travel + (!LsSolo() ? 0.3f : 0.1f)));
 	}
 	StandUp();
 	Run();
@@ -4355,7 +4440,7 @@ bool CCSBot::LsTakeCoverFrom(const Vector &threat, float minMove, bool fromFight
 		hold *= 1.3f;
 	else if (style == LS_STYLE_RUSHER)
 		hold *= 0.6f;
-	Hide(&spot, hold);
+	Hide(&spot, hold + travel);
 	LsFallBack();
 	m_lsBackFrom = threat + Vector(0, 0, HalfHumanHeight + LsLookHeight());
 	LsWhy("to cover");
@@ -4510,7 +4595,7 @@ bool CCSBot::LsMatchup(CBasePlayer *pEnemy, bool crouchAndHold)
 	if (m_state == &m_plantBombState || m_state == &m_defuseBombState || IsEscapingFromBomb())
 		return false;
 	float odds = 0.3f + 0.6f * skill;
-	if (!LsTeamGame())
+	if (LsSolo())
 		odds *= 0.4f;
 	if (LsStyle() == LS_STYLE_RUSHER)
 		odds *= 0.5f;
@@ -4553,23 +4638,33 @@ void CCSBot::LsHurtBy(CBasePlayer *pAttacker)
 
 // Mid-fight, turning to someone heard running at it (the aim leaves its enemy a moment): seen
 // now, it's the one fought
+void CCSBot::LsUrgentTurn(const Vector &at, float secs, CBasePlayer *who)
+{
+	m_lsRunner = who;
+	m_lsRunnerSpot = at;
+	m_lsRunnerUntil = gpGlobals->time + secs;
+}
+
 bool CCSBot::LsRunnerGlance()
 {
 	if (!LsFight() || gpGlobals->time >= m_lsRunnerUntil)
 		return false;
 	CBasePlayer *pRunner = m_lsRunner;
-	if (!pRunner || !pRunner->IsAlive() || IsBlind())
+	if ((pRunner && !pRunner->IsAlive()) || IsBlind())
 	{
 		m_lsRunnerUntil = 0.0f;
 		return false;
 	}
-	if (IsVisible(pRunner, true))
+	if (pRunner)
 	{
-		m_lsRunnerUntil = 0.0f;
-		Attack(pRunner);
-		return false;
+		if (IsVisible(pRunner, true))
+		{
+			m_lsRunnerUntil = 0.0f;
+			Attack(pRunner);
+			return false;
+		}
+		m_lsRunnerSpot = pRunner->pev->origin + Vector(0, 0, HalfHumanHeight);
 	}
-	m_lsRunnerSpot = pRunner->pev->origin + Vector(0, 0, HalfHumanHeight);
 	Vector ang = UTIL_VecToAngles(m_lsRunnerSpot - GetEyePosition());
 	ang.x = 360.0f - ang.x;
 	SetLookAngles(ang.y, ang.x);
@@ -4587,7 +4682,7 @@ bool CCSBot::LsRunnerGlance()
 bool CCSBot::LsRushed(const Vector *threat)
 {
 	float now = gpGlobals->time;
-	if (!LsFight() || !LsTeamGame() || now < m_lsRushCheckAt || now - m_lsRushedAt < 6.0f || IsUsingLadder() || IsBlind())
+	if (!LsFight() || LsSolo() || now < m_lsRushCheckAt || now - m_lsRushedAt < 6.0f || IsUsingLadder() || IsBlind())
 		return false;
 	m_lsRushCheckAt = now + 0.4f;
 	if (m_state == &m_plantBombState || m_state == &m_defuseBombState || IsEscapingFromBomb())

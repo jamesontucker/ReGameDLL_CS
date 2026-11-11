@@ -444,6 +444,12 @@ void AttackState::OnUpdate(CCSBot *me)
 	// if we haven't seen our enemy for a moment, continue on if we dont want to fight, or decide to ambush if we do
 	if (!me->IsEnemyVisible())
 	{
+		// (Loner-Strike: ducked behind its own cover - a duck, a crouch to reload - it knows just
+		// where they are: none of the "they went behind cover" reactions (ambush, a spray at the
+		// wall, a chase))
+		if (LsFight() && (me->m_lsDuckUntil > 0.0f || me->m_lsReloadCrouched))
+			return;
+
 		// attend to nearby enemy gunfire
 		if (notSeenEnemyTime > 0.5f && me->CanHearNearbyEnemyGunfire())
 		{

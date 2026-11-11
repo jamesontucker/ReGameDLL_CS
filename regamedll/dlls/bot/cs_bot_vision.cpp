@@ -1004,7 +1004,7 @@ bool CCSBot::LsCornerAhead(Vector *out)
 			for (int m = 1; m <= gpGlobals->maxClients && !covered; m++)
 			{
 				CBasePlayer *mate = UTIL_PlayerByIndex(m);
-				if (mate && mate != this && mate->IsAlive() && mate->m_iTeam == m_iTeam && (mate->pev->origin - at).IsLengthLessThan(250.0f))
+				if (mate && mate != this && mate->IsAlive() && BotRelationship(mate) == BOT_TEAMMATE && (mate->pev->origin - at).IsLengthLessThan(250.0f))
 					covered = true;
 			}
 			if (covered)
@@ -1439,9 +1439,11 @@ CBasePlayer *CCSBot::FindMostDangerousThreat()
 			CBasePlayer *pBest = nullptr;
 			float best = 1e18f;
 			int facing = 0;
+			float scored[MAX_THREATS + 1];
 			for (t = 0; t < threatCount; t++)
 			{
 				CBasePlayer *pThreat = threat[t].enemy;
+				scored[t] = -1.0f;
 				if (pThreat->IsProtectedByShield())
 					continue;
 				float score = threat[t].range;
@@ -1460,6 +1462,7 @@ CBasePlayer *CCSBot::FindMostDangerousThreat()
 				CBasePlayerWeapon *pGun = static_cast<CBasePlayerWeapon *>(pThreat->m_pActiveItem);
 				if (pGun && pGun->m_iId == WEAPON_AWP && LsSkill() > 0.35f)
 					score *= looking ? 0.45f : 0.75f;
+				scored[t] = score;
 				if (score < best)
 				{
 					best = score;
@@ -1479,7 +1482,7 @@ CBasePlayer *CCSBot::FindMostDangerousThreat()
 				{
 					if (threat[t].enemy == pCur)
 					{
-						curScore = threat[t].range * (IsPlayerLookingAtMe(pCur) ? 0.3f : 1.0f) * 0.6f;
+						curScore = scored[t];
 						break;
 					}
 				}

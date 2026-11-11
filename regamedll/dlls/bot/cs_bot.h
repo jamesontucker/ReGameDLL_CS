@@ -879,6 +879,8 @@ private:
 	float m_lsBreakStartAt = 0.0f;			// starts breaking it then (a newer player takes a moment)
 	int m_lsSafeMap = 0;				// the map its safe time was set for
 	float m_lsDoorBackUntil = 0.0f;		// stepping back out of a door's swing
+	EntityHandle<CBaseEntity> m_lsDoor;	// the door it pressed for, and when to see whether it opened
+	float m_lsDoorCheckAt = 0.0f;
 	void LsForceBadArea(const CNavArea *area, float secs);	// Loner-Strike: avoid an area for a while (a door it can't open)
 	bool m_lsCrouchWalking = false;
 	float m_lsCrouchWalkSince = 0.0f;
@@ -1213,12 +1215,14 @@ public:
 	float m_lsDuckUntil = 0.0f;				// down behind low cover until, and when it may again
 	float m_lsDuckAt = -999.0f;
 	float m_lsReloadCrouchAt = 0.0f;			// whether to crouch for this reload was decided (until then)
+	float m_lsKnifeOkUntil = 0.0f;				// a plugin's knife out on purpose, left alone until then
 	bool m_lsReloadCrouched = false;			// ...and it did (up again when it's done)
 	bool LsRushed(const Vector *threat);		// many more of them coming at it than its side has here: back to cover
 	float m_lsRushHeardAt[MAX_CLIENTS];			// each enemy last heard running toward it, close
 	float m_lsRushCheckAt = 0.0f;
 	float m_lsRushedAt = -999.0f;
-	bool LsRunnerGlance();						// mid-fight, a turn to someone heard running at it
+	bool LsRunnerGlance();						// a quick urgent turn (a runner heard, shot from the side) that beats the enemy aim
+	void LsUrgentTurn(const Vector &at, float secs, CBasePlayer *who);	// ...started (who: fought if they come into view)
 	EntityHandle<CBasePlayer> m_lsRunner;		// ...who, where, until when, and when it last did
 	Vector m_lsRunnerSpot;
 	float m_lsRunnerUntil = 0.0f;

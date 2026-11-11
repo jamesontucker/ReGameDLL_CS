@@ -375,10 +375,11 @@ void CCSBot::Update()
 	// (Loner-Strike: when it walked into the area it's in: the first couple of seconds there it
 	// looks ahead, not back - SetLookAt, LsScanAngles)
 	// (only somewhere really new: an area that wasn't in sight from the last one, through a
-	// doorway or round a corner; the next bit of the same room or corridor isn't)
+	// doorway or round a corner; the next bit of the same room or corridor isn't; and only once
+	// the map's sightlines are known)
 	if (m_lastKnownArea != m_lsScanInArea)
 	{
-		if (!m_lsScanInArea || !LsSightReady() || !LsSees(m_lsScanInArea, m_lastKnownArea))
+		if (LsSightReady() && (!m_lsScanInArea || !LsSees(m_lsScanInArea, m_lastKnownArea)))
 			m_lsScanInAt = gpGlobals->time;
 		m_lsScanInArea = m_lastKnownArea;
 	}
@@ -678,7 +679,9 @@ void CCSBot::Update()
 	}
 
 	// TODO: This doesn't work if we are restricted to just knives and sniper rifles because we cant use the rifle at close range
-	if (!IsSafe() && !IsUsingGrenade() && IsUsingKnife() && !IsEscapingFromBomb())
+	// (Loner-Strike: not a knife a plugin put out on purpose, while nobody's in sight)
+	if (!IsSafe() && !IsUsingGrenade() && IsUsingKnife() && !IsEscapingFromBomb()
+		&& !(LsFight() && gpGlobals->time < m_lsKnifeOkUntil && !IsEnemyVisible() && !IsAttacking()))
 	{
 		EquipBestWeapon();
 	}
@@ -925,6 +928,10 @@ void CCSBot::Update()
 	else
 	{
 		m_state->OnUpdate(this);
+
+	// Loner-Strike: stepping back out of a door's swing (after the path code, which would walk on)
+	if (LsFight() && gpGlobals->time < m_lsDoorBackUntil)
+		MoveBackward();
 	}
 
 	// Loner-Strike: whatever a plugin asked of it for a moment (ls_bot)
