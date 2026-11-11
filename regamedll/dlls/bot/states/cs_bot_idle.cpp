@@ -430,8 +430,26 @@ void IdleState::OnUpdate(CCSBot *me)
 					me->LsWhy("ct-push");
 					return;
 				}
+				// (a hold that came straight back - no way to the spot it picked - twice running:
+				// something else this time, not the same pick again every think: on rats a CT
+				// went hold-site, off-angle, hold-site hundreds of times on one spot)
+				float tnow = gpGlobals->time;
+				if (tnow >= me->m_lsHoldSiteSkipUntil)
 				{
-					const CCSBotManager::Zone *zone = me->LsQuietZone();
+					bool quick = tnow - me->m_lsHoldSiteAt < 2.0f;
+					me->m_lsHoldSiteFails = quick ? me->m_lsHoldSiteFails + 1 : 0;
+					me->m_lsHoldSiteAt = tnow;
+					if (me->m_lsHoldSiteFails >= 2)
+					{
+						me->m_lsHoldSiteFails = 0;
+						me->m_lsHoldSiteSkipUntil = tnow + 8.0f;
+					}
+				}
+				if (tnow >= me->m_lsHoldSiteSkipUntil)
+				{
+					// (the site it rotated to, while that's fresh; else the one fewest hold)
+					const CCSBotManager::Zone *zone = (me->m_lsRotateZone >= 0 && tnow < me->m_lsRotateZoneUntil)
+						? TheCSBots()->GetZone(me->m_lsRotateZone) : me->LsQuietZone();
 					CNavArea *area = zone ? TheCSBots()->GetRandomAreaInZone(zone) : nullptr;
 					if (area)
 					{

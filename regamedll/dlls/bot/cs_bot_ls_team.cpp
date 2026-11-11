@@ -9,6 +9,38 @@
 #include "precompiled.h"
 
 // Team play each frame (cheap: timers first)
+// A site being hit, as a CT side reads it off the radar and the kill feed: teammates dropping
+// by one site within seconds. No commander - each CT elsewhere decides for itself whether to
+// go (see LsTeamTick)
+static int s_hitRound = -1, s_hitZone = -1, s_hitCount = 0, s_hitVictim = 0;
+static float s_hitAt = -99.0f, s_hitStart = -99.0f, s_hitDeathAt = -1.0f;
+
+void LsCtSiteDeath(CBasePlayer *pVictim)
+{
+	if (!pVictim || pVictim->m_iTeam != CT || !TheCSBots() || TheCSBots()->GetScenario() != CCSBotManager::SCENARIO_DEFUSE_BOMB
+		|| TheCSBots()->IsBombPlanted() || TheCSBots()->GetZoneCount() < 2)
+		return;
+	float now = gpGlobals->time;
+	// (every bot hears of the same death: counted once)
+	if (now == s_hitDeathAt && pVictim->entindex() == s_hitVictim)
+		return;
+	s_hitDeathAt = now;
+	s_hitVictim = pVictim->entindex();
+	const CCSBotManager::Zone *zone = TheCSBots()->GetClosestZone(&pVictim->pev->origin);
+	if (!zone || (zone->m_center - pVictim->pev->origin).Make2D().IsLengthGreaterThan(1100.0f))
+		return;
+	int z = zone->m_index;
+	if (s_hitRound != LsRoundSerial() || s_hitZone != z || now - s_hitAt > 12.0f)
+	{
+		s_hitRound = LsRoundSerial();
+		s_hitZone = z;
+		s_hitCount = 0;
+		s_hitStart = now;
+	}
+	s_hitCount++;
+	s_hitAt = now;
+}
+
 void CCSBot::LsTeamTick()
 {
 	if (!LsFight() || !LsTeamGame() || !IsAlive())
@@ -20,7 +52,43 @@ void CCSBot::LsTeamTick()
 	{
 		m_lsTeamRound = round;
 		m_lsRotateAt = 0.0f;
+		m_lsRotateZone = -1;
 		m_lsForTimeRoll = -1;
+	}
+
+	// a site being hit (two teammates down by it within seconds, off the radar and the kill
+	// feed): a CT elsewhere goes over to help, or not, by who it is - team players and the
+	// careful mostly go, a camper anchoring its own site mostly stays, a newer player often
+	// doesn't read it at all; in a match nearly all of them go. Decided once per hit
+	if (m_iTeam == CT && s_hitRound == round && s_hitCount >= 2 && now - s_hitAt < 12.0f && m_lsRotateHitAt != s_hitStart
+		&& !TheCSBots()->IsBombPlanted() && LsFree() && !IsAttacking() && !LsOrderActive() && !LsLoner())
+	{
+		m_lsRotateHitAt = s_hitStart;
+		const CCSBotManager::Zone *zone = TheCSBots()->GetZone(s_hitZone);
+		float d = zone ? float((zone->m_center - pev->origin).Length2D()) : 0.0f;
+		if (zone && d > 1000.0f && d < 4500.0f)
+		{
+			int style = LsStyle();
+			bool anchoring = style == LS_STYLE_CAMPER && GetTask() == GUARD_BOMB_ZONE;
+			float lean = anchoring ? 0.3f : (style == LS_STYLE_LURKER || style == LS_STYLE_NINJA) ? 0.6f
+				: (style == LS_STYLE_RUSHER || style == LS_STYLE_CAREFUL) ? 1.15f : 1.0f;
+			float chance = (0.35f + 0.4f * LsTeamwork()) * lean * (0.5f + 0.5f * Q_min(1.0f, LsSkill() / 0.35f));
+			// (a match's anchor holds its own site, as in LsRadioAnswer)
+			if (LsMatch() && !anchoring)
+				chance += 0.25f;
+			if (RANDOM_FLOAT(0.0f, 1.0f) < chance)
+			{
+				const Vector *pos = TheCSBots()->GetRandomPositionInZone(zone);
+				if (pos)
+				{
+					MoveTo(pos, FASTEST_ROUTE);
+					// (and it stays on that site once there, not back to the one it left)
+					m_lsRotateZone = s_hitZone;
+					m_lsRotateZoneUntil = now + 45.0f;
+					LsWhy("rotate: site hit");
+				}
+			}
+		}
 	}
 
 	// a CT side well ahead on numbers, half a minute in, no plant: the bold go and find them

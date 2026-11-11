@@ -1172,7 +1172,7 @@ public:
 	bool LsBadLadder(const CNavLadder *ladder) const { return ladder && ladder == m_lsBadLadder && gpGlobals->time < m_lsBadLadderUntil; }
 	void LsLadderStuck(const CNavLadder *ladder) { m_lsBadLadder = ladder; m_lsBadLadderUntil = gpGlobals->time + 25.0f; }
 	bool LsBadArea(const CNavArea *area) const;		// an area it keeps failing to get into (costly for a while)
-	void LsAreaStuck(const CNavArea *area);			// gave up getting into it: twice in a row and it's a bad area
+	void LsAreaStuck(const CNavArea *area, bool climb = false);			// gave up getting into it: twice in a row and it's a bad area
 	bool LsDucksOff(const CNavArea *area, const Vector &spot) const;	// getting off a ladder into a low space: crouch
 	bool LsCalm(bool pluginLooks = true) const;		// nothing has startled it lately (calm looks turn slower)
 	bool LsPuppetLooking() const { return gpGlobals->time < m_lsPuppet.lookUntil; }	// a plugin has it looking somewhere
@@ -1208,6 +1208,11 @@ public:
 	bool LsPreAim(const Vector &heard, float secs, CBasePlayer *who = nullptr);	// look where a sound will come out (the area's angles)
 	int m_lsCtPushRound = -1;						// a CT: the round it decided whether to push out (once a round)
 	bool m_lsCtPush = false, m_lsCtPushed = false;
+	int m_lsRotateZone = -1;						// a site it rotated to (being hit): held for a while once there
+	float m_lsRotateZoneUntil = 0.0f;
+	float m_lsHoldSiteSkipUntil = 0.0f;
+	float m_lsHoldSiteAt = -10.0f;					// a CT's last site hold, and how many came straight back in a row
+	int m_lsHoldSiteFails = 0;
 	float m_lsInvestAimAt = 0.0f;					// next pre-aim while closing on a noise (InvestigateNoiseState)
 	float m_lsHuntHoldUntil = 0.0f;					// hunting, stopped a moment to hold an angle on a sound (HuntState)
 	float m_lsScanBlindUntil = 0.0f;				// its map angles are all walled off from where it stands, until (UpdateLookAround)
@@ -1481,6 +1486,7 @@ private:
 	enum { LSR_NONE, LSR_ENTRY, LSR_TRADE, LSR_FLANK, LSR_SNIPER };
 	int m_lsRole = LSR_NONE;						// its part in the push this round (picked from what the others are doing)
 	int m_lsRoleRound = -1;
+	float m_lsRotateHitAt = -1.0f;					// the site hit (its time) it decided about
 	int m_lsCallRound = -1;							// the round it said yes to a person's "rush b" / "go b" (in the push, whatever its habits)
 	int m_lsCallSkipRound = -1;						// the round it heard that call and did its own thing instead
 	float LsEntryScore();							// how fit it is to go in first (style, nerve, gun, health)
@@ -1739,6 +1745,7 @@ int LsRoundSerial();
 const CCSBotManager::Zone *LsTSite();	// the Ts' site this round
 void LsTeamCall(const CCSBotManager::Zone *zone, bool rush);	// a person called the site ("rush b"): the team's site, rushed or gathered
 bool LsTeamCalled(bool *rush);			// a person called this round's site (and whether it was a rush)
+void LsCtSiteDeath(CBasePlayer *pVictim);	// a CT down by a site: two in seconds and the site's being hit
 void LsTSiteDeath(CBasePlayer *pVictim);	// a T down at it early: two and the team goes for the other	// a count of rounds that only goes up (a restart sets the game's own back to 0)
 void Bot_LsRegisterCVars();
 void LsTraceMark();						// ls_mark [note]: a moment flagged in lstrace.csv

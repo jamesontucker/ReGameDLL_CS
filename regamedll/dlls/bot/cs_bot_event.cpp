@@ -71,6 +71,10 @@ void CCSBot::OnEvent(GameEventType event, CBaseEntity *pEntity, CBaseEntity *pOt
 		&& !static_cast<CBasePlayer *>(pEntity)->IsBot())
 		LsNoteAnyDeath(static_cast<CBasePlayer *>(pEntity));
 
+	// (a CT down by a site: the CT side reads a site being hit off the radar)
+	if (event == EVENT_PLAYER_DIED && pEntity && LsFight() && static_cast<CBasePlayer *>(pEntity)->IsPlayer())
+		LsCtSiteDeath(static_cast<CBasePlayer *>(pEntity));
+
 	if (!IsAlive())
 		return;
 

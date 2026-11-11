@@ -1592,8 +1592,11 @@ CCSBot::PathResult CCSBot::UpdatePathMovement(bool allowSpeedChange)
 		}
 
 		// (Loner-Strike: remembered, so the same route isn't tried all round)
-		if (!didFall && m_pathIndex < m_pathLength)
-			LsAreaStuck(m_path[m_pathIndex].area);
+		// (and a climb it can't make - the next spot too high to jump to, right by it - counts
+		// too: it was read as a fall and the same jump was planned again and again, a T
+		// hopping at the ledge by dust2's tunnel entrance for 24 s)
+		if (m_pathIndex < m_pathLength)
+			LsAreaStuck(m_path[m_pathIndex].area, didFall);
 
 		// if we havent made any progress in a long time, give up
 		if (m_pathIndex < m_pathLength - 1)
