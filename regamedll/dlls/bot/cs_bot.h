@@ -1645,7 +1645,8 @@ bool LsHabitNear(const Vector &at, float range);	// a person's spot this map (wh
 int LsMapSerial();						// changes when the map does
 float LsMapSafeTime();
 bool LsCrossesSky(const Vector &from, const Vector &to, float step);	// a line through sky brushes (traces pass, eyes don't)
-bool LsSkyInPlay();						// this map has sky brushes between places people stand
+bool LsSkyInPlay();
+bool LsHeadroom(const CNavArea *area);	// room to stand there (not a nav area wedged under sky or a ceiling)						// this map has sky brushes between places people stand
 int LsMapLean();						// +1 a long map (rifles, AWPs), -1 a close one (SMGs, shotguns), 0 neither or unknown					// how long the round's early "safe" part lasts on this map
 void LsExposurePoint(const CNavArea *area, int point, Vector *out);	// one of 9 across it (the outer ones by its edges), on the floor
 bool LsMatch();

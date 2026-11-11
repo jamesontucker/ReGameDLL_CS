@@ -3462,6 +3462,18 @@ bool LsCrossesSky(const Vector &from, const Vector &to, float step)
 	return false;
 }
 
+// Room to stand in an area: open at a crouched head's height above it. Nav learning sometimes
+// leaves areas wedged under sky brushes or ceilings (inferno's rooftops: sky a few units above
+// the floor) - nobody can be there, so they're never cover, a perch, or a way through
+bool LsHeadroom(const CNavArea *area)
+{
+	if (!area)
+		return false;
+	Vector head = *area->GetCenter() + Vector(0, 0, 40.0f);
+	int c = POINT_CONTENTS(head);
+	return c != CONTENTS_SOLID && c != CONTENTS_SKY;
+}
+
 // Whether this map has sky brushes inside the playing space (between places people stand): one
 // look per map at a few hundred lines between nav areas; most maps don't, and then the bots'
 // sight checks skip the sky test
@@ -3652,7 +3664,7 @@ float LsArrival(const CNavArea *area, int team)
 		const float speed = 250.0f;
 		auto relax = [&](float at, const CNavArea *to, float extra) {
 			int j = LsKnowIndex(to);
-			if (j < 0)
+			if (j < 0 || !LsHeadroom(to))
 				return;
 			if (d[j] < 0.0f || at + extra < d[j])
 			{
@@ -4682,7 +4694,7 @@ bool CCSBot::LsTakeCoverFrom(const Vector &threat, float minMove, bool fromFight
 		float d = float((c - pev->origin).Length2D());
 		if (d > 500.0f)
 			continue;
-		if (d >= minMove && d < bestD && (c - threat).Length() > threatD - 100.0f && !LsBadArea(area))
+		if (d >= minMove && d < bestD && (c - threat).Length() > threatD - 100.0f && !LsBadArea(area) && LsHeadroom(area))
 		{
 			TraceResult tr;
 			UTIL_TraceLine(from, c + Vector(0, 0, 62.0f), ignore_monsters, ignore_glass, ENT(pev), &tr);

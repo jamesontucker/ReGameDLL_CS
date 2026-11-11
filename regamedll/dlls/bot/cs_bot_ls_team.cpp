@@ -654,8 +654,8 @@ bool CCSBot::LsTakePerch(const CCSBotManager::Zone *site, bool tSide)
 		if (q < 40)
 			continue;
 		const LsAreaKnow *k = LsKnow(a);
-		// (no crawlspace, no spot others are holding)
-		if (k && k->ceiling * 4 < 70)
+		// (no crawlspace, nowhere nobody could stand, no spot others are holding)
+		if ((k && k->ceiling * 4 < 70) || !LsHeadroom(a))
 			continue;
 		if (LsSpotCrowded(this, &c))
 			continue;
