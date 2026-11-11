@@ -1666,6 +1666,10 @@ private:
 	float m_lsTraceAt = 0.0f;
 };
 
+// Loner-Strike: how far a person could see from one point toward another, 1 all the way: doors,
+// breakable windows and glass looked through (cs_bot_vision.cpp)
+float LsClearTo(const Vector &from, const Vector &to, edict_t *self);
+
 // Loner-Strike: each living teammate of a bot, other than itself (cs_bot_ls*.cpp)
 template <typename F>
 inline void LsForTeammates(CCSBot *me, F f)

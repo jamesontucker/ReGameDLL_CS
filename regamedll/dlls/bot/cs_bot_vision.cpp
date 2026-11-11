@@ -646,7 +646,7 @@ void CCSBot::UpdatePeripheralVision()
 // Loner-Strike: whether a person could see from `from` to `to`: glass is looked through, and a
 // door or a breakable window doesn't count as a wall (an angle on a door is held); only solid
 // walls block. How far it got: 1 all the way.
-static float LsClearTo(const Vector &from, const Vector &to, edict_t *self)
+float LsClearTo(const Vector &from, const Vector &to, edict_t *self)
 {
 	Vector start = from;
 	edict_t *skip = self;

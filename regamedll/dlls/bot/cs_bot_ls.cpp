@@ -4697,6 +4697,21 @@ bool CCSBot::LsScanAngles(bool holding)
 		}
 	}
 	LsLookableSpot(&look);
+	// (the map knowledge says this area sees it, from the area's middle: from where it actually
+	// stands, at an edge of a big area, a wall can be in the way - walking along glancing at a
+	// wall. Blocked close by: not this one, and counted as checked so it isn't picked again)
+	{
+		float span = float((look - eye).Length());
+		float clear = span > 1.0f ? span * LsClearTo(eye, look, ENT(pev)) : span;
+		if (clear < Q_min(250.0f, 0.5f * span))
+		{
+			m_lsScanArea[m_lsScanNextSlot] = (unsigned short)(k->angles[bestA].area + 1);
+			m_lsScanAt[m_lsScanNextSlot] = now;
+			m_lsScanNextSlot = (m_lsScanNextSlot + 1) % 8;
+			m_lsScanNext = now + 0.15f;
+			return false;
+		}
+	}
 	// how long on it: a good player a quick, sure check; careful ones and campers longer; holding
 	// a spot, longer still
 	// (moving: quick checks, a flick over the shoulder for one behind; holding: longer looks)
