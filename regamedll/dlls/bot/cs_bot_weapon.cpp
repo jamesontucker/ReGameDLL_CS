@@ -65,8 +65,18 @@ void CCSBot::FireWeaponAtEnemy()
 	{
 		ClearSurpriseDelay();
 
+		// Loner-Strike: a shotgun loads a shell at a time and fires with what's in it, as a
+		// player does mid-reload: a good one shoots with one in, a newer one waits for a few
+		bool lsShells = false;
+		if (LsFight())
+		{
+			CBasePlayerWeapon *pGun = GetActiveWeapon();
+			if (pGun && (pGun->m_iId == WEAPON_M3 || pGun->m_iId == WEAPON_XM1014) && pGun->m_fInSpecialReload && !pGun->m_fInReload)
+				lsShells = pGun->m_iClip >= (LsSkill() > 0.4f ? 1 : 3);
+		}
+
 		if (!(IsRecognizedEnemyProtectedByShield() && IsPlayerFacingMe(pEnemy))		// dont shoot at enemies behind shields
-			&& !IsActiveWeaponReloading()
+			&& (!IsActiveWeaponReloading() || lsShells)
 			&& !IsActiveWeaponClipEmpty()
 			&& IsEnemyVisible())
 		{
