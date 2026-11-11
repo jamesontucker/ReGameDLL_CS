@@ -5335,8 +5335,20 @@ bool CCSBot::LsTakeCoverFrom(const Vector &threat, float minMove, bool fromFight
 			continue;
 		if (d >= minMove && d < bestD && (c - threat).Length() > threatD - 100.0f && !LsBadArea(area) && LsHeadroom(area))
 		{
+			// (not a spot a teammate is standing on or already heading for: two in one bit of
+			// cover end up stepping round each other, and one spray gets both)
+			bool taken = false;
+			LsForTeammates(this, [&](CBasePlayer *pPlayer) {
+				if ((pPlayer->pev->origin - c).IsLengthLessThan(90.0f))
+					taken = true;
+				else if (pPlayer->IsBot() && static_cast<CCSBot *>(pPlayer)->HasPath()
+					&& (static_cast<CCSBot *>(pPlayer)->GetPathEndpoint() - c).IsLengthLessThan(90.0f))
+					taken = true;
+			});
 			TraceResult tr;
-			UTIL_TraceLine(from, c + Vector(0, 0, 62.0f), ignore_monsters, ignore_glass, ENT(pev), &tr);
+			tr.flFraction = 1.0f;
+			if (!taken)
+				UTIL_TraceLine(from, c + Vector(0, 0, 62.0f), ignore_monsters, ignore_glass, ENT(pev), &tr);
 			if (tr.flFraction < 1.0f)
 			{
 				best = area;
