@@ -796,7 +796,7 @@ void CCSBot::ReloadCheck()
 				{
 					// ignore enemies for a second to give us time to hide
 					// reaching our hiding spot clears our disposition
-					IgnoreEnemies(LsFight() ? 2.5f : 10.0f);
+					IgnoreEnemies(LsFight() ? 0.8f : 10.0f);
 
 					Run();
 					StandUp();

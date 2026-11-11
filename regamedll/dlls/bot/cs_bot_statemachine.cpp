@@ -274,7 +274,9 @@ bool CCSBot::TryToRetreat()
 		// reaching our hiding spot clears our disposition
 		// (Loner-Strike: in deathmatch a quick step back, not a camp; elsewhere not as long,
 		// and shooting back sooner)
-		IgnoreEnemies(!LsFight() ? 10.0f : LsSolo() ? 1.0f : 3.0f);
+		// (Loner-Strike: under a second - backing off isn't closing its eyes; and a close enemy or
+		// one aiming at it breaks it at once: Update)
+		IgnoreEnemies(!LsFight() ? 10.0f : LsSolo() ? 0.5f : 0.8f);
 
 		float holdTime = !LsFight() ? RANDOM_FLOAT(3.0f, 15.0f) : LsSolo() ? RANDOM_FLOAT(1.0f, 3.0f) : RANDOM_FLOAT(3.0f, 8.0f);
 

@@ -503,7 +503,11 @@ void CCSBot::Update()
 		{
 			// Decide if we should attack
 			bool doAttack = false;
-			switch (GetDisposition())
+			// (Loner-Strike: a moment of "ignore them" while falling back or running for cover
+			// isn't closing its eyes: someone close, or aiming at it, gets shot at)
+			bool lsBreakIgnore = LsFight() && !m_ignoreEnemiesTimer.IsElapsed() && m_disposition != IGNORE_ENEMIES
+				&& ((pev->origin - threat->pev->origin).IsLengthLessThan(600.0f) || IsPlayerLookingAtMe(threat));
+			switch (lsBreakIgnore ? m_disposition : GetDisposition())
 			{
 			case IGNORE_ENEMIES:
 			{
