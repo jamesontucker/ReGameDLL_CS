@@ -5550,7 +5550,7 @@ bool CCSBot::LsMatchup(CBasePlayer *pEnemy, bool crouchAndHold)
 			until = now + RANDOM_FLOAT(0.8f, 1.4f);
 		// (the bold go for it more, the careful and campers less)
 		float lean = (LsStyle() == LS_STYLE_CAREFUL || LsStyle() == LS_STYLE_CAMPER) ? 0.7f : (LsStyle() == LS_STYLE_RUSHER || LsStyle() == LS_STYLE_KNIFER) ? 1.25f : 1.0f;
-		if (until > now && range < 1200.0f && !IsUsingSniperRifle() && now > m_lsPushUntil
+		if (until > now && range < 1200.0f && !IsUsingSniperRifle() && now > m_lsPushUntil && !IsActiveWeaponReloading()
 			&& RANDOM_FLOAT(0.0f, 1.0f) < (0.3f + 0.6f * skill) * lean * (0.8f + 0.4f * LsAggro()))
 		{
 			m_lsPushUntil = Q_min(until, now + 1.8f);
@@ -5562,7 +5562,8 @@ bool CCSBot::LsMatchup(CBasePlayer *pEnemy, bool crouchAndHold)
 	// one called hurt, in view: the ones who listen to callouts push it (it's one shot)
 	float hurtHp = 100.0f;
 	// (with health to spare: pushing a one-shot enemy on 10 hp is trading, not winning)
-	if (LsKnownHurt(pEnemy, m_iTeam, &hurtHp) && hurtHp < 40.0f && now > m_lsPushUntil && !IsUsingSniperRifle() && !LsSolo()
+	// (never with the gun mid-reload: a push with nothing to shoot is a walk into them)
+	if (LsKnownHurt(pEnemy, m_iTeam, &hurtHp) && hurtHp < 40.0f && now > m_lsPushUntil && !IsUsingSniperRifle() && !LsSolo() && !IsActiveWeaponReloading()
 		&& pev->health >= 55.0f - 30.0f * LsAggro()
 		&& range < 1000.0f && RANDOM_FLOAT(0.0f, 1.0f) < 0.25f + 0.5f * skill * LsTeamwork() + 0.25f * LsAggro())
 	{
