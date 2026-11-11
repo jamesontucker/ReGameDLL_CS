@@ -76,11 +76,20 @@ void InvestigateNoiseState::OnUpdate(CCSBot *me)
 		return;
 	}
 
-	// look around
-	me->UpdateLookAround();
-
 	// get distance remaining on our path until we reach the source of the noise
 	float noiseDist = (m_checkNoisePosition - me->pev->origin).Length();
+
+	// Loner-Strike: closing in, a good player keeps the crosshair where it'll come out (the
+	// map's angles toward the sound), now and then; a newer one just runs at it
+	if (LsFight() && !LsSolo() && noiseDist < 900.0f && gpGlobals->time >= me->m_lsInvestAimAt)
+	{
+		me->m_lsInvestAimAt = gpGlobals->time + RANDOM_FLOAT(1.2f, 2.0f);
+		if (RANDOM_FLOAT(0.0f, 1.0f) < 0.2f + 0.7f * me->LsSkill())
+			me->LsPreAim(m_checkNoisePosition, RANDOM_FLOAT(0.8f, 1.3f));
+	}
+
+	// look around
+	me->UpdateLookAround();
 
 	if (me->IsUsingKnife())
 	{
@@ -92,7 +101,15 @@ void InvestigateNoiseState::OnUpdate(CCSBot *me)
 	else
 	{
 		const float closeToNoiseRange = 1500.0f;
-		if (noiseDist < closeToNoiseRange)
+		// Loner-Strike: the last stretch, a good or careful player goes quietly; rushers, the bold
+		// and newer players run in (or anyone in a hurry)
+		int lsStyle = me->LsStyle();
+		if (LsFight() && !LsSolo() && noiseDist < 700.0f && !me->IsHurrying() && me->LsSkill() > 0.45f && me->LsAggro() < 0.75f
+			&& lsStyle != LS_STYLE_RUSHER && lsStyle != LS_STYLE_KNIFER)
+		{
+			me->Walk();
+		}
+		else if (noiseDist < closeToNoiseRange)
 		{
 			// if we dont have many friends left, or we are alone, and we are near noise source, sneak quietly
 			if (me->GetFriendsRemaining() <= 2 && !me->IsHurrying())

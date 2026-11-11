@@ -101,6 +101,49 @@ bool CCSBot::ShouldInvestigateNoise(float *retNoiseDist)
 				return false;
 		}
 
+		// Loner-Strike: who it is decides how much a sound pulls it in. Rushers and the bold go
+		// and look; careful players and campers mostly hold and let it come to them; a newer
+		// player chases sounds (the classic newbie habit) where a good one uses them as
+		// information - pre-aimed at where it'll come out. Not in deathmatch (everyone hunts)
+		if (LsFight() && !LsSolo())
+		{
+			int style = LsStyle();
+			float pull = (style == LS_STYLE_RUSHER || style == LS_STYLE_KNIFER) ? 1.4f : (style == LS_STYLE_CAREFUL || style == LS_STYLE_CAMPER) ? 0.55f
+				: (style == LS_STYLE_LURKER || style == LS_STYLE_NINJA) ? 0.85f : 1.0f;
+			pull *= 0.7f + 0.6f * LsAggro();
+			if (LsSkill() < 0.3f)
+				pull *= 1.25f;
+			chance *= pull;
+
+			// (holding instead, once per noise: a close one, and a good or patient player -
+			// eyes on where it'll come out rather than walking into it)
+			if (noiseDist < 900.0f && m_lsNoiseHeldFor != m_noiseTimestamp && !IsAttacking() && LsFree() && m_state != &m_investigateNoiseState)
+			{
+				float holdOdds = (0.15f + 0.6f * LsSkill()) * (1.0f - 0.5f * LsAggro()) * ((style == LS_STYLE_CAREFUL || style == LS_STYLE_CAMPER) ? 1.4f : 1.0f);
+				if (RANDOM_FLOAT(0.0f, 1.0f) < Q_min(0.9f, holdOdds))
+				{
+					m_lsNoiseHeldFor = m_noiseTimestamp;
+					float secs = RANDOM_FLOAT(2.0f, 3.5f);
+					if (LsPreAim(m_noisePosition, secs))
+					{
+						// (a hunting bot stops for it; one already holding a spot stays there)
+						if (m_state == &m_huntState)
+						{
+							Vector here = pev->origin;
+							Hide(&here, secs, true);
+						}
+						LsWhy("heard it: holding the angle");
+						return false;
+					}
+				}
+				else
+					m_lsNoiseHeldFor = m_noiseTimestamp;
+			}
+			// (the same noise it chose to hold on: not walked to a moment later)
+			else if (m_lsNoiseHeldFor == m_noiseTimestamp && noiseDist < 900.0f && IsLookingAtSpot(PRIORITY_MEDIUM))
+				return false;
+		}
+
 		if (RANDOM_FLOAT(0.0f, 1.0f) <= chance)
 		{
 			if (retNoiseDist)

@@ -1206,6 +1206,7 @@ public:
 	void LsHeardBreak(CBaseEntity *pBreak);		// glass, a vent cover, a board breaking: someone's there
 	void LsHurtBy(CBasePlayer *pAttacker);		// hit: through a wall? that spot's not safe
 	bool LsPreAim(const Vector &heard, float secs, CBasePlayer *who = nullptr);	// look where a sound will come out (the area's angles)
+	float m_lsInvestAimAt = 0.0f;					// next pre-aim while closing on a noise (InvestigateNoiseState)
 	bool LsTakeCoverFrom(const Vector &threat, float minMove, bool fromFight = false, float holdSecs = -1.0f);	// to the nearest spot out of its sight, a short hold there
 	bool LsMatchup(CBasePlayer *pEnemy, bool crouchAndHold);		// mid-fight: the wrong gun for this range (an AWP down a lane): out of it
 	Vector LsDefuseSpot(const Vector &bomb);		// beside the bomb, the side away from the threat
@@ -1484,6 +1485,7 @@ private:
 	float m_lsCoverPickAt = 0.0f;					// when it last picked a spot to take cover at
 	Vector m_lsLastCornerLook;						// the last corner it checked, and when
 	float m_lsLastCornerLookAt = 0.0f;
+	float m_lsNoiseHeldFor = -1.0f;					// the noise it chose to hold an angle on instead of walking to
 	float m_lsPressure = 0.0f;						// how much is coming at it right now (hits taken, teammates dropping, outnumbered)
 	float m_lsPressureAt = 0.0f;
 	float m_lsPressureHp = 100.0f;
