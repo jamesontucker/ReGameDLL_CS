@@ -99,7 +99,8 @@ void CCSBot::OnEvent(GameEventType event, CBaseEntity *pEntity, CBaseEntity *pOt
 	{
 		// (running to cover, enemies ignored: hit, it fights back; hit where it's hiding, that
 		// spot isn't cover - avoided a while)
-		if (LsFight())
+		// (only an enemy's: a teammate's stray bullet or grenade scratch isn't the spot failing)
+		if (LsFight() && pOther && pOther->IsPlayer() && IsEnemy(static_cast<CBasePlayer *>(pOther)))
 		{
 			m_ignoreEnemiesTimer.Invalidate();
 			if (IsHiding() && IsAtHidingSpot() && m_lastKnownArea)
@@ -169,7 +170,12 @@ void CCSBot::OnEvent(GameEventType event, CBaseEntity *pEntity, CBaseEntity *pOt
 					// not carrying on with its back to it
 					// (same level: on nuke, a death on the floor below is heard but isn't round the
 					// corner)
-					if (LsFight() && !IsSniper() && !IsVisible(&pVictim->pev->origin) && (pVictim->pev->origin - pev->origin).IsLengthLessThan(900.0f)
+					// (a knife or a silenced gun makes nothing to hear: no direction from it)
+					CBasePlayerWeapon *pKillGun = static_cast<CBasePlayerWeapon *>(pKiller->m_pActiveItem);
+					bool lsQuietKill = pKillGun && (pKillGun->m_iId == WEAPON_KNIFE
+						|| (pKillGun->m_iId == WEAPON_M4A1 && (pKillGun->m_iWeaponState & WPNSTATE_M4A1_SILENCED))
+						|| (pKillGun->m_iId == WEAPON_USP && (pKillGun->m_iWeaponState & WPNSTATE_USP_SILENCED)));
+					if (LsFight() && !IsSniper() && !lsQuietKill && !IsVisible(&pVictim->pev->origin) && (pVictim->pev->origin - pev->origin).IsLengthLessThan(900.0f)
 						&& Q_abs(pVictim->pev->origin.z - pev->origin.z) < 140.0f && !IsVisible(pKiller, true))
 					{
 						// (no return: the kill feed, the death noted near it and the rest below still
@@ -464,7 +470,8 @@ void CCSBot::OnEvent(GameEventType event, CBaseEntity *pEntity, CBaseEntity *pOt
 			m_taskEntity = nullptr;
 			SetDisposition(OPPORTUNITY_FIRE);
 		}
-		else if (!GetGameState()->GetNearestVisibleFreeHostage() && m_task != GUARD_HOSTAGE_RESCUE_ZONE && GuardRandomZone())
+		else if (!GetGameState()->GetNearestVisibleFreeHostage() && m_task != GUARD_HOSTAGE_RESCUE_ZONE
+			&& (!LsFight() || (pEntity->pev->origin - pev->origin).IsLengthGreaterThan(700.0f)) && GuardRandomZone())
 		{
 			m_task = GUARD_HOSTAGE_RESCUE_ZONE;
 			m_taskEntity = nullptr;

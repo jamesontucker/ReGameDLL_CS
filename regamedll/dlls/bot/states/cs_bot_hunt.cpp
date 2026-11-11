@@ -165,9 +165,9 @@ void HuntState::OnUpdate(CCSBot *me)
 		me->InvestigateNoise();
 		return;
 	}
-	// (Loner-Strike: it chose to stop and hold an angle on the sound instead: that's the state
-	// now - nothing more from the hunt this think)
-	if (LsFight() && me->IsHiding())
+	// (Loner-Strike: stopped a moment to hold an angle on a sound: no moving on, and the eyes
+	// stay on that angle - still hunting, so no re-plan when it's over)
+	if (LsFight() && gpGlobals->time < me->m_lsHuntHoldUntil)
 		return;
 
 	// look around

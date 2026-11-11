@@ -534,7 +534,10 @@ void AttackState::OnUpdate(CCSBot *me)
 	else
 	{
 		// we can see the enemy again - reset our ambush check
-		m_didAmbushCheck = false;
+		// (Loner-Strike: once per fight - each re-peek re-rolling it made a run to a crouch spot
+		// mid-duel likely)
+		if (!LsFight())
+			m_didAmbushCheck = false;
 
 		// if the enemy is coming out of hiding, we need time to react
 		if (m_isEnemyHidden)
@@ -577,6 +580,21 @@ void AttackState::OnUpdate(CCSBot *me)
 			StopAttacking(me);
 			return;
 		}
+
+		// Loner-Strike: only a glimpse of them (gone before it could react): a careful or good
+		// player doesn't charge through the gap after them - it holds an angle where they went;
+		// the bold and the newer ones go after them
+		if (LsFight() && !LsSolo() && !m_haveSeenEnemy)
+		{
+			int style = me->LsStyle();
+			float holdOdds = (0.15f + 0.6f * me->LsSkill()) * (1.0f - 0.5f * me->LsAggro())
+				* ((style == LS_STYLE_CAREFUL || style == LS_STYLE_CAMPER) ? 1.4f : (style == LS_STYLE_RUSHER || style == LS_STYLE_KNIFER) ? 0.3f : 1.0f);
+			if (me->LsTrait(54) < holdOdds && me->LsPreAim(me->GetLastKnownEnemyPosition(), RANDOM_FLOAT(2.0f, 3.5f)))
+			{
+				StopAttacking(me);
+				return;
+			}
+		}
 		else
 		{
 			// move to last known position of enemy
@@ -618,11 +636,16 @@ void AttackState::OnUpdate(CCSBot *me)
 		me->m_lsHoldSince = 0.0f;
 	// (Loner-Strike: the wrong gun for the distance and it isn't being shot at: no spraying from
 	// out of range - in closer first)
+	bool lsClosing = false;
 	if (LsFight() && me->LsOutOfRange(pEnemy, lsRange))
 	{
 		lsHoldFire = true;
 		if (gpGlobals->time > me->m_lsPushUntil && !me->IsUsingSniperRifle())
 			me->m_lsPushUntil = gpGlobals->time + RANDOM_FLOAT(0.8f, 1.4f);
+		// (closing the distance is the point: it walks in, it doesn't stop dead in their view)
+		lsClosing = !me->IsUsingSniperRifle() && !m_crouchAndHold;
+		if (lsClosing)
+			m_dodge = true;
 	}
 
 	if (gpGlobals->time > m_reacquireTimestamp && !lsHoldFire)
@@ -648,7 +671,7 @@ void AttackState::OnUpdate(CCSBot *me)
 		float range = toEnemy.Length2D();
 
 		// Loner-Strike: stopping to shoot ends the strafe now (with a counter-strafe)
-		if (lsHoldFire && m_dodgeState != STEADY_ON)
+		if (lsHoldFire && !lsClosing && m_dodgeState != STEADY_ON)
 		{
 			me->LsCounterStrafe(m_dodgeState == SLIDE_LEFT ? 1 : 2);
 			m_dodgeState = STEADY_ON;
@@ -677,7 +700,7 @@ void AttackState::OnUpdate(CCSBot *me)
 			m_dodgeState = STEADY_ON;
 			m_nextDodgeStateTimestamp = 0.0f;
 		}
-		else if (lsHoldFire)
+		else if (lsHoldFire && !lsClosing)
 		{
 			// Loner-Strike: stopping dead to shoot: keys against its own slide
 			m_dodgeState = STEADY_ON;
@@ -715,7 +738,7 @@ void AttackState::OnUpdate(CCSBot *me)
 			m_firstDodge = false;
 		}
 
-		if (LsFight() && gpGlobals->time < me->m_lsPushUntil && !lsHoldFire && !lsDucked)
+		if (LsFight() && gpGlobals->time < me->m_lsPushUntil && (!lsHoldFire || lsClosing) && !lsDucked)
 			me->MoveForward();
 
 		switch (m_dodgeState)

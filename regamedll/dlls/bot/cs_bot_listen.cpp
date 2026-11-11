@@ -115,33 +115,34 @@ bool CCSBot::ShouldInvestigateNoise(float *retNoiseDist)
 				pull *= 1.25f;
 			chance *= pull;
 
-			// (holding instead, once per noise: a close one, and a good or patient player -
-			// eyes on where it'll come out rather than walking into it)
-			if (noiseDist < 900.0f && m_lsNoiseHeldFor != m_noiseTimestamp && !IsAttacking() && LsFree() && m_state != &m_investigateNoiseState)
-			{
-				float holdOdds = (0.15f + 0.6f * LsSkill()) * (1.0f - 0.5f * LsAggro()) * ((style == LS_STYLE_CAREFUL || style == LS_STYLE_CAMPER) ? 1.4f : 1.0f);
-				if (RANDOM_FLOAT(0.0f, 1.0f) < Q_min(0.9f, holdOdds))
-				{
-					m_lsNoiseHeldFor = m_noiseTimestamp;
-					float secs = RANDOM_FLOAT(2.0f, 3.5f);
-					if (LsPreAim(m_noisePosition, secs))
-					{
-						// (a hunting bot stops for it; one already holding a spot stays there)
-						if (m_state == &m_huntState)
-						{
-							Vector here = pev->origin;
-							Hide(&here, secs, true);
-						}
-						LsWhy("heard it: holding the angle");
-						return false;
-					}
-				}
-				else
-					m_lsNoiseHeldFor = m_noiseTimestamp;
-			}
-			// (the same noise it chose to hold on: not walked to a moment later)
-			else if (m_lsNoiseHeldFor == m_noiseTimestamp && noiseDist < 900.0f && IsLookingAtSpot(PRIORITY_MEDIUM))
+			float now = gpGlobals->time;
+			// (the same source it's holding on, or held on a moment ago - footsteps make a new
+			// noise every step: not walked to, and not held again and again)
+			if (now < m_lsNoiseHoldUntil + 4.0f && (m_noisePosition - m_lsNoiseHoldAt).IsLengthLessThan(350.0f))
 				return false;
+
+			// (holding instead, decided once per source: a close one, and a good or patient
+			// player - eyes on where it'll come out rather than walking into it; not when in a
+			// hurry, nor when investigating already)
+			bool decided = now - m_lsNoiseRollAt < 4.0f && (m_noisePosition - m_lsNoiseRollPos).IsLengthLessThan(350.0f);
+			if (noiseDist < 900.0f && !decided && !IsHurrying() && LsFree() && m_state != &m_investigateNoiseState)
+			{
+				m_lsNoiseRollAt = now;
+				m_lsNoiseRollPos = m_noisePosition;
+				float holdOdds = (0.15f + 0.6f * LsSkill()) * (1.0f - 0.5f * LsAggro()) * ((style == LS_STYLE_CAREFUL || style == LS_STYLE_CAMPER) ? 1.4f : 1.0f);
+				float secs = RANDOM_FLOAT(2.0f, 3.5f);
+				if (RANDOM_FLOAT(0.0f, 1.0f) < Q_min(0.9f, holdOdds) && LsPreAim(m_noisePosition, secs))
+				{
+					m_lsNoiseHoldUntil = now + secs;
+					m_lsNoiseHoldAt = m_noisePosition;
+					// (a hunting bot stops where it is for it, still hunting; one already holding a
+					// spot stays there)
+					if (m_state == &m_huntState)
+						m_lsHuntHoldUntil = now + secs;
+					LsWhy("heard it: holding the angle");
+					return false;
+				}
+			}
 		}
 
 		if (RANDOM_FLOAT(0.0f, 1.0f) <= chance)
@@ -212,6 +213,11 @@ bool CCSBot::UpdateLookAtNoise()
 {
 	// make sure a noise exists
 	if (!IsNoiseHeard() || gpGlobals->time - m_noiseTimestamp > 0.5f)
+		return false;
+
+	// (Loner-Strike: holding an angle on this sound: the eyes stay on that angle, not pulled to
+	// the stock look at the noise itself)
+	if (LsFight() && gpGlobals->time < m_lsNoiseHoldUntil)
 		return false;
 
 	bool nearbyThreat = false;

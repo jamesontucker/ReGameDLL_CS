@@ -209,6 +209,12 @@ void FollowState::OnUpdate(CCSBot *me)
 	{
 		repath = true;
 	}
+	// (Loner-Strike: a leader crouch-walking or walking slowly away: kept up with once the gap
+	// opens past personal space, not left until it's 450 off)
+	else if (LsFight() && leaderSpeed > 40.0f && (m_leader->pev->origin - me->pev->origin).IsLengthGreaterThan(300.0f))
+	{
+		repath = true;
+	}
 
 	// move along our path
 	if (me->UpdatePathMovement(NO_SPEED_CHANGE) != CCSBot::PROGRESSING)
@@ -227,7 +233,7 @@ void FollowState::OnUpdate(CCSBot *me)
 		// (Loner-Strike: already a few steps off a leader who's hardly moving: it stays and looks
 		// round, rather than shuffling up to them)
 		float lsGap = float((m_leader->pev->origin - me->pev->origin).Length2D());
-		if (LsFight() && leaderSpeed < 100.0f && lsGap > 150.0f && lsGap < 450.0f)
+		if (LsFight() && leaderSpeed < 40.0f && lsGap > 150.0f && lsGap < 450.0f)
 		{
 			me->DestroyPath();
 			m_repathInterval.Start(0.5f);

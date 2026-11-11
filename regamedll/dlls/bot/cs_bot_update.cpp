@@ -373,8 +373,12 @@ void CCSBot::Update()
 	// (Loner-Strike: flashed the way a person is: see LsBlindTick)
 	if (LsBlindTick())
 	{
-		// (blind: nobody to tell the plugins about)
+		// (blind: nobody to tell the plugins about - and no aim following where they really
+		// are: the spray goes where it last saw them)
 		pev->euser4 = nullptr;
+		if (IsAimingAtEnemy())
+			StopAiming();
+		m_isEnemyVisible = false;
 		return;
 	}
 
@@ -511,6 +515,11 @@ void CCSBot::Update()
 				&& ((pev->origin - threat->pev->origin).IsLengthLessThan(600.0f) || (IsPlayerLookingAtMe(threat) && gpGlobals->time > m_lsCoverRunUntil));
 			// (out of bullets: only someone right on top of it is a fight)
 			bool lsEmpty = LsFight() && LsOutOfAmmo() && (pev->origin - threat->pev->origin).IsLengthGreaterThan(250.0f);
+			// (out of bullets with someone in view who hasn't shot at it yet: out of their line,
+			// not walking on toward them with an empty gun - unless it's on its way to a gun)
+			if (lsEmpty && !IsAttacking() && !m_lsSwapBox.IsValid() && gpGlobals->time - m_lsCoverPickAt > 3.0f && m_state != &m_plantBombState
+				&& m_state != &m_defuseBombState && !IsEscapingFromBomb() && LsTakeCoverFrom(threat->pev->origin, 120.0f, false))
+				LsWhy("out of ammo: out of sight");
 			switch (lsEmpty ? IGNORE_ENEMIES : lsBreakIgnore ? m_disposition : GetDisposition())
 			{
 			case IGNORE_ENEMIES:
@@ -700,7 +709,8 @@ void CCSBot::Update()
 	// or if we no longer feel "safe", equip our weapon
 	if (!IsSafe() && !IsUsingGrenade() && IsActiveWeaponOutOfAmmo())
 	{
-		EquipBestWeapon();
+		// (Loner-Strike: nothing left in any gun: the knife now, not up to 5 s later)
+		EquipBestWeapon(LsFight() && LsOutOfAmmo() ? MUST_EQUIP : false);
 	}
 
 	// TODO: This doesn't work if we are restricted to just knives and sniper rifles because we cant use the rifle at close range

@@ -333,7 +333,14 @@ void CCSBot::LsTeamTick()
 		CBaseEntity *pBox = m_lsSwapBox;
 		CBasePlayerItem *pMine = m_rgpPlayerItems[PRIMARY_WEAPON_SLOT];
 		if (IsAttacking() || !IsMovingTo() || now > m_lsSwapUntil)
+		{
+			// (cut short by a fight: not a failed try - it may go back for it)
+			if (IsAttacking())
+				for (int r = 0; r < 4; r++)
+					if (static_cast<CBaseEntity *>(m_lsSwapLast[r]) == pBox)
+						m_lsSwapLastAt[r] = 0.0f;
 			m_lsSwapBox = nullptr;
+		}
 		else if ((pBox->pev->origin - pev->origin).IsLengthLessThan(90.0f))
 		{
 			// (a pistol lying there: only one fits, so an empty one of its own goes first)
@@ -388,7 +395,8 @@ void CCSBot::LsTeamTick()
 		{
 			static const char *const better[] = { "models/w_ak47.mdl", "models/w_m4a1.mdl", "models/w_awp.mdl", "models/w_sg552.mdl", "models/w_aug.mdl",
 				"models/w_galil.mdl", "models/w_famas.mdl" };
-			CBaseEntity *pBox = nullptr;
+			CBaseEntity *pBox = nullptr, *pBest = nullptr;
+			float bestCost = 1e9f;
 			while ((pBox = UTIL_FindEntityByClassname(pBox, "weaponbox")))
 			{
 				// (out of bullets: any gun at all, and from further off - with enemies about only one
@@ -428,17 +436,30 @@ void CCSBot::LsTeamTick()
 						tried = true;
 				if (tried)
 					continue;
-				Vector to = pBox->pev->origin;
+				// (the nearest one that qualifies, not the first the game lists - and with an enemy
+				// about, not one out toward them)
+				float cost = float((pBox->pev->origin - pev->origin).Length());
+				if (GetTimeSinceLastSawEnemy() < 3.0f && (pBox->pev->origin - GetLastKnownEnemyPosition()).Length() < (pev->origin - GetLastKnownEnemyPosition()).Length())
+					cost += 500.0f;
+				if (cost < bestCost)
+				{
+					bestCost = cost;
+					pBest = pBox;
+				}
+			}
+			if (pBest)
+			{
+				Vector to = pBest->pev->origin;
 				MoveTo(&to, FASTEST_ROUTE);
-				if (!HasPath())
-					continue;
-				m_lsSwapBox = pBox;
-				m_lsSwapLast[m_lsSwapLastSlot] = pBox;
+				m_lsSwapLast[m_lsSwapLastSlot] = pBest;
 				m_lsSwapLastAt[m_lsSwapLastSlot] = now;
 				m_lsSwapLastSlot = (m_lsSwapLastSlot + 1) % 4;
-				m_lsSwapUntil = now + 6.0f;
-				LsWhy("swap-gun");
-				break;
+				if (HasPath())
+				{
+					m_lsSwapBox = pBest;
+					m_lsSwapUntil = now + 6.0f;
+					LsWhy("swap-gun");
+				}
 			}
 		}
 	}
@@ -513,6 +534,9 @@ bool CCSBot::LsRadioAnswer()
 	case EVENT_RADIO_COVER_ME:
 	case EVENT_RADIO_STICK_TOGETHER_TEAM:
 	case EVENT_RADIO_REGROUP_TEAM:
+		// (a person's order stands: another bot's "follow me" doesn't pull it off)
+		if (LsOrderActive() || LsPuppetActive() || m_lsPlantOrderRound == LsRoundSerial())
+			return true;
 		if (!m_radioSubject->IsBot() || LsMatch())
 			return false;
 		return RANDOM_FLOAT(0.0f, 1.0f) > 0.25f;
@@ -770,7 +794,7 @@ bool CCSBot::LsExecuting()
 void CCSBot::LsExecuteTick()
 {
 	if (!LsFight() || !LsTeamGame() || m_iTeam != TERRORIST || !IsAlive() || TheCSBots()->GetScenario() != CCSBotManager::SCENARIO_DEFUSE_BOMB
-		|| TheCSBots()->IsBombPlanted() || CSGameRules()->IsFreezePeriod() || LsOrderActive())
+		|| TheCSBots()->IsBombPlanted() || CSGameRules()->IsFreezePeriod() || LsOrderActive() || m_lsPlantOrderRound == LsRoundSerial())
 		return;
 	// (one on its way to a dropped bomb gets it first: the go, or a wait at the stage, pulled
 	// it off the bomb, the fetch check sent it back, and it went to and fro till the time ran
@@ -998,6 +1022,10 @@ bool CCSBot::LsTeamHeard(GameEventType event, CBasePlayer *pPlayer)
 			LsForTeammates(this, [&](CBasePlayer *pOther) {
 				if ((pOther->pev->origin - c).IsLengthLessThan(200.0f))
 					crowded = true;
+				// (nor where another bot's already heading: two traders the same tick)
+				else if (pOther->IsBot() && static_cast<CCSBot *>(pOther)->HasPath()
+					&& (static_cast<CCSBot *>(pOther)->GetPathEndpoint() - c).IsLengthLessThan(200.0f))
+					crowded = true;
 			});
 			if (crowded)
 				continue;
@@ -1192,7 +1220,9 @@ void CCSBot::LsAvenge(CBasePlayer *pVictim, CBasePlayer *pKiller)
 	if (holds && LsFree() && !IsAttacking())
 	{
 		float secs = RANDOM_FLOAT(3.0f, 6.0f) * (0.7f + 0.6f * (1.0f - LsAggro())) * (lean > 1.2f ? 1.4f : 1.0f);
-		Hide(GetLastKnownArea(), secs, 250.0f, true);
+		// (already holding a spot: it stays there - only the eyes go to the killer's angle)
+		if (!(IsHiding() && IsAtHidingSpot()))
+			Hide(GetLastKnownArea(), secs, 250.0f, true);
 		// (the eyes stay on that angle for the hold, not just the first glance: the glance
 		// above would block the pre-aim's lower priority)
 		float watch = RANDOM_FLOAT(3.0f, 5.0f);
@@ -1596,7 +1626,9 @@ static int s_retakeCount = 0;
 void CCSBot::LsRetakeApproach()
 {
 	int round = LsRoundSerial();
-	if (!LsFree() || GetTask() == DEFUSE_BOMB || IsHiding() || LsSkill() < 0.35f || !LsRetakeRush())
+	// (on its way to defuse counts too - a lone CT that chose not to wait gets that task the
+	// same moment; only one already defusing goes straight on)
+	if (!LsFree() || IsDefusingBomb() || IsHiding() || LsSkill() < 0.35f || !LsRetakeRush())
 		return;
 	// (after the wait for teammates a lone CT may do first - LsTeamTick - not instead of it)
 	{

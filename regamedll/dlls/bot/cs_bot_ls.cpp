@@ -2762,7 +2762,7 @@ void CCSBot::LsHeard(GameEventType event, CBasePlayer *pPlayer, float dist)
 	}
 
 	// the good ones spray a thin wall they know someone's behind
-	if (dist < 700.0f && skill > 0.63f && LsTrait(33) < skill - 0.33f && now - m_lsBangHeardAt > 5.5f && RANDOM_FLOAT(0.0f, 1.0f) < 0.32f + 0.3f * (skill - 0.63f))
+	if (dist < 700.0f && skill > 0.63f && LsFree() && LsTrait(33) < skill - 0.33f && now - m_lsBangHeardAt > 5.5f && RANDOM_FLOAT(0.0f, 1.0f) < 0.32f + 0.3f * (skill - 0.63f))
 	{
 		m_lsBangHeardAt = now;
 		if (LsBangThrough(heard + Vector(0, 0, 10.0f)))
@@ -2859,6 +2859,8 @@ void CCSBot::LsCheckBeforePlant()
 	else
 		return;
 	float secs = RANDOM_FLOAT(0.35f, 0.8f) * (lean > 1.2f ? 1.3f : 1.0f);
+	// (that noise is checked: the plant's own threat roll doesn't stop to look at it again)
+	m_lsObjRolledAt = m_noiseTimestamp;
 	SetLookAt("Loner-Strike: checking", &look, PRIORITY_HIGH, secs);
 	m_lsCheckUntil = gpGlobals->time + secs;
 	m_lsObjUseAt = m_lsCheckUntil;
@@ -4283,6 +4285,7 @@ bool CCSBot::LsScanAngles(bool holding)
 	if (bestA < 0)
 	{
 		m_lsScanNext = now + RANDOM_FLOAT(0.4f, 0.8f);
+		m_lsScanBlindUntil = m_lsScanNext + 0.2f;
 		return false;
 	}
 	// (an angle ahead not checked yet goes before any behind)
@@ -5051,8 +5054,9 @@ bool CCSBot::LsTakeCoverFrom(const Vector &threat, float minMove, bool fromFight
 	Hide(&spot, hold + travel);
 	m_lsCoverPickAt = gpGlobals->time;
 	// (on the way it shoots what it meets but doesn't go off after noises - the shot that sent
-	// it there is one)
-	SetDisposition(OPPORTUNITY_FIRE);
+	// it there is one; set directly: SetDisposition would cancel the "don't stop to fight on
+	// the way" window just started above, and every move to cover from a fight undid itself)
+	m_disposition = OPPORTUNITY_FIRE;
 	LsFallBack();
 	m_lsBackFrom = threat + Vector(0, 0, HalfHumanHeight + LsLookHeight());
 	LsWhy("to cover");
@@ -5280,7 +5284,11 @@ void CCSBot::LsHurtBy(CBasePlayer *pAttacker)
 		bool shortGun = (mine == LSG_SMG || mine == LSG_SHOTGUN || mine == LSG_PISTOL) && (theirs == LSG_RIFLE || theirs == LSG_SNIPER || theirs == LSG_DEAGLE || theirs == LSG_MG);
 		if (shortGun && apart > 750.0f && m_state != &m_plantBombState && m_state != &m_defuseBombState && !IsEscapingFromBomb()
 			&& RANDOM_FLOAT(0.0f, 1.0f) < 0.3f + 0.6f * LsSkill() && LsTakeCoverFrom(pAttacker->pev->origin, 120.0f, true))
+		{
+			// (a deliberate run out of the line: the rifle aiming at it doesn't pull it back)
+			m_lsCoverRunUntil = now + 2.5f;
 			LsWhy("outgunned at range: cover");
+		}
 		return;
 	}
 	TraceResult tr;
@@ -5291,7 +5299,10 @@ void CCSBot::LsHurtBy(CBasePlayer *pAttacker)
 		return;
 	if (m_lastKnownArea)
 		LsForceBadArea(m_lastKnownArea, 8.0f + 7.0f * LsSkill());
-	if (LsTakeCoverFrom(pAttacker->pev->origin, 150.0f))
+	// (out of sight: only roughly where the shots came from)
+	float err = 120.0f + 200.0f * (1.0f - LsSkill());
+	Vector roughly = pAttacker->pev->origin + Vector(RANDOM_FLOAT(-err, err), RANDOM_FLOAT(-err, err), 0.0f);
+	if (LsTakeCoverFrom(roughly, 150.0f))
 		LsWhy("wallbanged: moving");
 }
 

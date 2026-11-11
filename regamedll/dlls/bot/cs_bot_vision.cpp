@@ -742,8 +742,10 @@ void CCSBot::UpdateLookAround(bool updateNow)
 		if (LsScanAngles(true))
 			return;
 		{
+			// (unless every one of them is walled off from where it stands: then the stock
+			// approach points, rather than staring at nothing for the whole hold)
 			const LsAreaKnow *lk = LsFight() ? LsKnow(m_lastKnownArea) : nullptr;
-			if (lk && lk->angleCount > 0)
+			if (lk && lk->angleCount > 0 && gpGlobals->time >= m_lsScanBlindUntil)
 				return;
 		}
 

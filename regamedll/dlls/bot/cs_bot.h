@@ -1207,6 +1207,8 @@ public:
 	void LsHurtBy(CBasePlayer *pAttacker);		// hit: through a wall? that spot's not safe
 	bool LsPreAim(const Vector &heard, float secs, CBasePlayer *who = nullptr);	// look where a sound will come out (the area's angles)
 	float m_lsInvestAimAt = 0.0f;					// next pre-aim while closing on a noise (InvestigateNoiseState)
+	float m_lsHuntHoldUntil = 0.0f;					// hunting, stopped a moment to hold an angle on a sound (HuntState)
+	float m_lsScanBlindUntil = 0.0f;				// its map angles are all walled off from where it stands, until (UpdateLookAround)
 	bool LsTakeCoverFrom(const Vector &threat, float minMove, bool fromFight = false, float holdSecs = -1.0f);	// to the nearest spot out of its sight, a short hold there
 	bool LsMatchup(CBasePlayer *pEnemy, bool crouchAndHold);		// mid-fight: the wrong gun for this range (an AWP down a lane): out of it
 	Vector LsDefuseSpot(const Vector &bomb);		// beside the bomb, the side away from the threat
@@ -1485,7 +1487,10 @@ private:
 	float m_lsCoverPickAt = 0.0f;					// when it last picked a spot to take cover at
 	Vector m_lsLastCornerLook;						// the last corner it checked, and when
 	float m_lsLastCornerLookAt = 0.0f;
-	float m_lsNoiseHeldFor = -1.0f;					// the noise it chose to hold an angle on instead of walking to
+	float m_lsNoiseHoldUntil = 0.0f;				// holding an angle on a sound instead of walking to it, until
+	Vector m_lsNoiseHoldAt;							// where that sound was
+	float m_lsNoiseRollAt = 0.0f;					// when it last decided hold-or-not for a sound, and where
+	Vector m_lsNoiseRollPos;
 	float m_lsPressure = 0.0f;						// how much is coming at it right now (hits taken, teammates dropping, outnumbered)
 	float m_lsPressureAt = 0.0f;
 	float m_lsPressureHp = 100.0f;

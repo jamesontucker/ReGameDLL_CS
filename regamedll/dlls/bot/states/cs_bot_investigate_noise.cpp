@@ -109,6 +109,11 @@ void InvestigateNoiseState::OnUpdate(CCSBot *me)
 		{
 			me->Walk();
 		}
+		else if (LsFight() && LsSolo())
+		{
+			// (deathmatch: nobody creeps up on a sound)
+			me->Run();
+		}
 		else if (noiseDist < closeToNoiseRange)
 		{
 			// if we dont have many friends left, or we are alone, and we are near noise source, sneak quietly
