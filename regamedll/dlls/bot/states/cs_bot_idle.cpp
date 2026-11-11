@@ -416,7 +416,10 @@ void IdleState::OnUpdate(CCSBot *me)
 				// alone by mid-round and were picked off one by one by Ts moving together)
 				if (me->m_lsCtPushRound != LsRoundSerial())
 				{
-					float push = me->LsStyle() == LS_STYLE_RUSHER ? 0.7f : 0.1f + 0.35f * me->LsAggro();
+					// (about one CT a round goes looking on a pub, a rusher mostly; fewer in a match)
+					float push = me->LsStyle() == LS_STYLE_RUSHER ? 0.6f : 0.06f + 0.28f * me->LsAggro();
+					if (LsMatch())
+						push *= 0.6f;
 					me->m_lsCtPushRound = LsRoundSerial();
 					me->m_lsCtPush = RANDOM_FLOAT(0.0f, 1.0f) < push;
 					me->m_lsCtPushed = false;

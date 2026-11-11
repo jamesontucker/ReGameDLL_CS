@@ -1634,7 +1634,7 @@ void CCSBot::LsStalemateTick()
 	LsWhy("stalemate");
 }
 
-// The bomb site with the fewest living teammates within 1200 units (ties at random)
+// The bomb site with the fewest living teammates within 1500 units (ties at random)
 const CCSBotManager::Zone *CCSBot::LsQuietZone()
 {
 	const CCSBotManager::Zone *best = nullptr;
@@ -1650,7 +1650,7 @@ const CCSBotManager::Zone *CCSBot::LsQuietZone()
 			Vector at = pPlayer->pev->origin;
 			if (pPlayer->IsBot() && static_cast<CCSBot *>(pPlayer)->HasPath())
 				at = static_cast<CCSBot *>(pPlayer)->GetPathEndpoint();
-			if ((at - zone->m_center).IsLengthLessThan(1500.0f) && TheCSBots()->GetClosestZone(&at) == zone)
+			if (LsSiteDist(at, zone->m_center) < 1500.0f && LsNearZone(at) == zone)
 				score += 1.0f;
 		});
 		if (score < bestScore)
