@@ -1586,6 +1586,11 @@ bool CCSBot::LsMayBackOff(const Vector &toEnemy)
 		s_edgeSlipAt = -999.0f;	// (a new map: the clock restarted)
 	if (LsSkill() < 0.3f && !LsMatch() && LsTrait(74) < 0.35f && gpGlobals->time - s_edgeSlipAt > 480.0f && RANDOM_FLOAT(0.0f, 1.0f) < 0.05f)
 	{
+		// (a drop it lives through: never into a pit or off a deadly height)
+		UTIL_TraceLine(behind, behind - Vector(0, 0, 1000.0f), ignore_monsters, ENT(pev), &tr);
+		float drop = float(pev->origin.z - HalfHumanHeight - tr.vecEndPos.z);
+		if (tr.flFraction >= 1.0f || GetApproximateFallDamage(drop) + LsFallMargin() >= pev->health)
+			return false;
 		s_edgeSlipAt = gpGlobals->time;
 		LsWhy("backed off an edge");
 		return true;
@@ -2015,6 +2020,10 @@ void CCSBot::LsShotAt(CBasePlayer *pShooter, const Vector &impact)
 	{
 		CBasePlayerWeapon *pGun = static_cast<CBasePlayerWeapon *>(pShooter->m_pActiveItem);
 		bool sniper = pGun && (pGun->m_iId == WEAPON_AWP || pGun->m_iId == WEAPON_SCOUT || pGun->m_iId == WEAPON_G3SG1 || pGun->m_iId == WEAPON_SG550);
+		// (or the one it heard scoping lately, whatever's in their hands now)
+		CBasePlayer *pSniper = m_lsSniperHeard;
+		if (pSniper == pShooter && gpGlobals->time - m_lsSniperHeardAt < 20.0f)
+			sniper = true;
 		// (never every time: good players sometimes swing straight back to trade)
 		float odds = Q_min(0.75f, 0.1f + 0.65f * LsSkill() + (sniper ? 0.15f : 0.0f)) * (LsTeamGame() ? 1.0f : 0.5f) * (LsStyle() == LS_STYLE_RUSHER ? 0.6f : 1.0f);
 		if (RANDOM_FLOAT(0.0f, 1.0f) < odds && LsTakeCoverFrom(m_lsShotFrom, 64.0f))
@@ -2384,6 +2393,20 @@ void CCSBot::LsHeard(GameEventType event, CBasePlayer *pPlayer, float dist)
 		LsPuppetRelease();
 	bool busy = m_state == &m_plantBombState || m_state == &m_defuseBombState || IsUsingLadder() || m_lsSaving || LsPuppetActive() || IsBlind();
 
+	// (someone running this way, close: counted for being rushed, LsRushed)
+	if (event == EVENT_PLAYER_FOOTSTEP && dist < 1000.0f)
+	{
+		Vector vel = pPlayer->pev->velocity;
+		Vector toMe = pev->origin - pPlayer->pev->origin;
+		int idx = pPlayer->entindex() - 1;
+		if (idx >= 0 && idx < MAX_CLIENTS && vel.Length2D() > 150.0f && vel.x * toMe.x + vel.y * toMe.y > 0.0f)
+		{
+			m_lsRushHeardAt[idx] = now;
+			if (!IsAttacking())
+				LsRushed(&pPlayer->pev->origin);
+		}
+	}
+
 	// an enemy scoping a sniper rifle: there's an AWPer about, roughly there
 	if (event == EVENT_WEAPON_ZOOMED)
 	{
@@ -2437,7 +2460,7 @@ void CCSBot::LsHeard(GameEventType event, CBasePlayer *pPlayer, float dist)
 	bool coming = event == EVENT_DOOR || event == EVENT_PLAYER_LANDED_FROM_HEIGHT;
 	if (event != EVENT_WEAPON_RELOADED && event != EVENT_PLAYER_FOOTSTEP && event != EVENT_WEAPON_FIRED && !coming)
 		return;
-	if (dist > 900.0f)
+	if (dist > (coming ? 1000.0f : 900.0f))
 		return;
 	// (once a moment: the visibility check below is a few traces)
 	if (now - m_lsHeardAt < 0.4f)
@@ -3687,6 +3710,9 @@ bool CCSBot::LsScanAngles(bool holding)
 		// (the enemy's side of the map first)
 		if (enemyHome)
 			score *= (tc - *enemyHome).Length2D() < (pev->origin - *enemyHome).Length2D() ? 1.5f : 0.7f;
+		// (where an AWPer was heard scoping lately: the better ones keep an eye on it)
+		if (skill > 0.4f && now - m_lsSniperHeardAt < 15.0f && (tc - m_lsSniperSpot).IsLengthLessThan(600.0f))
+			score *= 1.8f;
 		// (near something heard or seen lately)
 		if ((noiseFresh && (tc - m_noisePosition).IsLengthLessThan(600.0f)) || (sawFresh && (tc - GetLastKnownEnemyPosition()).IsLengthLessThan(600.0f)))
 			score *= 2.5f;
@@ -4244,6 +4270,11 @@ void CCSBot::LsHeardBreak(CBaseEntity *pBreak)
 	});
 	if (ours || RANDOM_FLOAT(0.0f, 1.0f) > 0.5f + 0.5f * LsSkill())
 		return;
+	// (its own shots broke it; or it's already on a louder, fresher noise)
+	if (gpGlobals->time - m_fireWeaponTimestamp < 0.4f)
+		return;
+	if (IsNoiseHeard() && GetNoisePriority() > PRIORITY_MEDIUM && gpGlobals->time - m_noiseTimestamp < 3.0f)
+		return;
 	CNavArea *area = TheNavAreaGrid.GetNearestNavArea(&at);
 	if (!area)
 		return;
@@ -4264,6 +4295,9 @@ void CCSBot::LsHeardBreak(CBaseEntity *pBreak)
 bool CCSBot::LsTakeCoverFrom(const Vector &threat, float minMove, bool fromFight)
 {
 	if (!m_lastKnownArea || IsUsingLadder() || (IsAttacking() && !fromFight))
+		return false;
+	// (never off a plant, a defuse, a run from the bomb, or with hostages following)
+	if (m_state == &m_plantBombState || m_state == &m_defuseBombState || IsEscapingFromBomb() || m_hostageEscortCount > 0)
 		return false;
 	Vector from = threat + Vector(0, 0, 17.0f);
 	float threatD = float((pev->origin - threat).Length());
@@ -4323,6 +4357,7 @@ bool CCSBot::LsTakeCoverFrom(const Vector &threat, float minMove, bool fromFight
 		hold *= 0.6f;
 	Hide(&spot, hold);
 	LsFallBack();
+	m_lsBackFrom = threat + Vector(0, 0, HalfHumanHeight + LsLookHeight());
 	LsWhy("to cover");
 	return true;
 }
@@ -4398,12 +4433,15 @@ float CCSBot::LsFallMargin()
 // off, a shotgun past its reach) - the better ones get out of that line and come by another
 // way, unless the enemy's hurt or not looking its way. Newer ones just fight it out; less of
 // it in deathmatch, from rushers, and on aim maps (nowhere to go round)
-bool CCSBot::LsMatchup(CBasePlayer *pEnemy)
+bool CCSBot::LsMatchup(CBasePlayer *pEnemy, bool crouchAndHold)
 {
 	float now = gpGlobals->time;
 	// hit with low cover in front: down behind it a moment, then back up to shoot (the better
 	// ones; on aim maps it's how the whole fight goes: from the box, not out in the open)
-	if (m_lsDuckUntil > 0.0f && now >= m_lsDuckUntil)
+	// (not a bot holding crouched there anyway: that's its own habit)
+	if (crouchAndHold)
+		m_lsDuckUntil = 0.0f;
+	else if (m_lsDuckUntil > 0.0f && now >= m_lsDuckUntil)
 	{
 		m_lsDuckUntil = 0.0f;
 		StandUp();
@@ -4425,6 +4463,8 @@ bool CCSBot::LsMatchup(CBasePlayer *pEnemy)
 			LsWhy("down behind cover");
 		}
 	}
+	if (LsRushed(&pEnemy->pev->origin))
+		return true;
 	if (now < m_lsMatchupAt || !IsEnemyVisible() || !pEnemy->IsAlive())
 		return false;
 	m_lsMatchupAt = now + 0.5f;
@@ -4438,11 +4478,20 @@ bool CCSBot::LsMatchup(CBasePlayer *pEnemy)
 	}
 	// (most of the time, more often the better it is: not every reload like a script; decided
 	// once per reload)
-	if (IsReloading() && skill > 0.4f && now > m_lsReloadCrouchAt)
+	if (m_lsReloadCrouched && !IsReloading())
+	{
+		m_lsReloadCrouched = false;
+		if (!crouchAndHold && m_lsDuckUntil <= 0.0f)
+			StandUp();
+	}
+	else if (IsReloading() && !crouchAndHold && skill > 0.4f && now > m_lsReloadCrouchAt)
 	{
 		m_lsReloadCrouchAt = now + 3.0f;
 		if (RANDOM_FLOAT(0.0f, 1.0f) < 0.45f + 0.5f * skill && LsLowCoverToward(pEnemy->pev->origin))
+		{
 			Crouch();
+			m_lsReloadCrouched = true;
+		}
 	}
 
 	CBasePlayer *pDone = m_lsMatchupEnemy;
@@ -4514,7 +4563,7 @@ bool CCSBot::LsRunnerGlance()
 		m_lsRunnerUntil = 0.0f;
 		return false;
 	}
-	if (IsVisible(pRunner, false))
+	if (IsVisible(pRunner, true))
 	{
 		m_lsRunnerUntil = 0.0f;
 		Attack(pRunner);
@@ -4524,5 +4573,68 @@ bool CCSBot::LsRunnerGlance()
 	Vector ang = UTIL_VecToAngles(m_lsRunnerSpot - GetEyePosition());
 	ang.x = 360.0f - ang.x;
 	SetLookAngles(ang.y, ang.x);
+	return true;
+}
+
+// Being rushed: walking onto a site into three of them, or hearing a pack running at it, with
+// none or few of its own team there. Counted from what it can fairly know: enemies seen in
+// the last second or so, enemies heard running its way, teammates close by. Clearly
+// outnumbered (two more of them than of its side, three at least), the better players see it
+// at once and get back into cover, eyes on them, and don't walk straight back out (that spot's
+// avoided a while: it waits for its team); newer ones often stand and take the fight, rushers
+// more often go down shooting. Not in deathmatch (everyone's an enemy there), not planting or
+// defusing, not a CT with the bomb about to go off (no time to wait)
+bool CCSBot::LsRushed(const Vector *threat)
+{
+	float now = gpGlobals->time;
+	if (!LsFight() || !LsTeamGame() || now < m_lsRushCheckAt || now - m_lsRushedAt < 6.0f || IsUsingLadder() || IsBlind())
+		return false;
+	m_lsRushCheckAt = now + 0.4f;
+	if (m_state == &m_plantBombState || m_state == &m_defuseBombState || IsEscapingFromBomb())
+		return false;
+	if (m_iTeam == CT && TheCSBots()->IsBombPlanted() && TheCSBots()->GetBombTimeLeft() < 15.0f)
+		return false;
+	int seen = 0, heard = 0;
+	Vector sum(0, 0, 0);
+	for (int i = 1; i <= gpGlobals->maxClients && i <= MAX_CLIENTS; i++)
+	{
+		CBasePlayer *pPlayer = UTIL_PlayerByIndex(i);
+		if (!IsEntityValid(pPlayer) || !pPlayer->IsAlive() || !IsEnemy(pPlayer))
+			continue;
+		const WatchInfo &w = m_watchInfo[i - 1];
+		if (w.isEnemy && w.timestamp > 0.0f && now - w.timestamp < 1.5f)
+			seen++;
+		else if (now - m_lsRushHeardAt[i - 1] < 2.0f)
+			heard++;
+		else
+			continue;
+		sum = sum + pPlayer->pev->origin;
+	}
+	int count = seen + heard;
+	if (count < 3)
+		return false;
+	int side = 1;
+	LsForTeammates(this, [&](CBasePlayer *pPlayer) {
+		if ((pPlayer->pev->origin - pev->origin).IsLengthLessThan(700.0f))
+			side++;
+	});
+	// (heard ones weigh less than ones in sight: footsteps might be two people or five)
+	if (float(seen) + 0.6f * float(heard) < float(side) + 2.0f)
+		return false;
+	m_lsRushedAt = now;
+	float skill = LsSkill();
+	float odds = 0.15f + 0.8f * skill;
+	if (LsStyle() == LS_STYLE_RUSHER)
+		odds *= 0.6f;
+	if (RANDOM_FLOAT(0.0f, 1.0f) > odds)
+		return false;
+	Vector from = sum * (1.0f / float(count));
+	const CNavArea *here = m_lastKnownArea;
+	if (!LsTakeCoverFrom(from, 0.0f, IsAttacking()))
+		return false;
+	if (here)
+		LsForceBadArea(here, 8.0f + 6.0f * skill);
+	GetChatter()->Scared();
+	LsWhy("rushed: back to cover");
 	return true;
 }

@@ -1205,7 +1205,7 @@ public:
 	void LsHurtBy(CBasePlayer *pAttacker);		// hit: through a wall? that spot's not safe
 	bool LsPreAim(const Vector &heard, float secs);	// look where a sound will come out (the area's angles)
 	bool LsTakeCoverFrom(const Vector &threat, float minMove, bool fromFight = false);	// to the nearest spot out of its sight, a short hold there
-	bool LsMatchup(CBasePlayer *pEnemy);		// mid-fight: the wrong gun for this range (an AWP down a lane): out of it
+	bool LsMatchup(CBasePlayer *pEnemy, bool crouchAndHold);		// mid-fight: the wrong gun for this range (an AWP down a lane): out of it
 	bool LsLowCoverToward(const Vector &at);	// low cover right by it that way (crouch behind it)
 	float LsFallMargin();						// how close to dying from a drop it'll go (pros never close)
 	EntityHandle<CBasePlayer> m_lsMatchupEnemy;	// the enemy whose matchup it weighed (once a fight)
@@ -1213,6 +1213,11 @@ public:
 	float m_lsDuckUntil = 0.0f;				// down behind low cover until, and when it may again
 	float m_lsDuckAt = -999.0f;
 	float m_lsReloadCrouchAt = 0.0f;			// whether to crouch for this reload was decided (until then)
+	bool m_lsReloadCrouched = false;			// ...and it did (up again when it's done)
+	bool LsRushed(const Vector *threat);		// many more of them coming at it than its side has here: back to cover
+	float m_lsRushHeardAt[MAX_CLIENTS];			// each enemy last heard running toward it, close
+	float m_lsRushCheckAt = 0.0f;
+	float m_lsRushedAt = -999.0f;
 	bool LsRunnerGlance();						// mid-fight, a turn to someone heard running at it
 	EntityHandle<CBasePlayer> m_lsRunner;		// ...who, where, until when, and when it last did
 	Vector m_lsRunnerSpot;

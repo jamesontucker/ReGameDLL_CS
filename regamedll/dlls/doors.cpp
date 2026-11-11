@@ -696,7 +696,7 @@ void CBaseDoor::DoorGoDown()
 				if (m_hActivator && m_hActivator->IsPlayer())
 #endif
 				{
-					TheBots->OnEvent(EVENT_DOOR, m_hActivator);
+					TheBots->OnEvent(EVENT_DOOR, m_hActivator, this);	// (Loner-Strike: closing: the door, so bots can tell)
 				}
 			}
 		}

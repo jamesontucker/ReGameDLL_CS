@@ -412,6 +412,11 @@ void CCSBot::OnEvent(GameEventType event, CBaseEntity *pEntity, CBaseEntity *pOt
 		}
 	}
 
+	// Loner-Strike: a door swinging shut by itself isn't someone coming (and the one who opened
+	// it is long gone from it)
+	if (event == EVENT_DOOR && pOther && LsFight())
+		return;
+
 	// check if noise is close enough for us to hear
 	const Vector *newNoisePosition = &pPlayer->pev->origin;
 	float newNoiseDist = (pev->origin - *newNoisePosition).Length();

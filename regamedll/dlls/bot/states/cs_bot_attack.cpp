@@ -31,6 +31,8 @@
 // Begin attacking
 void AttackState::OnEnter(CCSBot *me)
 {
+	me->m_lsDuckUntil = 0.0f;	// Loner-Strike: no duck left over from the last fight
+	me->m_lsReloadCrouched = false;
 	me->LsFightBegins();	// Loner-Strike
 	CBasePlayer *pEnemy = me->GetEnemy();
 
@@ -205,7 +207,7 @@ void AttackState::OnUpdate(CCSBot *me)
 		m_haveSeenEnemy = me->IsEnemyVisible();
 
 	// Loner-Strike: the wrong gun for this range, a flashed enemy to push, low cover to reload behind
-	if (LsFight() && me->LsMatchup(pEnemy))
+	if (LsFight() && me->LsMatchup(pEnemy, m_crouchAndHold))
 		return;
 
 	// Retreat check
@@ -721,6 +723,8 @@ void AttackState::OnUpdate(CCSBot *me)
 // Finish attack
 void AttackState::OnExit(CCSBot *me)
 {
+	me->m_lsDuckUntil = 0.0f;
+	me->m_lsReloadCrouched = false;
 	me->PrintIfWatched("AttackState:OnExit()\n");
 
 	m_crouchAndHold = false;
