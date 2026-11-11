@@ -775,7 +775,8 @@ bool CCSBot::LsSeeIntoSmoke(CBasePlayer *pPlayer, bool testFOV, unsigned char *v
 	Vector spot = pPlayer->pev->origin;
 	if (LsClearLine(spot, testFOV))
 		parts |= CHEST;
-	spot.z += 25.0f;
+	// (the eyes, as the main vision checks them)
+	spot = pPlayer->pev->origin + pPlayer->pev->view_ofs;
 	if (LsClearLine(spot, testFOV))
 		parts |= HEAD;
 

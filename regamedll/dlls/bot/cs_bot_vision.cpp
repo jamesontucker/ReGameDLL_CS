@@ -429,6 +429,14 @@ bool CCSBot::IsVisible(CBasePlayer *pPlayer, bool testFOV, unsigned char *visPar
 
 	if (IsVisible(&spot, testFOV))
 		testVisParts |= HEAD;
+	// (Loner-Strike: standing, the top of the head over a wall with the eyes just below it is
+	// still a head to shoot at - not crouched, where that point is air over the box)
+	else if (LsFight() && !(pPlayer->pev->flags & FL_DUCKING))
+	{
+		Vector top = pPlayer->pev->origin + Vector(0, 0, 25.0f);
+		if (IsVisible(&top, testFOV))
+			testVisParts |= HEAD;
+	}
 
 	// check feet
 	const float standFeet = 34.0f;

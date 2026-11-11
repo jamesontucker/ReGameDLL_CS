@@ -5324,8 +5324,8 @@ bool CCSBot::LsTakeCoverFrom(const Vector &threat, float minMove, bool fromFight
 	CNavArea *queue[48];
 	int head = 0, tail = 0;
 	queue[tail++] = m_lastKnownArea;
-	CNavArea *best = nullptr;
-	float bestD = 500.0f;
+	CNavArea *best = nullptr, *bestTaken = nullptr;
+	float bestD = 500.0f, bestTakenD = 500.0f;
 	while (head < tail)
 	{
 		CNavArea *area = queue[head++];
@@ -5347,7 +5347,18 @@ bool CCSBot::LsTakeCoverFrom(const Vector &threat, float minMove, bool fromFight
 			});
 			TraceResult tr;
 			tr.flFraction = 1.0f;
-			if (!taken)
+			// (a taken one is kept as a last resort: cover shared beats none)
+			if (taken && d < bestTakenD)
+			{
+				UTIL_TraceLine(from, c + Vector(0, 0, 62.0f), ignore_monsters, ignore_glass, ENT(pev), &tr);
+				if (tr.flFraction < 1.0f)
+				{
+					bestTaken = area;
+					bestTakenD = d;
+				}
+				tr.flFraction = 1.0f;
+			}
+			else if (!taken)
 				UTIL_TraceLine(from, c + Vector(0, 0, 62.0f), ignore_monsters, ignore_glass, ENT(pev), &tr);
 			if (tr.flFraction < 1.0f)
 			{
@@ -5375,6 +5386,8 @@ bool CCSBot::LsTakeCoverFrom(const Vector &threat, float minMove, bool fromFight
 			}
 		}
 	}
+	if (!best)
+		best = bestTaken;
 	if (!best)
 		return false;
 	m_lsCoverStay = best == m_lastKnownArea;
