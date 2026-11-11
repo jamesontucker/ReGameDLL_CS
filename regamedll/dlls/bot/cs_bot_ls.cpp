@@ -3590,12 +3590,6 @@ bool CCSBot::LsScanAngles(bool holding)
 	}
 	bool dm = !LsTeamGame();
 	const Vector *enemyHome = dm ? nullptr : LsEnemySpawn(m_iTeam);
-	// (just walked into this area: what's ahead is unchecked)
-	if (m_lastKnownArea != m_lsScanInArea)
-	{
-		m_lsScanInArea = m_lastKnownArea;
-		m_lsScanInAt = now;
-	}
 	bool fresh = now - m_lsScanInAt < 2.0f;
 	Vector eye = GetEyePosition();
 	float heading = pev->velocity.Length2D() > 60.0f ? UTIL_VecToYaw(pev->velocity) : pev->v_angle.y;

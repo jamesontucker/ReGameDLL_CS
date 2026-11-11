@@ -490,6 +490,17 @@ void CCSBot::SetLookAt(const char *desc, const Vector *pos, PriorityType pri, fl
 	if (!pos)
 		return;
 
+	// Loner-Strike: nobody walks into a new area sideways or backwards. Walking, for the first
+	// couple of seconds in an area, a look around (low priority: a hiding spot, an approach
+	// point, a corner) well behind the way it's going is let go; a reaction (a noise, an enemy,
+	// being shot at: medium and up) still turns it
+	if (pri == PRIORITY_LOW && LsFight() && !IsNotMoving() && !IsAttacking() && gpGlobals->time - m_lsScanInAt < 2.0f)
+	{
+		float heading = UTIL_VecToYaw(pev->velocity);
+		if (Q_abs(NormalizeAngle(UTIL_VecToYaw(*pos - pev->origin) - heading)) > 100.0f)
+			return;
+	}
+
 	// if currently looking at a point in space with higher priority, ignore this request
 	if (m_lookAtSpotState != NOT_LOOKING_AT_SPOT && m_lookAtSpotPriority > pri)
 		return;

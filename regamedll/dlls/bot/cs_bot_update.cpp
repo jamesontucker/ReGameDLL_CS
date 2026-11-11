@@ -369,6 +369,16 @@ void CCSBot::Update()
 
 	// (Loner-Strike: and not staring at a wall with nothing going on; an enemy bumping into it
 	// is felt)
+	// (Loner-Strike: when it walked into the area it's in: the first couple of seconds there it
+	// looks ahead, not back - SetLookAt, LsScanAngles)
+	// (only somewhere really new: an area that wasn't in sight from the last one, through a
+	// doorway or round a corner; the next bit of the same room or corridor isn't)
+	if (m_lastKnownArea != m_lsScanInArea)
+	{
+		if (!m_lsScanInArea || !LsSightReady() || !LsSees(m_lsScanInArea, m_lastKnownArea))
+			m_lsScanInAt = gpGlobals->time;
+		m_lsScanInArea = m_lastKnownArea;
+	}
 	LsWallSanity();
 	LsBumpCheck();
 	LsCrouchWalk();
