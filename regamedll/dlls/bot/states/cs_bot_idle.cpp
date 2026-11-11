@@ -465,6 +465,11 @@ void IdleState::OnUpdate(CCSBot *me)
 						me->Hide(area, RANDOM_FLOAT(15.0f, 40.0f), 600.0f);
 						me->SetDisposition(CCSBot::OPPORTUNITY_FIRE);
 						me->LsWhy("hold-site");
+						// (Loner-Strike: an enemy seen a moment ago close by: it goes, but backing
+						// off with its eyes on them - not its back turned to someone it just fought)
+						if (LsFight() && me->GetEnemy() && me->GetTimeSinceLastSawEnemy() < 6.0f
+							&& (me->GetLastKnownEnemyPosition() - me->pev->origin).IsLengthLessThan(1800.0f))
+							me->LsFallBack();
 						return;
 					}
 				}

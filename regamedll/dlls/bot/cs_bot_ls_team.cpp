@@ -560,6 +560,10 @@ void CCSBot::LsTeamTick()
 				if (!empty && LsRecentDeathNear(m_iTeam, pBox->pev->origin, 400.0f, 15.0f)
 					&& RANDOM_FLOAT(0.0f, 1.0f) < Q_min(0.95f, (0.3f + 0.65f * LsSkill()) * (1.0f - 0.4f * LsAggro())))
 					continue;
+				// (and nobody walks out to a gun that dropped seconds ago: whoever got that kill is
+				// still looking at it - only with no bullets left)
+				if (!empty && LsRecentDeathNear(m_iTeam, pBox->pev->origin, 400.0f, 6.0f))
+					continue;
 				// (one a living player dropped, a gift or a swap of their own, isn't fair game)
 				CBaseEntity *pOwner = pBox->pev->owner ? CBaseEntity::Instance(pBox->pev->owner) : nullptr;
 				if (pOwner && pOwner->IsPlayer() && pOwner->IsAlive())
