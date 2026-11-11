@@ -1210,9 +1210,8 @@ public:
 	float LsFallMargin();						// how close to dying from a drop it'll go (pros never close)
 	EntityHandle<CBasePlayer> m_lsMatchupEnemy;	// the enemy whose matchup it weighed (once a fight)
 	float m_lsMatchupAt = 0.0f;
-	float m_lsEdgeSlipAt = -999.0f;
-	float m_lsDuckUntil = 0.0f;				// down behind low cover until, and when it last did
-	float m_lsDuckAt = -999.0f;			// a newer player backing off an edge it didn't see (rare)
+	float m_lsDuckUntil = 0.0f;				// down behind low cover until, and when it may again
+	float m_lsDuckAt = -999.0f;
 	bool LsRunnerGlance();						// mid-fight, a turn to someone heard running at it
 	EntityHandle<CBasePlayer> m_lsRunner;		// ...who, where, until when, and when it last did
 	Vector m_lsRunnerSpot;

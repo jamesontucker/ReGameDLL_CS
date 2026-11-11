@@ -1580,9 +1580,13 @@ bool CCSBot::LsMayBackOff(const Vector &toEnemy)
 		return true;
 	// (a newer player in a fight, now and then, backs off an edge it didn't see: rare, a few
 	// times a long session at most)
-	if (LsSkill() < 0.3f && !LsMatch() && LsTrait(74) < 0.35f && gpGlobals->time - m_lsEdgeSlipAt > 600.0f && RANDOM_FLOAT(0.0f, 1.0f) < 0.05f)
+	// (once every 8 minutes at most on the whole server, whoever it is)
+	static float s_edgeSlipAt = -999.0f;
+	if (gpGlobals->time < s_edgeSlipAt)
+		s_edgeSlipAt = -999.0f;	// (a new map: the clock restarted)
+	if (LsSkill() < 0.3f && !LsMatch() && LsTrait(74) < 0.35f && gpGlobals->time - s_edgeSlipAt > 480.0f && RANDOM_FLOAT(0.0f, 1.0f) < 0.05f)
 	{
-		m_lsEdgeSlipAt = gpGlobals->time;
+		s_edgeSlipAt = gpGlobals->time;
 		LsWhy("backed off an edge");
 		return true;
 	}
@@ -2011,7 +2015,8 @@ void CCSBot::LsShotAt(CBasePlayer *pShooter, const Vector &impact)
 	{
 		CBasePlayerWeapon *pGun = static_cast<CBasePlayerWeapon *>(pShooter->m_pActiveItem);
 		bool sniper = pGun && (pGun->m_iId == WEAPON_AWP || pGun->m_iId == WEAPON_SCOUT || pGun->m_iId == WEAPON_G3SG1 || pGun->m_iId == WEAPON_SG550);
-		float odds = (0.1f + 0.75f * LsSkill() + (sniper ? 0.2f : 0.0f)) * (LsTeamGame() ? 1.0f : 0.5f) * (LsStyle() == LS_STYLE_RUSHER ? 0.6f : 1.0f);
+		// (never every time: good players sometimes swing straight back to trade)
+		float odds = Q_min(0.75f, 0.1f + 0.65f * LsSkill() + (sniper ? 0.15f : 0.0f)) * (LsTeamGame() ? 1.0f : 0.5f) * (LsStyle() == LS_STYLE_RUSHER ? 0.6f : 1.0f);
 		if (RANDOM_FLOAT(0.0f, 1.0f) < odds && LsTakeCoverFrom(m_lsShotFrom, 64.0f))
 		{
 			if (sniper && m_lastKnownArea)
@@ -2402,8 +2407,12 @@ void CCSBot::LsHeard(GameEventType event, CBasePlayer *pPlayer, float dist)
 		if (vel.Length2D() > 180.0f && vel.x * toMe.x + vel.y * toMe.y > 0.0f && RANDOM_FLOAT(0.0f, 1.0f) < 0.1f + 0.85f * skill
 			&& !IsVisible(pPlayer, true))
 		{
+			// (only if the runner gets there first, or the one in front isn't looking its way;
+			// never turning away from one nearly dead in front of it)
 			CBasePlayer *pEnemy = GetEnemy();
-			if (!(pEnemy && IsEnemyVisible() && pEnemy->pev->health < 30.0f && skill > 0.5f))
+			bool fighting = pEnemy && IsEnemyVisible();
+			bool first = !fighting || dist < float((pEnemy->pev->origin - pev->origin).Length()) || !IsPlayerLookingAtMe(pEnemy);
+			if (first && !(fighting && pEnemy->pev->health < 30.0f && skill > 0.5f))
 			{
 				m_lsRunner = pPlayer;
 				m_lsRunnerSpot = pPlayer->pev->origin + Vector(0, 0, HalfHumanHeight);
@@ -4394,9 +4403,10 @@ bool CCSBot::LsMatchup(CBasePlayer *pEnemy)
 	}
 	else if (m_lsDuckUntil > 0.0f)
 		Crouch();
-	else if (GetTimeSinceAttacked() < 0.3f && now - m_lsDuckAt > 2.0f && !IsReloading() && pEnemy->IsAlive())
+	else if (GetTimeSinceAttacked() < 0.3f && now > m_lsDuckAt && !IsReloading() && pEnemy->IsAlive())
 	{
-		m_lsDuckAt = now;
+		// (not like clockwork: a while before the next, and sometimes it just stays up)
+		m_lsDuckAt = now + RANDOM_FLOAT(2.5f, 4.0f);
 		int kind = LsMapKind();
 		bool aim = kind == LSMAP_AIM || kind == LSMAP_FY || kind == LSMAP_AWP;
 		float odds = aim ? 0.3f + 0.5f * LsSkill() : 0.4f * LsSkill();
