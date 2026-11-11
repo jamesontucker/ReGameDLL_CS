@@ -877,6 +877,7 @@ private:
 	EntityHandle<CBaseEntity> m_lsBreak;	// something breakable in its way it's breaking, and until when
 	float m_lsBreakUntil = 0.0f;
 	float m_lsBreakStartAt = 0.0f;			// starts breaking it then (a newer player takes a moment)
+	int m_lsSafeMap = 0;				// the map its safe time was set for
 	float m_lsDoorBackUntil = 0.0f;		// stepping back out of a door's swing
 	void LsForceBadArea(const CNavArea *area, float secs);	// Loner-Strike: avoid an area for a while (a door it can't open)
 	bool m_lsCrouchWalking = false;
@@ -887,6 +888,8 @@ private:
 	float m_lsScanAt[4] = {};
 	int m_lsScanNextSlot = 0;
 	float m_lsScanNext = 0.0f;
+	const CNavArea *m_lsScanInArea = nullptr;	// the area it last walked into, and when
+	float m_lsScanInAt = 0.0f;
 	float m_lsBumpAt = 0.0f;			// noticed a bump; reacts at this time
 	int m_lsBumpBy = 0;
 	float m_lsBumpCheckAt = 0.0f;
@@ -1563,6 +1566,8 @@ bool LsExposureReady();
 enum { LSMAP_OBJECTIVE, LSMAP_AIM, LSMAP_FY, LSMAP_AWP, LSMAP_KNIFE, LSMAP_OTHER };
 int LsMapKind();
 const Vector *LsEnemySpawn(int team);	// the middle of the other team's spawn (null if none)
+int LsMapSerial();						// changes when the map does
+float LsMapSafeTime();					// how long the round's early "safe" part lasts on this map
 void LsExposurePoint(const CNavArea *area, int point, Vector *out);	// one of 9 across it (the outer ones by its edges), on the floor
 bool LsMatch();
 bool LsSolo();

@@ -3506,6 +3506,7 @@ namespace
 {
 char s_kindMap[64] = {};
 int s_kind = LSMAP_OBJECTIVE;
+int s_mapSerial = 0;
 Vector s_spawn[2];
 bool s_hasSpawn[2] = {};
 
@@ -3514,6 +3515,7 @@ void LsMapKindUpdate()
 	if (!gpGlobals->mapname || Q_strcmp(s_kindMap, STRING(gpGlobals->mapname)) == 0)
 		return;
 	Q_strlcpy(s_kindMap, STRING(gpGlobals->mapname));
+	s_mapSerial++;
 	auto starts = [](const char *prefix) { return Q_strnicmp(s_kindMap, prefix, Q_strlen(prefix)) == 0; };
 	if (starts("aim_") || starts("35hp_") || starts("1v1") || starts("aim-"))
 		s_kind = LSMAP_AIM;
@@ -3588,12 +3590,20 @@ bool CCSBot::LsScanAngles(bool holding)
 	}
 	bool dm = !LsTeamGame();
 	const Vector *enemyHome = dm ? nullptr : LsEnemySpawn(m_iTeam);
+	// (just walked into this area: what's ahead is unchecked)
+	if (m_lastKnownArea != m_lsScanInArea)
+	{
+		m_lsScanInArea = m_lastKnownArea;
+		m_lsScanInAt = now;
+	}
+	bool fresh = now - m_lsScanInAt < 2.0f;
 	Vector eye = GetEyePosition();
 	float heading = pev->velocity.Length2D() > 60.0f ? UTIL_VecToYaw(pev->velocity) : pev->v_angle.y;
 	bool noiseFresh = IsNoiseHeard() && now - m_noiseTimestamp < 5.0f;
 	bool sawFresh = GetTimeSinceLastSawEnemy() < 10.0f;
 
 	float bestScore = -1.0f, scores[LS_KNOW_ANGLES];
+	bool behind[LS_KNOW_ANGLES] = {};
 	int bestA = -1;
 	Vector at[LS_KNOW_ANGLES];
 	for (int a = 0; a < k->angleCount; a++)
@@ -3612,10 +3622,12 @@ bool CCSBot::LsScanAngles(bool holding)
 		// (near something heard or seen lately)
 		if ((noiseFresh && (tc - m_noisePosition).IsLengthLessThan(600.0f)) || (sawFresh && (tc - GetLastKnownEnemyPosition()).IsLengthLessThan(600.0f)))
 			score *= 2.5f;
-		// (moving: mostly ahead; a careful player still checks behind now and then)
+		// (moving: ahead first, nobody walks backwards into somewhere unchecked; behind only
+		// once what's ahead is checked, and then just a quick look over the shoulder)
 		float off = float(Q_abs(NormalizeAngle(UTIL_VecToYaw(tc - pev->origin) - heading)));
-		if (!holding && off > 110.0f)
-			score *= (style == LS_STYLE_CAREFUL || style == LS_STYLE_CAMPER) ? 0.6f : 0.3f;
+		behind[a] = !holding && off > 100.0f;
+		if (behind[a])
+			score *= fresh ? 0.03f : (style == LS_STYLE_CAREFUL || style == LS_STYLE_CAMPER) ? 0.4f : 0.2f;
 		// (checked a moment ago)
 		for (int r = 0; r < 4; r++)
 			if (m_lsScanArea[r] == an.area + 1 && now - m_lsScanAt[r] < 4.0f)
@@ -3642,22 +3654,42 @@ bool CCSBot::LsScanAngles(bool holding)
 	}
 	if (bestA < 0)
 		return false;
-	// a newer player's pick is looser: one of the top few, not always the best
+	// (an angle ahead not checked yet goes before any behind)
+	if (behind[bestA])
+	{
+		int ahead = -1;
+		for (int a = 0; a < k->angleCount; a++)
+			if (scores[a] >= 0.0f && !behind[a] && (ahead < 0 || scores[a] > scores[ahead]))
+				ahead = a;
+		bool aheadChecked = true;
+		if (ahead >= 0)
+		{
+			aheadChecked = false;
+			for (int r = 0; r < 4; r++)
+				if (m_lsScanArea[r] == k->angles[ahead].area + 1 && now - m_lsScanAt[r] < 4.0f)
+					aheadChecked = true;
+		}
+		if (ahead >= 0 && (!aheadChecked || fresh))
+			bestA = ahead;
+	}
+	// a newer player's pick is looser: one of the top few, not always the best (but not one
+	// behind it while walking in fresh)
 	if (RANDOM_FLOAT(0.0f, 1.0f) > 0.4f + 0.6f * skill)
 	{
 		int pick = RANDOM_LONG(0, k->angleCount - 1);
-		if (scores[pick] >= 0.0f)
+		if (scores[pick] >= 0.0f && !(fresh && behind[pick]))
 			bestA = pick;
 	}
 	Vector look = at[bestA];
 	LsLookableSpot(&look);
 	// how long on it: a good player a quick, sure check; careful ones and campers longer; holding
 	// a spot, longer still
-	float hold = RANDOM_FLOAT(0.5f, 1.0f) + 0.4f * (1.0f - skill);
+	// (moving: quick checks, a flick over the shoulder for one behind; holding: longer looks)
+	float hold = holding ? RANDOM_FLOAT(0.9f, 1.8f) + 0.5f * (1.0f - skill) : RANDOM_FLOAT(0.3f, 0.6f) + 0.3f * (1.0f - skill);
 	if (style == LS_STYLE_CAREFUL || style == LS_STYLE_CAMPER)
-		hold *= 1.3f;
-	if (holding)
-		hold *= 1.8f;
+		hold *= 1.25f;
+	if (!holding && behind[bestA])
+		hold = RANDOM_FLOAT(0.2f, 0.35f);
 	SetLookAt("Loner-Strike: angle", &look, PRIORITY_LOW, hold, true, 8.0f);
 	m_lsScanArea[m_lsScanNextSlot] = (unsigned short)(k->angles[bestA].area + 1);
 	m_lsScanAt[m_lsScanNextSlot] = now;
@@ -4067,4 +4099,25 @@ void CCSBot::LsDoorButton()
 	m_lsButton = pBest;
 	m_lsButtonUntil = now + 8.0f;
 	LsWhy("going to the door's button");
+}
+
+int LsMapSerial()
+{
+	LsMapKindUpdate();
+	return s_mapSerial;
+}
+
+// The "safe" early part of the round (knife out, no worries) on this map: until a couple of
+// seconds before the two teams could first meet (half the way between the spawns, running), and
+// none on maps where the fight starts at once. Stock had 15-20 s on every map: still knife-running
+// when de_dust2's mid fights start
+float LsMapSafeTime()
+{
+	int kind = LsMapKind();
+	if (kind == LSMAP_AIM || kind == LSMAP_FY || kind == LSMAP_AWP || kind == LSMAP_KNIFE)
+		return 0.0f;
+	const Vector *ct = LsEnemySpawn(TERRORIST), *t = LsEnemySpawn(CT);
+	if (!ct || !t)
+		return 20.0f;
+	return Q_max(0.0f, float((*ct - *t).Length2D()) * 0.5f / 250.0f - 2.0f);
 }

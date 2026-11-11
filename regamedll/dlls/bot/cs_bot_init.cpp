@@ -185,6 +185,17 @@ void CCSBot::ResetValues()
 	m_lsCrouchWalking = false;
 	m_lsCrouchWalkNext = 0.0f;
 	m_lsScanNext = 0.0f;
+	// (the safe early part of the round fits the map: a new map starts from the stock guess,
+	// cut to before the teams could first meet; what it learns lower stays)
+	if (LsFight())
+	{
+		if (m_lsSafeMap != LsMapSerial())
+		{
+			m_lsSafeMap = LsMapSerial();
+			m_safeTime = 15.0f + 5.0f * GetProfile()->GetAggression();
+		}
+		m_safeTime = Q_min(m_safeTime, LsMapSafeTime());
+	}
 	m_lsButton = nullptr;
 	m_lsButtonUntil = 0.0f;
 	m_lsButtonBehind = nullptr;
