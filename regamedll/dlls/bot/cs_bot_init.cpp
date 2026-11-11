@@ -204,6 +204,7 @@ void CCSBot::ResetValues()
 	m_lsMatchupAt = 0.0f;
 	m_lsDuckUntil = 0.0f;
 	m_lsDuckAt = -999.0f;
+	m_lsReloadCrouchAt = 0.0f;
 	m_lsRunnerUntil = 0.0f;
 	m_lsRunnerAt = 0.0f;
 	m_lsSniperHeard = nullptr;

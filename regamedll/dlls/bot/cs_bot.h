@@ -1212,6 +1212,7 @@ public:
 	float m_lsMatchupAt = 0.0f;
 	float m_lsDuckUntil = 0.0f;				// down behind low cover until, and when it may again
 	float m_lsDuckAt = -999.0f;
+	float m_lsReloadCrouchAt = 0.0f;			// whether to crouch for this reload was decided (until then)
 	bool LsRunnerGlance();						// mid-fight, a turn to someone heard running at it
 	EntityHandle<CBasePlayer> m_lsRunner;		// ...who, where, until when, and when it last did
 	Vector m_lsRunnerSpot;

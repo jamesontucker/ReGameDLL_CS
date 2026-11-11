@@ -4309,12 +4309,19 @@ bool CCSBot::LsTakeCoverFrom(const Vector &threat, float minMove, bool fromFight
 	if (fromFight)
 	{
 		StopAttacking();
-		IgnoreEnemies(LsTeamGame() ? 1.5f : 0.8f);
+		IgnoreEnemies(LsTeamGame() ? 0.8f : 0.5f);
 	}
 	StandUp();
 	Run();
-	// (a short hold there, then on: back out by another way, the spot it left avoided)
-	Hide(&spot, RANDOM_FLOAT(1.5f, 4.0f));
+	// (a short hold there, then on: back out by another way, the spot it left avoided; the
+	// better ones are quicker back out, careful ones and campers wait longer, rushers least)
+	float hold = RANDOM_FLOAT(1.0f, 2.5f) + 1.5f * (1.0f - LsSkill());
+	int style = LsStyle();
+	if (style == LS_STYLE_CAREFUL || style == LS_STYLE_CAMPER)
+		hold *= 1.3f;
+	else if (style == LS_STYLE_RUSHER)
+		hold *= 0.6f;
+	Hide(&spot, hold);
 	LsFallBack();
 	LsWhy("to cover");
 	return true;
@@ -4429,8 +4436,14 @@ bool CCSBot::LsMatchup(CBasePlayer *pEnemy)
 		m_lsPushUntil = now + RANDOM_FLOAT(1.0f, 1.8f);
 		LsWhy("pushing a flashed one");
 	}
-	if (IsReloading() && skill > 0.4f && LsLowCoverToward(pEnemy->pev->origin))
-		Crouch();
+	// (most of the time, more often the better it is: not every reload like a script; decided
+	// once per reload)
+	if (IsReloading() && skill > 0.4f && now > m_lsReloadCrouchAt)
+	{
+		m_lsReloadCrouchAt = now + 3.0f;
+		if (RANDOM_FLOAT(0.0f, 1.0f) < 0.45f + 0.5f * skill && LsLowCoverToward(pEnemy->pev->origin))
+			Crouch();
+	}
 
 	CBasePlayer *pDone = m_lsMatchupEnemy;
 	if (pDone == pEnemy)
