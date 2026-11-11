@@ -2695,7 +2695,7 @@ double LsNowMs()
 }
 
 const unsigned int LSV_MAGIC = 0x3256534C;	// "LSV2"
-const unsigned int LSV_VERSION = 5;
+const unsigned int LSV_VERSION = 6;	// (6: sky brushes block sight - inferno's rooftops)
 const float LSV_RANGE = 3500.0f;			// farther than this counts as not in sight
 const float LSV_BANG_RANGE = 1000.0f;		// wallbang spots looked for this close
 const double LSV_BUDGET_MS = 0.4;			// per frame
@@ -2762,6 +2762,59 @@ unsigned int LsNavKey()
 	return h;
 }
 
+// A line through sky: traces go straight through sky brushes, but people see the sky there - a
+// wall. Some maps cap rooftops and gaps with them (inferno: two lines in three over its roofs),
+// so a "clear" trace through one isn't seen through. Checked every few units along the line
+bool LsCrossesSky(const Vector &from, const Vector &to, float step)
+{
+	Vector d = to - from;
+	float len = float(d.Length());
+	if (len < step * 2.0f)
+		return false;
+	int steps = int(len / step);
+	for (int i = 1; i < steps; i++)
+	{
+		Vector p = from + d * (float(i) / float(steps));
+		if (POINT_CONTENTS(p) == CONTENTS_SKY)
+			return true;
+	}
+	return false;
+}
+
+// Whether this map has sky brushes inside the playing space (between places people stand): one
+// look per map at a few hundred lines between nav areas; most maps don't, and then the bots'
+// sight checks skip the sky test
+bool LsSkyInPlay()
+{
+	static int s_serial = -1;
+	static bool s_sky = false;
+	if (s_serial == LsMapSerial())
+		return s_sky;
+	s_serial = LsMapSerial();
+	s_sky = false;
+	int n = (int)TheNavAreaList.size();
+	if (n < 2 || TheCSBots()->IsLearningMap())
+	{
+		s_serial = -1;	// (no nav yet: looked at again once there is one)
+		return false;
+	}
+	std::vector<CNavArea *> list(TheNavAreaList.begin(), TheNavAreaList.end());
+	unsigned int seed = 12345u;
+	auto next = [&seed]() { seed = seed * 1103515245u + 12345u; return (seed >> 8) & 0xffffff; };
+	for (int t = 0; t < 400 && !s_sky; t++)
+	{
+		const CNavArea *a = list[next() % n], *b = list[next() % n];
+		Vector ea = *a->GetCenter() + Vector(0, 0, 64.0f), eb = *b->GetCenter() + Vector(0, 0, 64.0f);
+		if ((ea - eb).IsLengthGreaterThan(3000.0f) || (ea - eb).IsLengthLessThan(300.0f))
+			continue;
+		TraceResult tr;
+		UTIL_TraceLine(ea, eb, ignore_monsters, ignore_glass, nullptr, &tr);
+		if (tr.flFraction >= 1.0f && LsCrossesSky(ea, eb, 48.0f))
+			s_sky = true;
+	}
+	return s_sky;
+}
+
 bool SeeThrough(edict_t *hit)
 {
 	CBaseEntity *pHit = hit ? CBaseEntity::Instance(hit) : nullptr;
@@ -2780,13 +2833,13 @@ bool Clear(const Vector &from, const Vector &to)
 		UTIL_TraceLine(start, to, ignore_monsters, ignore_glass, skip, &tr);
 		s_know.traces++;
 		if (tr.flFraction >= 1.0f)
-			return true;
+			return !LsCrossesSky(from, to, 48.0f);
 		if (tr.fStartSolid || !SeeThrough(tr.pHit))
 			return false;
 		start = tr.vecEndPos;
 		skip = tr.pHit;
 	}
-	return true;
+	return !LsCrossesSky(from, to, 48.0f);
 }
 
 // How far it is to something solid that way (a door or window counts: it's in the way now)

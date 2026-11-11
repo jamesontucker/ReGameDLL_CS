@@ -393,6 +393,11 @@ bool CCSBot::IsVisible(const Vector *pos, bool testFOV) const
 	if (result.flFraction != 1.0f)
 		return false;
 
+	// Loner-Strike: traces pass through sky brushes, eyes don't (inferno's rooftops): on a map
+	// with sky between places, a line through it isn't seen through
+	if (LsFight() && LsSkyInPlay() && LsCrossesSky(GetEyePosition(), *pos, 64.0f))
+		return false;
+
 	return true;
 }
 
