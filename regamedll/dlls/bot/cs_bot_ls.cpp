@@ -3507,6 +3507,30 @@ bool LsHeadroom(const CNavArea *area)
 	return c != CONTENTS_SOLID && c != CONTENTS_SKY;
 }
 
+// How lit a spot is, from the map's own lighting: a hidden point entity moved there and the
+// engine asked for its light (as it works out a player's). 128 if it can't tell
+int LsLightAt(const Vector &pos)
+{
+	static EntityHandle<CBaseEntity> s_probe;
+	CBaseEntity *pProbe = s_probe;
+	if (!pProbe)
+	{
+		edict_t *e = CREATE_NAMED_ENTITY(MAKE_STRING("info_target"));
+		if (FNullEnt(e))
+			return 128;
+		pProbe = CBaseEntity::Instance(e);
+		if (!pProbe)
+			return 128;
+		pProbe->pev->effects |= EF_NODRAW;
+		pProbe->pev->solid = SOLID_NOT;
+		pProbe->pev->movetype = MOVETYPE_NONE;
+		pProbe->pev->classname = MAKE_STRING("ls_light_probe");
+		s_probe = pProbe;
+	}
+	UTIL_SetOrigin(pProbe->pev, pos + Vector(0, 0, 36.0f));
+	return GETENTITYILLUM(pProbe->edict());
+}
+
 // Whether this map has sky brushes inside the playing space (between places people stand): one
 // look per map at a few hundred lines between nav areas; most maps don't, and then the bots'
 // sight checks skip the sky test

@@ -1252,7 +1252,9 @@ public:
 	float m_lsSmokeLaneAt = 0.0f;
 	float m_lsHePlanAt = 0.0f;						// Gun Game's grenade level: next time it works out an arc
 	float m_lsExecCheckAt = 0.0f;
-	float m_lsJiggleJumpUntil = 0.0f;				// mid jump-peek (in the air: still the jiggle)					// a smoke for the AWP lane it just got out of, thrown from cover then
+	float m_lsJiggleJumpUntil = 0.0f;
+	int m_lsRetakeRound = -1;						// the round it picked its way into a retake
+	void LsRetakeApproach();				// mid jump-peek (in the air: still the jiggle)					// a smoke for the AWP lane it just got out of, thrown from cover then
 	Vector m_lsSmokeLaneSpot;
 	void LsSmokeLaneTick();
 	void LsFlashWatch();							// a flashbang about to pop in front of it: turn away (the better ones)
@@ -1667,7 +1669,8 @@ int LsMapSerial();						// changes when the map does
 float LsMapSafeTime();
 bool LsCrossesSky(const Vector &from, const Vector &to, float step);	// a line through sky brushes (traces pass, eyes don't)
 bool LsSkyInPlay();
-bool LsHeadroom(const CNavArea *area);	// room to stand there (not a nav area wedged under sky or a ceiling)						// this map has sky brushes between places people stand
+bool LsHeadroom(const CNavArea *area);
+int LsLightAt(const Vector &pos);			// how lit a spot is (0 dark - 255), from the map's lighting	// room to stand there (not a nav area wedged under sky or a ceiling)						// this map has sky brushes between places people stand
 int LsMapLean();						// +1 a long map (rifles, AWPs), -1 a close one (SMGs, shotguns), 0 neither or unknown					// how long the round's early "safe" part lasts on this map
 void LsExposurePoint(const CNavArea *area, int point, Vector *out);	// one of 9 across it (the outer ones by its edges), on the floor
 bool LsMatch();

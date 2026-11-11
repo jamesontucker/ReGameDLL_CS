@@ -59,6 +59,11 @@ void CCSBot::LsTeamTick()
 		}
 	}
 
+	// a retake: the CTs don't all come in the same way - each, once a round, takes a way in from
+	// a side the others aren't coming from (the defuser goes straight for it)
+	if (m_iTeam == CT && m_lsRetakeRound != round && TheCSBots()->IsBombPlanted() && GetGameState()->GetBombPosition())
+		LsRetakeApproach();
+
 	// a CT AWPer early in the round takes a perch over the site it's going to hold (once a
 	// round; a sniper who knows the map; not with an order on, nor in a fight)
 	if (m_iTeam == CT && m_lsPerchRound != round && LsGunClass(this) == LSG_SNIPER && !TheCSBots()->IsBombPlanted() && LsFree()
@@ -1457,4 +1462,69 @@ bool CCSBot::LsCutOffRescue(const Vector &hostage)
 	Hide(spot, RANDOM_FLOAT(20.0f, 35.0f), 500.0f);
 	LsWhy("cut off the rescue");
 	return true;
+}
+
+// The ways in to a retake taken this round (from which side of the bomb), so the next CT takes
+// another: an entry straight in, the rest from round the other sides - a crossfire on the Ts
+// holding it, not a queue through one door. Not the one going to defuse; the better players
+static int s_retakeRound = -1;
+static Vector2D s_retakeDirs[8];
+static int s_retakeCount = 0;
+
+void CCSBot::LsRetakeApproach()
+{
+	int round = LsRoundSerial();
+	if (!LsFree() || GetTask() == DEFUSE_BOMB || IsHiding() || LsSkill() < 0.35f || !LsRetakeRush())
+		return;
+	m_lsRetakeRound = round;
+	if (s_retakeRound != round)
+	{
+		s_retakeRound = round;
+		s_retakeCount = 0;
+	}
+	Vector bomb = *GetGameState()->GetBombPosition();
+	Vector2D mine = (pev->origin - bomb).Make2D();
+	if (mine.IsLengthLessThan(700.0f))
+		return;		// (close already: in it goes)
+	mine.NormalizeInPlace();
+	// (the first comes straight from where it is)
+	if (s_retakeCount == 0)
+	{
+		s_retakeDirs[s_retakeCount++] = mine;
+		return;
+	}
+	// a side at least 70 degrees off every way already taken, the nearest to its own
+	Vector best;
+	float bestScore = -1e9f;
+	bool found = false;
+	for (int k = 0; k < 12; k++)
+	{
+		float yaw = float(k) * 30.0f;
+		Vector2D dir(BotCOS(yaw), BotSIN(yaw));
+		bool clash = false;
+		for (int i = 0; i < s_retakeCount && !clash; i++)
+			clash = float(DotProduct(dir, s_retakeDirs[i])) > 0.34f;
+		if (clash)
+			continue;
+		Vector spot = bomb + Vector(dir.x, dir.y, 0.0f) * 550.0f;
+		CNavArea *area = TheNavAreaGrid.GetNearestNavArea(&spot);
+		if (!area || !LsHeadroom(area) || (*area->GetCenter() - spot).Make2D().IsLengthGreaterThan(250.0f))
+			continue;
+		float score = float(DotProduct(dir, mine));
+		if (score > bestScore)
+		{
+			bestScore = score;
+			best = *area->GetCenter();
+			found = true;
+			if (s_retakeCount < 8)
+				s_retakeDirs[s_retakeCount] = dir;
+		}
+	}
+	if (!found)
+		return;
+	if (s_retakeCount < 8)
+		s_retakeCount++;
+	MoveTo(&best, SAFEST_ROUTE);
+	Hurry(4.0f);
+	LsWhy("retake: another way in");
 }

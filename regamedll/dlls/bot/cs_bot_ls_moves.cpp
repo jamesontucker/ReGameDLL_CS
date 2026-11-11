@@ -445,6 +445,23 @@ const Vector *CCSBot::LsOffAngle(const Vector *stockPick, const Vector *pos, CNa
 	if (!offCount)
 		return stockPick;
 	LsWhy("off-angle");
+	// (a sneaky one, now and then, takes the darkest of them: a small part of it, only between
+	// spots that are already good angles)
+	int style = LsStyle();
+	if ((style == LS_STYLE_NINJA || style == LS_STYLE_LURKER || style == LS_STYLE_CAMPER) && offCount > 1 && RANDOM_FLOAT(0.0f, 1.0f) < 0.5f)
+	{
+		int dark = 0, least = 9999;
+		for (int i = 0; i < offCount && i < 12; i++)
+		{
+			int light = LsLightAt(*offAngle[i]);
+			if (light < least)
+			{
+				least = light;
+				dark = i;
+			}
+		}
+		return offAngle[dark];
+	}
 	return offAngle[RANDOM_LONG(0, offCount - 1)];
 }
 
@@ -707,6 +724,19 @@ bool CCSBot::LsLadderYaw(float faceYaw, float *yaw)
 // While climbing: the strafe that goes with the turn, once the view has come round
 void CCSBot::LsLadderClimb()
 {
+	// near the top with enemies about: eyes up on where it comes out (the better ones), not on
+	// the rungs
+	if (m_pathLadder && LsSkill() > 0.4f && LsLadderExposed())
+	{
+		const Vector &top = m_pathLadder->m_top;
+		if (top.z > pev->origin.z && top.z - pev->origin.z < 120.0f)
+		{
+			NavDirType out = m_pathLadderFaceIn ? OppositeDirection(m_pathLadder->m_dir) : m_pathLadder->m_dir;
+			float yaw = DirectionToAngle(out);
+			Vector exit = top + Vector(BotCOS(yaw) * 80.0f, BotSIN(yaw) * 80.0f, HalfHumanHeight);
+			SetLookAt("Loner-Strike: ladder top", &exit, PRIORITY_MEDIUM, 0.4f);
+		}
+	}
 	if (!LsLadderSide())
 		return;
 	NavDirType faceDir = m_pathLadderFaceIn ? OppositeDirection(m_pathLadder->m_dir) : m_pathLadder->m_dir;
