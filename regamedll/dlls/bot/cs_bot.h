@@ -1253,7 +1253,7 @@ public:
 	float m_lsHePlanAt = 0.0f;						// Gun Game's grenade level: next time it works out an arc
 	float m_lsExecCheckAt = 0.0f;
 	float m_lsJiggleJumpUntil = 0.0f;
-	int m_lsRetakeRound = -1;						// the round it picked its way into a retake
+	int m_lsRetakeWayRound = -1;					// the round it picked its way into a retake
 	void LsRetakeApproach();				// mid jump-peek (in the air: still the jiggle)					// a smoke for the AWP lane it just got out of, thrown from cover then
 	Vector m_lsSmokeLaneSpot;
 	void LsSmokeLaneTick();

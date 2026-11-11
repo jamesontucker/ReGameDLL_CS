@@ -223,7 +223,7 @@ void CCSBot::ResetValues()
 	m_lsHePlanAt = 0.0f;
 	m_lsExecCheckAt = 0.0f;
 	m_lsJiggleJumpUntil = 0.0f;
-	m_lsRetakeRound = -1;
+	m_lsRetakeWayRound = -1;
 	// (a respawn that doesn't go through RoundRespawn: no order or plugin marks carried over)
 	if (LsFight())
 	{

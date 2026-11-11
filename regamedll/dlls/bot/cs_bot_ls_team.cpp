@@ -61,7 +61,7 @@ void CCSBot::LsTeamTick()
 
 	// a retake: the CTs don't all come in the same way - each, once a round, takes a way in from
 	// a side the others aren't coming from (the defuser goes straight for it)
-	if (m_iTeam == CT && m_lsRetakeRound != round && TheCSBots()->IsBombPlanted() && GetGameState()->GetBombPosition())
+	if (m_iTeam == CT && m_lsRetakeWayRound != round && TheCSBots()->IsBombPlanted() && GetGameState()->GetBombPosition())
 		LsRetakeApproach();
 
 	// a CT AWPer early in the round takes a perch over the site it's going to hold (once a
@@ -1476,7 +1476,14 @@ void CCSBot::LsRetakeApproach()
 	int round = LsRoundSerial();
 	if (!LsFree() || GetTask() == DEFUSE_BOMB || IsHiding() || LsSkill() < 0.35f || !LsRetakeRush())
 		return;
-	m_lsRetakeRound = round;
+	// (after the wait for teammates a lone CT may do first - LsTeamTick - not instead of it)
+	{
+		float d = float((*GetGameState()->GetBombPosition() - pev->origin).Length());
+		bool mayWait = GetFriendsRemaining() > 0 && GetNearbyFriendCount() == 0 && TheCSBots()->GetBombTimeLeft() > 22.0f && d > 800.0f && d < 2200.0f;
+		if (mayWait && m_lsRetakeRound != round)
+			return;
+	}
+	m_lsRetakeWayRound = round;
 	if (s_retakeRound != round)
 	{
 		s_retakeRound = round;
