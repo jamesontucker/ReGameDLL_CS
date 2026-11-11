@@ -365,14 +365,15 @@ void CCSBot::LsTeamTick()
 		}
 	}
 	else if (!TheCSBots()->IsRoundOver() && now >= m_lsSwapCheckAt && !IsAttacking() && !LsOrderActive() && !IsCarryingBomb() && LsFree()
-		&& !CSGameRules()->IsFreezePeriod() && !LsWeaponModeOn() && !TheCSBots()->IsBombPlanted() && GetHostageEscortCount() == 0
-		&& GetTask() != DEFUSE_BOMB && GetTask() != COLLECT_HOSTAGES && GetTask() != RESCUE_HOSTAGES && GetTimeSinceLastSawEnemy() > 8.0f)
+		&& !CSGameRules()->IsFreezePeriod() && !LsWeaponModeOn() && (!TheCSBots()->IsBombPlanted() || LsOutOfAmmo()) && GetHostageEscortCount() == 0
+		&& GetTask() != DEFUSE_BOMB && GetTask() != COLLECT_HOSTAGES && GetTask() != RESCUE_HOSTAGES && (GetTimeSinceLastSawEnemy() > 8.0f || (LsOutOfAmmo() && GetTimeSinceLastSawEnemy() > 1.5f)))
 	{
-		m_lsSwapCheckAt = now + 2.0f;
+		m_lsSwapCheckAt = now + (LsOutOfAmmo() ? 0.5f : 2.0f);
+		bool empty = LsOutOfAmmo();
 		CBasePlayerItem *pPrimary = m_rgpPlayerItems[PRIMARY_WEAPON_SLOT];
 		// (a newer player often doesn't think of it: as if it had no eye for the better gun)
 		bool lsNotices = RANDOM_FLOAT(0.0f, 1.0f) < 0.35f + 0.65f * LsSkill();
-		bool poor = lsNotices && (!pPrimary || pPrimary->m_iId == WEAPON_MP5N || pPrimary->m_iId == WEAPON_TMP || pPrimary->m_iId == WEAPON_MAC10 || pPrimary->m_iId == WEAPON_UMP45
+		bool poor = empty || lsNotices && (!pPrimary || pPrimary->m_iId == WEAPON_MP5N || pPrimary->m_iId == WEAPON_TMP || pPrimary->m_iId == WEAPON_MAC10 || pPrimary->m_iId == WEAPON_UMP45
 			|| pPrimary->m_iId == WEAPON_P90 || pPrimary->m_iId == WEAPON_M3 || pPrimary->m_iId == WEAPON_XM1014);
 		if (poor)
 		{
@@ -381,9 +382,10 @@ void CCSBot::LsTeamTick()
 			CBaseEntity *pBox = nullptr;
 			while ((pBox = UTIL_FindEntityByClassname(pBox, "weaponbox")))
 			{
-				if ((pBox->pev->origin - pev->origin).IsLengthGreaterThan(450.0f))
+				// (out of bullets: any gun at all, and from further off)
+				if ((pBox->pev->origin - pev->origin).IsLengthGreaterThan(empty ? 900.0f : 450.0f))
 					continue;
-				bool good = false;
+				bool good = empty;
 				for (const char *g : better)
 					good = good || FStrEq(STRING(pBox->pev->model), g);
 				if (!good || !FVisible(pBox->pev->origin + Vector(0, 0, 8)))

@@ -208,6 +208,20 @@ void AttackState::OnUpdate(CCSBot *me)
 		m_haveSeenEnemy = me->IsEnemyVisible();
 
 	// Loner-Strike: the wrong gun for this range, a flashed enemy to push, low cover to reload behind
+	// Loner-Strike: out of bullets, the knife all it has left: not a charge at someone shooting
+	// it - away to cover (and a gun off the floor), unless they're right there
+	if (LsFight() && me->LsOutOfAmmo() && (pEnemy->pev->origin - me->pev->origin).IsLengthGreaterThan(300.0f))
+	{
+		if (me->LsTakeCoverFrom(pEnemy->pev->origin, 0.0f, true))
+		{
+			me->LsWhy("out of ammo: to cover");
+			return;
+		}
+		StopAttacking(me);
+		me->TryToRetreat();
+		me->LsWhy("out of ammo: away");
+		return;
+	}
 	if (LsFight() && me->LsMatchup(pEnemy, m_crouchAndHold))
 		return;
 

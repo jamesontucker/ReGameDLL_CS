@@ -1260,7 +1260,10 @@ public:
 	float m_lsBangChestAt = 0.0f;
 	bool m_lsBangChest = false;
 	void LsTraceAttack();
-	bool LsKnifeDanger();							// a reason to have the gun out now, knife run or not
+	bool LsKnifeDanger();
+	// out of bullets: it has a gun, but every one is empty (not a knife-only mode, where the
+	// knife is the point)
+	bool LsOutOfAmmo() const { return (m_rgpPlayerItems[PRIMARY_WEAPON_SLOT] || m_rgpPlayerItems[PISTOL_SLOT]) && IsPrimaryWeaponEmpty() && IsPistolEmpty(); }							// a reason to have the gun out now, knife run or not
 	bool LsAboutToEnter();							// right at a doorway or corner into somewhere it can't see yet
 	Vector m_lsRecent[8];							// where it's been lately (every few seconds), so hunting doesn't circle back
 	int m_lsRecentNext = 0;

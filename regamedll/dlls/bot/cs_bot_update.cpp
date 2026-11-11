@@ -507,7 +507,9 @@ void CCSBot::Update()
 			// isn't closing its eyes: someone close, or aiming at it, gets shot at)
 			bool lsBreakIgnore = LsFight() && !m_ignoreEnemiesTimer.IsElapsed() && m_disposition != IGNORE_ENEMIES
 				&& ((pev->origin - threat->pev->origin).IsLengthLessThan(600.0f) || IsPlayerLookingAtMe(threat));
-			switch (lsBreakIgnore ? m_disposition : GetDisposition())
+			// (out of bullets: only someone right on top of it is a fight)
+			bool lsEmpty = LsFight() && LsOutOfAmmo() && (pev->origin - threat->pev->origin).IsLengthGreaterThan(300.0f);
+			switch (lsEmpty ? IGNORE_ENEMIES : lsBreakIgnore ? m_disposition : GetDisposition())
 			{
 			case IGNORE_ENEMIES:
 			{
@@ -565,7 +567,7 @@ void CCSBot::Update()
 		}
 
 		// if we aren't attacking but we are being attacked, retaliate
-		if (GetDisposition() != IGNORE_ENEMIES && !IsAttacking())
+		if (GetDisposition() != IGNORE_ENEMIES && !IsAttacking() && !(LsFight() && LsOutOfAmmo() && (pev->origin - threat->pev->origin).IsLengthGreaterThan(300.0f)))
 		{
 			const float recentAttackDuration = 1.0f;
 			if (GetTimeSinceAttacked() < recentAttackDuration)
