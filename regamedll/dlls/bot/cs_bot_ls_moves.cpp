@@ -231,6 +231,26 @@ bool CCSBot::LsCornerMoves(Vector *goal)
 			m_lsCornerPlan = LS_CORNER_JIGGLE;
 			m_lsJumpPeek = true;
 		}
+		// (any sensitive corner - past it somewhere the enemy can have got to by now, not a
+		// safe stretch: a good player jumps past the edge and back to see who's holding it,
+		// then goes in pre-aimed or waits; veterans, careful ones and lurkers fairly often, a
+		// pub player now and then, newbies hardly ever - not for a rusher at a run)
+		else if (LsFight() && !IsSafe() && !IsAttacking() && now >= m_lsNextJiggle && !LsRushing())
+		{
+			CNavArea *pastArea = TheNavAreaGrid.GetNearestNavArea(&past);
+			if (pastArea && LsTimingWeight(pastArea) >= 0.9f)
+			{
+				int style = LsStyle();
+				float lean = (style == LS_STYLE_CAREFUL || style == LS_STYLE_LURKER || style == LS_STYLE_NINJA) ? 1.4f
+					: (style == LS_STYLE_RUSHER || style == LS_STYLE_KNIFER) ? 0.4f : 1.0f;
+				float odds = Q_max(0.02f, LsSkill() - 0.25f) * 0.45f * lean * (1.0f - 0.4f * LsAggro());
+				if (RANDOM_FLOAT(0.0f, 1.0f) < odds)
+				{
+					m_lsCornerPlan = LS_CORNER_JIGGLE;
+					m_lsJumpPeek = true;
+				}
+			}
+		}
 		m_lsCornerShift = Vector2D(0, 0);
 		m_lsCornerBlind = false;
 		if (m_lsCornerPlan == LS_CORNER_WIDE || m_lsCornerPlan == LS_CORNER_OUTSIDE)

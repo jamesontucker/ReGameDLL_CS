@@ -512,6 +512,31 @@ void CCSBot::SetLookAt(const char *desc, const Vector *pos, PriorityType pri, fl
 	if (m_lookAtSpotState != NOT_LOOKING_AT_SPOT && m_lookAtSpotPriority > pri)
 		return;
 
+	// Loner-Strike: no looking up at nothing. A spot well above eye level is only worth it
+	// where someone could actually stand up there - a ledge, a window, a balcony: below the
+	// spot there's floor within about a player's height. Out in the open (long A, the sky over
+	// a courtyard) the look comes down to head height on the same line. Enemies and grenades
+	// in the air aren't touched: only looks around (low and medium priority)
+	Vector lsLevelled;
+	if (LsFight() && pri <= PRIORITY_MEDIUM)
+	{
+		Vector eye = pev->origin + pev->view_ofs;
+		Vector to = *pos - eye;
+		float across = float(to.Length2D());
+		if (to.z > 48.0f && to.z > 0.35f * across)
+		{
+			TraceResult tr;
+			UTIL_TraceLine(*pos, *pos - Vector(0, 0, 110.0f), ignore_monsters, ENT(pev), &tr);
+			bool ledge = tr.flFraction < 1.0f && !tr.fAllSolid && !tr.fStartSolid;
+			if (!ledge)
+			{
+				lsLevelled = *pos;
+				lsLevelled.z = eye.z + Q_min(to.z, 0.1f * across);
+				pos = &lsLevelled;
+			}
+		}
+	}
+
 	// if already looking at this spot, just extend the time
 	const float tolerance = 10.0f;
 	if (m_lookAtSpotState != NOT_LOOKING_AT_SPOT && VectorsAreEqual(pos, &m_lookAtSpot, tolerance))
@@ -1302,8 +1327,18 @@ CBasePlayer *CCSBot::FindMostDangerousThreat()
 			// update watch timestamp
 			int idx = pPlayer->entindex() - 1;
 			// (Loner-Strike trace: first in view after a few seconds without them)
+			// (and the eyes go to what caught them: someone noticed at the edge of the view, with
+			// the eyes on a noise elsewhere, kept slipping out of view and the reaction started
+			// over - a person looks straight at the movement)
 			if (LsFight() && (m_watchInfo[idx].timestamp <= 0.0f || gpGlobals->time - m_watchInfo[idx].timestamp > 3.0f))
+			{
 				LsTraceSeen(pPlayer);
+				if (!IsAttacking() && pPlayer != currentThreat)
+				{
+					Vector at = pPlayer->pev->origin + Vector(0, 0, HalfHumanHeight);
+					SetLookAt("Loner-Strike: caught the eye", &at, PRIORITY_HIGH, 0.6f);
+				}
+			}
 			m_watchInfo[idx].timestamp = gpGlobals->time;
 			m_watchInfo[idx].isEnemy = true;
 

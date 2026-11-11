@@ -64,6 +64,8 @@ cvar_t cv_bot_ls_solo       = { "bot_ls_solo", "1", FCVAR_SERVER, 0.0f, nullptr 
 cvar_t cv_bot_ls_fight      = { "bot_ls_fight", "1", FCVAR_SERVER, 0.0f, nullptr };
 cvar_t cv_bot_ls_match      = { "bot_ls_match", "0", FCVAR_SERVER, 0.0f, nullptr };
 cvar_t cv_bot_ls_trace      = { "bot_ls_trace", "0", FCVAR_SERVER, 0.0f, nullptr };
+// (each bomb site's real letter from the nav's place names, for plugins: "a x y b x y")
+cvar_t cv_ls_sites          = { "ls_sites", "", 0, 0.0f, nullptr };
 const char LS_PEEK[] = "Loner-Strike: peek";
 
 void Bot_LsRegisterCVars()
@@ -76,6 +78,49 @@ void Bot_LsRegisterCVars()
 	CVAR_REGISTER(&cv_bot_ls_fight);
 	CVAR_REGISTER(&cv_bot_ls_match);
 	CVAR_REGISTER(&cv_bot_ls_trace);
+	CVAR_REGISTER(&cv_ls_sites);
+}
+
+// The bomb sites' letters as the nav names them (BombsiteA / BombsiteB), published once per
+// nav for the plugins: on 1.6 there's no radar place message, so the chat plugin couldn't
+// learn which site is which and fell back to the map's entity order - backwards on dust2
+// ("ok B", then planting A)
+void LsPublishSites()
+{
+	static int s_doneFor = -1;
+	if (s_doneFor == g_lsNavLoads || !TheCSBots() || TheNavAreaList.empty())
+		return;
+	s_doneFor = g_lsNavLoads;
+	char out[128] = "";
+	for (int z = 0; z < TheCSBots()->GetZoneCount() && z < 4; z++)
+	{
+		const CCSBotManager::Zone *zone = TheCSBots()->GetZone(z);
+		if (!zone)
+			continue;
+		// (the letter most of the site's areas are named with)
+		int votes[3] = {};
+		for (auto area : TheNavAreaList)
+		{
+			if ((*area->GetCenter() - zone->m_center).Make2D().IsLengthGreaterThan(450.0f))
+				continue;
+			const char *name = TheNavAreaGrid.IDToName(area->GetPlace());
+			if (!name || Q_strnicmp(name, "Bombsite", 8) || !name[8] || name[9])
+				continue;
+			int c = (name[8] | 0x20) - 'a';
+			if (c >= 0 && c < 3)
+				votes[c]++;
+		}
+		int best = -1;
+		for (int c = 0; c < 3; c++)
+			if (votes[c] > 0 && (best < 0 || votes[c] > votes[best]))
+				best = c;
+		if (best < 0)
+			continue;
+		char one[40];
+		Q_snprintf(one, sizeof(one), "%s%c %.0f %.0f", out[0] ? " " : "", 'a' + best, zone->m_center.x, zone->m_center.y);
+		Q_strlcat(out, one);
+	}
+	CVAR_SET_STRING("ls_sites", out);
 }
 
 // An organised match (bot_ls_match, set by match mode)
@@ -2023,7 +2068,7 @@ static FILE *LsTraceFile()
 		s_file = fopen("lstrace.csv", "a");
 		if (!s_file)
 			return nullptr;
-		fprintf(s_file, "#cols,time,id,team,state,task,enemy,leader,goal_x,goal_y,noise_x,noise_y,why,why_ago,speed,view_off,attacking,look,x,y,z,hp,weapon,crouched\n");
+		fprintf(s_file, "#cols,time,id,team,state,task,enemy,leader,goal_x,goal_y,noise_x,noise_y,why,why_ago,speed,view_off,attacking,look,x,y,z,hp,weapon,crouched,pitch\n");
 		fprintf(s_file, "#cols_why,time,id,team,x,y,z,why\n");
 		fprintf(s_file, "#cols_attack,time,id,team,enemy,since_first_saw,range\n");
 		fprintf(s_file, "#cols_seen,time,id,team,enemy,range\n");
@@ -2109,13 +2154,13 @@ void CCSBot::LsTrace()
 	float off = speed > 1.0f ? NormalizeAngle(pev->v_angle.y - UTIL_VecToYaw(pev->velocity)) : 0.0f;
 	const char *look = (m_lookAtSpotState != NOT_LOOKING_AT_SPOT && m_lookAtDesc) ? m_lookAtDesc : "-";
 	CBasePlayerItem *pItem = m_pActiveItem;
-	fprintf(s_file, "%.2f,%d,%d,%s,%d,%d,%d,%.0f,%.0f,%.0f,%.0f,%s,%.1f,%.0f,%.0f,%d,%s,%.0f,%.0f,%.0f,%.0f,%d,%d\n",
+	fprintf(s_file, "%.2f,%d,%d,%s,%d,%d,%d,%.0f,%.0f,%.0f,%.0f,%s,%.1f,%.0f,%.0f,%d,%s,%.0f,%.0f,%.0f,%.0f,%d,%d,%.0f\n",
 		gpGlobals->time, entindex(), m_iTeam, m_state ? m_state->GetName() : "-", int(GetTask()),
 		pEnemy ? pEnemy->entindex() : 0, pLeader ? pLeader->entindex() : 0,
 		goal.x, goal.y, noise ? noise->x : 0.0f, noise ? noise->y : 0.0f,
 		m_lsWhy, m_lsWhy[0] ? gpGlobals->time - m_lsWhyAt : 0.0f,
 		speed, off, IsAttacking() ? 1 : 0, look,
-		pev->origin.x, pev->origin.y, pev->origin.z, pev->health, pItem ? pItem->m_iId : 0, (pev->flags & FL_DUCKING) ? 1 : 0);
+		pev->origin.x, pev->origin.y, pev->origin.z, pev->health, pItem ? pItem->m_iId : 0, (pev->flags & FL_DUCKING) ? 1 : 0, pev->v_angle.x);
 	fflush(s_file);
 }
 
@@ -2667,11 +2712,16 @@ void CCSBot::LsHeard(GameEventType event, CBasePlayer *pPlayer, float dist)
 	float dz = float(pPlayer->pev->origin.z - pev->origin.z);
 	if (dz > 120.0f || dz < -120.0f)
 	{
-		// (toward where it came from, tipped 20-35 degrees up or down, not at the ceiling or the floor)
+		// (toward where it came from: up there or down there as heard, roughly - the level they're
+		// on, at head height, never more than about 25 degrees off level unless they really are
+		// that steeply above; not a fixed tip that stared at the sky outdoors)
 		Vector flat = pPlayer->pev->origin - pev->origin;
 		flat.z = 0.0f;
+		float across = float(flat.Length2D());
 		flat = flat.IsZero() ? Vector(BotCOS(pev->v_angle.y), BotSIN(pev->v_angle.y), 0.0f) : flat.Normalize();
-		Vector glance = pev->origin + pev->view_ofs + 200.0f * flat + Vector(0, 0, (dz > 0.0f ? 1.0f : -1.0f) * RANDOM_FLOAT(75.0f, 140.0f));
+		float reach = Q_max(200.0f, Q_min(across, 600.0f));
+		float rise = Q_max(-0.47f * reach, Q_min(0.47f * reach, dz * (reach / Q_max(across, 1.0f))));
+		Vector glance = pev->origin + pev->view_ofs + reach * flat + Vector(0, 0, rise);
 		if (now - m_lsPreAimAt > 3.0f)
 		{
 			SetLookAt("Loner-Strike: listening", &glance, PRIORITY_LOW, RANDOM_FLOAT(0.6f, 1.2f));
@@ -4112,6 +4162,16 @@ bool CCSBot::LsScanAngles(bool holding)
 			continue;
 		const Vector &tc = *target->GetCenter();
 		at[a] = Vector(tc.x, tc.y, tc.z + HalfHumanHeight + LsLookHeight());
+		// (the angles were worked out for the area as a whole; from where the bot actually is, a
+		// big area's angle can be behind the wall right beside it - a check that way would be a
+		// stare at bare wall: only angles it can actually see down from here)
+		{
+			TraceResult tr;
+			UTIL_TraceLine(eye, at[a], ignore_monsters, ENT(pev), &tr);
+			float len = float((at[a] - eye).Length());
+			if (tr.flFraction < 1.0f && tr.flFraction * len < Q_min(300.0f, 0.6f * len))
+				continue;
+		}
 		float score = 1.0f + float(an.weight);
 		// (the enemy's side of the map first)
 		if (enemyHome)
@@ -5819,6 +5879,7 @@ void CCSBot::LsTold(const Vector &at)
 // 4 running from the bomb, 8 a plugin hold on, 16 hiding
 void CCSBot::LsPublishState()
 {
+	LsPublishSites();
 	int flags = 0;
 	if (LsFight())
 	{
