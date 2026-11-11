@@ -211,6 +211,16 @@ void CCSBot::ResetValues()
 	m_lsTempoAt = -999.0f;
 	m_lsImpactAt = -999.0f;
 	m_lsHurtPushAt = -999.0f;
+	m_lsCoverStay = false;
+	m_lsPushArrived = false;
+	m_lsPushGoAt = 0.0f;
+	m_lsForTimeAt = -999.0f;
+	m_lsSniperShotAt = -999.0f;
+	m_lsPlantHeardAt = -999.0f;
+	m_lsCoverPeekUntil = 0.0f;
+	m_lsCoverPeekUp = false;
+	m_lsAimMapAt = 0.0f;
+	pev->vuser1.y = 0.0f;
 	m_lsFlashCheckAt = 0.0f;
 	m_lsFlashAwayUntil = 0.0f;
 	m_lsJumpPeek = false;

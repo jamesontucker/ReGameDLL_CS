@@ -87,8 +87,23 @@ bool LsMatch()
 // to it: people spread out to hold a place, they don't stand shoulder to shoulder
 bool LsSpotCrowded(CBaseEntity *me, const Vector *pos)
 {
+	if (!LsFight() || !me || !me->IsPlayer())
+		return false;
+	// (a crawlspace - vents, a low tunnel - is a way through, not a place to hold: out, but for
+	// the odd newer player who doesn't know better)
+	{
+		Vector p = *pos;
+		CNavArea *area = TheNavAreaGrid.GetNavArea(&p);
+		const LsAreaKnow *k = area ? LsKnow(area) : nullptr;
+		if ((k && k->ceiling * 4 < 70) || (area && (area->GetAttributes() & NAV_CROUCH)))
+		{
+			CCSBot *bot = static_cast<CBasePlayer *>(me)->IsBot() ? static_cast<CCSBot *>(me) : nullptr;
+			if (!bot || !(bot->LsSkill() < 0.25f && bot->LsTrait(76) < 0.1f))
+				return true;
+		}
+	}
 	// (free-for-all: nobody's a teammate)
-	if (!LsFight() || !me || !me->IsPlayer() || (CSGameRules() && CSGameRules()->IsFreeForAll()))
+	if (CSGameRules() && CSGameRules()->IsFreeForAll())
 		return false;
 	// (a disciplined team spreads wider: different angles onto the same way in, a crossfire)
 	const float apart = LsMatch() ? 320.0f : 220.0f;
@@ -136,7 +151,8 @@ bool CCSBot::LsTeamGame() const
 // (the bomb, hostages, guarding the plant), not saving its gun, not under a plugin's control
 bool CCSBot::LsFree() const
 {
-	return !IsAttacking() && !IsBusy() && !IsCarryingBomb() && !m_lsSaving && !LsPuppetActive() && !LsOrderActive() && !IsDefusingBomb()
+	return !IsAttacking() && !IsBusy() && !IsCarryingBomb() && !m_lsSaving && !LsPuppetActive() && !LsOrderActive() && !IsDefusingBomb() && !m_bIsVIP
+		&& GetTask() != VIP_ESCAPE && GetTask() != GUARD_VIP_ESCAPE_ZONE
 		&& !IsEscapingFromBomb() && GetHostageEscortCount() == 0 && !m_isWaitingToTossGrenade
 		&& GetTask() != GUARD_TICKING_BOMB && !IsUsingLadder() && m_state != &m_plantBombState && m_state != &m_defuseBombState;
 }
@@ -763,7 +779,7 @@ void CCSBot::LsPuppetUpdate()
 	// (and nothing holds it on a ladder or blinded)
 	// (a person's order: following them, or a chat hold, only gives way to what an order does)
 	bool order = gpGlobals->time < p.followUntil || FStrEq(p.holdTag, "bc");
-	bool urgent = p.urgent && gpGlobals->time < p.lookUntil;
+	bool urgent = p.urgent && gpGlobals->time < p.lookUntil && !IsDefusingBomb() && m_state != &m_plantBombState;
 	// (a person's "wait" doesn't keep it standing while it's being hit)
 	if (FStrEq(p.holdTag, "bc") && gpGlobals->time < p.holdUntil && (GetTimeSinceAttacked() < 1.0f || IsSurprised()))
 	{
@@ -1803,7 +1819,7 @@ void CCSBot::LsSneak()
 	// (a ninja or lurker CT walks in to a planted bomb while there's time for it)
 	bool quietRetake = m_iTeam == CT && TheCSBots() && TheCSBots()->IsBombPlanted() && (LsStyle() == LS_STYLE_NINJA || LsStyle() == LS_STYLE_LURKER)
 		&& TheCSBots()->GetBombTimeLeft() > 15.0f + (m_bHasDefuser ? 5.0f : 10.0f);
-	bool loud = IsHurrying() || GetTimeSinceAttacked() < 5.0f || GetTimeSinceLastSawEnemy() < 6.0f || IsSafe()
+	bool loud = IsHurrying() || LsRushing() || GetTimeSinceAttacked() < 5.0f || GetTimeSinceLastSawEnemy() < 6.0f || IsSafe()
 		|| (TheCSBots() && TheCSBots()->IsBombPlanted() && !quietRetake) || (IsCarryingBomb() && !sneakyCarrier) || GetHostageEscortCount() > 0;
 
 	bool want = false;
@@ -2465,6 +2481,8 @@ void CCSBot::LsHeard(GameEventType event, CBasePlayer *pPlayer, float dist)
 			m_lsSniperHeard = pPlayer;
 			m_lsSniperSpot = pPlayer->pev->origin + Vector(RANDOM_FLOAT(-err, err), RANDOM_FLOAT(-err, err), 0.0f);
 			m_lsSniperHeardAt = now;
+			if (pShot->m_iId == WEAPON_AWP || pShot->m_iId == WEAPON_SCOUT)
+				m_lsSniperShotAt = now;
 		}
 	}
 	// (a plugin's hold or look gives way to an enemy heard close by)
@@ -2493,8 +2511,9 @@ void CCSBot::LsHeard(GameEventType event, CBasePlayer *pPlayer, float dist)
 		CBasePlayerWeapon *pGun = static_cast<CBasePlayerWeapon *>(pPlayer->m_pActiveItem);
 		if (pGun && (pGun->m_iId == WEAPON_AWP || pGun->m_iId == WEAPON_SCOUT || pGun->m_iId == WEAPON_G3SG1 || pGun->m_iId == WEAPON_SG550))
 		{
+			float err = dist * 0.12f;
 			m_lsSniperHeard = pPlayer;
-			m_lsSniperSpot = pPlayer->pev->origin;
+			m_lsSniperSpot = pPlayer->pev->origin + Vector(RANDOM_FLOAT(-err, err), RANDOM_FLOAT(-err, err), 0.0f);
 			m_lsSniperHeardAt = now;
 		}
 		return;
@@ -2515,7 +2534,9 @@ void CCSBot::LsHeard(GameEventType event, CBasePlayer *pPlayer, float dist)
 			CBasePlayer *pEnemy = GetEnemy();
 			bool fighting = pEnemy && IsEnemyVisible();
 			bool first = !fighting || dist < float((pEnemy->pev->origin - pev->origin).Length()) || !IsPlayerLookingAtMe(pEnemy);
-			if (first && !(fighting && pEnemy->pev->health < 30.0f && skill > 0.5f))
+			float knownHp = 100.0f;
+			bool nearlyDead = fighting && LsKnownHurt(pEnemy, m_iTeam, &knownHp) && knownHp < 30.0f;
+			if (first && !(nearlyDead && skill > 0.5f))
 			{
 				m_lsRunner = pPlayer;
 				m_lsRunnerSpot = pPlayer->pev->origin + Vector(0, 0, HalfHumanHeight);
@@ -3984,8 +4005,13 @@ bool CCSBot::LsScanAngles(bool holding)
 			CBasePlayer *mate = UTIL_PlayerByIndex(m);
 			if (!mate || mate == this || !mate->IsAlive() || BotRelationship(mate) != BOT_TEAMMATE || (mate->pev->origin - pev->origin).IsLengthGreaterThan(1200.0f))
 				continue;
-			float toYaw = UTIL_VecToYaw(tc - mate->pev->origin);
-			if (Q_abs(NormalizeAngle(toYaw - mate->pev->v_angle.y)) < 25.0f)
+			// (the radar shows where they are, not where they look: one holding still where it
+			// can see that spot is taken to be watching it)
+			if (mate->pev->velocity.Length2D() > 60.0f)
+				continue;
+			Vector mp = mate->pev->origin;
+			CNavArea *mateArea = mate->IsBot() ? static_cast<CCSBot *>(mate)->GetLastKnownArea() : TheNavAreaGrid.GetNearestNavArea(&mp);
+			if (mateArea && LsSees(mateArea, target))
 				covered = true;
 		}
 		if (covered)
@@ -4200,7 +4226,7 @@ void CCSBot::LsCrouchWalk()
 			StandUp();
 		}
 	};
-	if (!LsFight() || LsSolo() || !LsExposureReady() || IsAttacking() || IsHurrying() || IsNotMoving() || IsSafe() || GetTimeSinceLastSawEnemy() < 3.0f
+	if (!LsFight() || LsSolo() || !LsExposureReady() || IsAttacking() || IsHurrying() || LsRushing() || IsNotMoving() || IsSafe() || GetTimeSinceLastSawEnemy() < 3.0f
 		|| TheCSBots()->IsBombPlanted() || IsCarryingBomb() || IsUsingLadder() || !m_lastKnownArea || LsStyle() == LS_STYLE_RUSHER || !LsKnows(LSK_EXPOSURE))
 	{
 		stop();
@@ -4298,7 +4324,7 @@ static float s_breakTriedAt[MAX_EDICTS];
 
 void CCSBot::LsDoorButton()
 {
-	if (!LsFight() || !IsAlive() || IsAttacking() || IsUsingLadder())
+	if (!LsFight() || !IsAlive() || IsAttacking() || IsUsingLadder() || LsPuppetActive())
 		return;
 	float now = gpGlobals->time;
 	auto giveUp = [&]() {
@@ -4504,7 +4530,9 @@ void CCSBot::LsDoorButton()
 	// a door opened by something else (it has a name): the button wired to it, close by
 	if (FStringNull(pHit->pev->targetname))
 	{
-		m_lsButtonBehind = nullptr;
+		// (no button for it anywhere: locked, or opened by the map - another way round)
+		giveUp();
+		LsWhy("door won't open: another way");
 		return;
 	}
 	const char *name = STRING(pHit->pev->targetname);
@@ -4726,6 +4754,7 @@ bool CCSBot::LsTakeCoverFrom(const Vector &threat, float minMove, bool fromFight
 	}
 	if (!best)
 		return false;
+	m_lsCoverStay = best == m_lastKnownArea;
 	Vector spot = *best->GetCenter();
 	// (on the way there it doesn't stop to fight - until it's hit, which ends that at once)
 	float travel = float((spot - pev->origin).Length2D()) / 230.0f;
@@ -4756,6 +4785,9 @@ bool CCSBot::LsTakeCoverFrom(const Vector &threat, float minMove, bool fromFight
 	travel *= 1.4f;
 	Hurry(travel + 0.5f);
 	Hide(&spot, hold + travel);
+	// (on the way it shoots what it meets but doesn't go off after noises - the shot that sent
+	// it there is one)
+	SetDisposition(OPPORTUNITY_FIRE);
 	LsFallBack();
 	m_lsBackFrom = threat + Vector(0, 0, HalfHumanHeight + LsLookHeight());
 	LsWhy("to cover");
@@ -4908,11 +4940,26 @@ bool CCSBot::LsMatchup(CBasePlayer *pEnemy, bool crouchAndHold)
 	m_lsMatchupEnemy = pEnemy;
 	int mine = LsGunClass(this), theirs = LsGunClass(pEnemy);
 	bool bad = false;
+	// (an AWPer that just fired: the bolt's coming back - the better ones swing on it)
+	CBasePlayer *pHeardSniper = m_lsSniperHeard;
+	if (theirs == LSG_SNIPER && pHeardSniper == pEnemy && now - m_lsSniperShotAt < 1.2f && skill > 0.5f && mine != LSG_SNIPER)
+	{
+		m_lsMatchupEnemy = nullptr;	// (weighed again after)
+		m_lsPushUntil = now + RANDOM_FLOAT(0.6f, 1.0f);
+		LsWhy("swinging on the bolt");
+		return false;
+	}
 	if (theirs == LSG_SNIPER && mine != LSG_SNIPER && range > 900.0f && IsPlayerLookingAtMe(pEnemy))
+		bad = true;
+	// (a shotgun up close beats a rifle: get some distance)
+	if (theirs == LSG_SHOTGUN && (mine == LSG_RIFLE || mine == LSG_SNIPER) && range < 300.0f)
 		bad = true;
 	bool farGun = theirs == LSG_RIFLE || theirs == LSG_SNIPER || theirs == LSG_MG;
 	if (farGun && ((mine == LSG_SMG && range > 1300.0f) || (mine == LSG_SHOTGUN && range > 800.0f) || (mine == LSG_PISTOL && range > 1100.0f)))
 		bad = true;
+	// (an eco pistol up close against a rifle: that's the fight it wanted - an ambush - no backing off)
+	if (mine == LSG_PISTOL && farGun && range < 700.0f)
+		bad = false;
 	// (hurt as far as it knows: called out, or its own hits)
 	if (!bad || LsKnownHurt(pEnemy, m_iTeam) || skill < 0.35f)
 		return false;
@@ -5006,7 +5053,7 @@ bool CCSBot::LsRunnerGlance()
 bool CCSBot::LsRushed(const Vector *threat)
 {
 	float now = gpGlobals->time;
-	if (!LsFight() || LsSolo() || now < m_lsRushCheckAt || now - m_lsRushedAt < 6.0f || IsUsingLadder() || IsBlind())
+	if (!LsFight() || LsSolo() || now < m_lsRushCheckAt || now - m_lsRushedAt < 6.0f || IsUsingLadder() || IsBlind() || LsRushing())
 		return false;
 	m_lsRushCheckAt = now + 0.4f;
 	if (m_state == &m_plantBombState || m_state == &m_defuseBombState || IsEscapingFromBomb())
@@ -5060,9 +5107,25 @@ bool CCSBot::LsRushed(const Vector *threat)
 	float wait = Q_min(5.0f + 7.0f * skill, Q_max(1.5f, LsTimeLeft() - 25.0f));
 	if (LsStyle() == LS_STYLE_RUSHER)
 		wait *= 0.5f;
-	if (!LsTakeCoverFrom(from, 0.0f, IsAttacking(), wait))
+	// (nobody left to wait for: just out of their line)
+	bool team = GetFriendsRemaining() > 0;
+	// (already somewhere they can't see: it stays put, crouched if it was)
+	if (IsAtHidingSpot())
+	{
+		TraceResult tr;
+		UTIL_TraceLine(from + Vector(0, 0, 17.0f), GetEyePosition(), ignore_monsters, ignore_glass, ENT(pev), &tr);
+		if (tr.flFraction < 1.0f)
+		{
+			LsWhy("rushed: staying in cover");
+			return false;
+		}
+	}
+	if (!LsTakeCoverFrom(from, 0.0f, IsAttacking(), team ? wait : -1.0f))
 		return false;
-	m_lsRushHoldUntil = now + wait + 3.0f;
+	if (m_lsCoverStay)
+		here = nullptr;
+	if (team)
+		m_lsRushHoldUntil = now + wait + 3.0f;
 	if (here)
 		LsForceBadArea(here, 8.0f + 6.0f * skill);
 	GetChatter()->Scared();
@@ -5104,7 +5167,7 @@ void CCSBot::LsRushHoldTick()
 
 // A person's spots this map: where they stood when they killed a bot (a veteran expects them
 // there again). The last dozen
-struct LsHabit { Vector at; int map; };
+struct LsHabit { Vector at; int map; int who; };
 static LsHabit s_habits[12];
 static int s_habitNext = 0;
 
@@ -5112,8 +5175,13 @@ bool LsHabitNear(const Vector &at, float range)
 {
 	int map = LsMapSerial();
 	for (int i = 0; i < 12; i++)
-		if (s_habits[i].map == map && (s_habits[i].at - at).IsLengthLessThan(range))
+	{
+		if (s_habits[i].map != map || !(s_habits[i].at - at).IsLengthLessThan(range))
+			continue;
+		CBasePlayer *pWho = UTIL_PlayerByIndex(s_habits[i].who);
+		if (pWho && pWho->IsAlive() && !pWho->IsBot())
 			return true;
+	}
 	return false;
 }
 
@@ -5171,8 +5239,8 @@ void CCSBot::LsFeed(CBasePlayer *pVictim, CBasePlayer *pKiller)
 	m_lsFeedAt = gpGlobals->time;
 	m_lsFeedSniper = pKiller && pKiller != pVictim && BotRelationship(pKiller) == BOT_ENEMY && LsGunClass(pKiller) == LSG_SNIPER;
 	// (the teammate's last words: "1 low" - the killer's hurt)
-	if (pKiller && pKiller != pVictim && pKiller->IsAlive() && BotRelationship(pKiller) == BOT_ENEMY && pKiller->pev->health < 40.0f)
-		LsCallHurt(pKiller, m_iTeam, pKiller->pev->health);
+	if (pKiller && pKiller != pVictim && pVictim->IsBot() && pKiller->IsAlive() && BotRelationship(pKiller) == BOT_ENEMY && pKiller->pev->health < 40.0f)
+		LsCallHurt(pKiller, m_iTeam, pKiller->pev->health, pKiller->pev->origin);
 	// (killed by an AWP there: that lane's covered - the better ones keep off it a while)
 	if (m_lsFeedSniper && skill > 0.45f)
 	{
@@ -5193,6 +5261,7 @@ void CCSBot::LsNoteDeath(CBasePlayer *pKiller)
 	{
 		s_habits[s_habitNext].at = pKiller->pev->origin;
 		s_habits[s_habitNext].map = LsMapSerial();
+		s_habits[s_habitNext].who = pKiller->entindex();
 		s_habitNext = (s_habitNext + 1) % 12;
 	}
 }
@@ -5281,19 +5350,22 @@ Vector CCSBot::LsDefuseSpot(const Vector &bomb)
 static float s_hurtAt[2][MAX_CLIENTS + 1];
 static float s_hurtHp[2][MAX_CLIENTS + 1];
 static int s_hurtRound[2][MAX_CLIENTS + 1];
+static Vector s_hurtWhere[2][MAX_CLIENTS + 1];
 
-void LsCallHurt(CBasePlayer *pEnemy, int team, float hp)
+void LsCallHurt(CBasePlayer *pEnemy, int team, float hp, const Vector &where)
 {
 	int t = team == TERRORIST ? 0 : team == CT ? 1 : -1;
 	int i = pEnemy ? pEnemy->entindex() : 0;
 	if (t < 0 || i < 1 || i > MAX_CLIENTS)
 		return;
 	s_hurtAt[t][i] = gpGlobals->time;
-	s_hurtHp[t][i] = hp;
+	// (as a player calls it: "10", "20", ... - "1" under ten)
+	s_hurtHp[t][i] = hp < 10.0f ? 5.0f : float(int((hp + 9.0f) / 10.0f) * 10);
 	s_hurtRound[t][i] = LsRoundSerial();
+	s_hurtWhere[t][i] = where;
 }
 
-bool LsKnownHurt(CBasePlayer *pEnemy, int team, float *hp)
+bool LsKnownHurt(CBasePlayer *pEnemy, int team, float *hp, Vector *where, float *when)
 {
 	int t = team == TERRORIST ? 0 : team == CT ? 1 : -1;
 	int i = pEnemy ? pEnemy->entindex() : 0;
@@ -5302,6 +5374,10 @@ bool LsKnownHurt(CBasePlayer *pEnemy, int team, float *hp)
 		return false;
 	if (hp)
 		*hp = s_hurtHp[t][i];
+	if (where)
+		*where = s_hurtWhere[t][i];
+	if (when)
+		*when = s_hurtAt[t][i];
 	return true;
 }
 
@@ -5316,13 +5392,13 @@ void CCSBot::LsHurtCallTick()
 	for (int i = 1; i <= gpGlobals->maxClients; i++)
 	{
 		CBasePlayer *pEnemy = UTIL_PlayerByIndex(i);
-		float hp = 100.0f;
-		if (!pEnemy || !pEnemy->IsAlive() || !IsEnemy(pEnemy) || !LsKnownHurt(pEnemy, m_iTeam, &hp) || hp > 35.0f)
+		float hp = 100.0f, when = 0.0f;
+		Vector at;
+		if (!pEnemy || !pEnemy->IsAlive() || !IsEnemy(pEnemy) || !LsKnownHurt(pEnemy, m_iTeam, &hp, &at, &when) || hp > 35.0f)
 			continue;
-		int t = m_iTeam == TERRORIST ? 0 : 1;
-		if (now - s_hurtAt[t][i] > 6.0f)
+		if (now - when > 6.0f)
 			continue;
-		Vector at = pEnemy->pev->origin;	// (where the callout said: they were just hit there)
+		// (where the callout said: where they were hit, not where they are now)
 		float d = float((at - pev->origin).Length());
 		if (d > 1300.0f || d < 200.0f)
 			continue;
@@ -5496,6 +5572,8 @@ int LsMapLean()
 // something louder and fresher already
 void CCSBot::LsTold(const Vector &at)
 {
+	if (!LsFight() || LsMatch())
+		return;
 	Vector spot = at;
 	CNavArea *area = TheNavAreaGrid.GetNearestNavArea(&spot);
 	if (!area || (IsNoiseHeard() && GetNoisePriority() > PRIORITY_MEDIUM && gpGlobals->time - m_noiseTimestamp < 3.0f))
@@ -5504,4 +5582,101 @@ void CCSBot::LsTold(const Vector &at)
 	m_noiseArea = area;
 	m_noisePriority = PRIORITY_MEDIUM;
 	m_noiseTimestamp = gpGlobals->time;
+}
+
+// ---- state for the plugins, peeks over cover, aim maps ------------------------------------
+
+// What it's doing, for the plugins to respect (pev->vuser1.y, bits): 1 defusing, 2 planting,
+// 4 running from the bomb, 8 a plugin hold on, 16 hiding
+void CCSBot::LsPublishState()
+{
+	int flags = 0;
+	if (LsFight())
+	{
+		if (IsDefusingBomb())
+			flags |= 1;
+		if (m_state == &m_plantBombState)
+			flags |= 2;
+		if (IsEscapingFromBomb())
+			flags |= 4;
+		if (gpGlobals->time < m_lsPuppet.holdUntil)
+			flags |= 8;
+		if (IsHiding())
+			flags |= 16;
+	}
+	pev->vuser1.y = float(flags);
+}
+
+// Holding a spot behind low cover (stock hides crouched): now and then it comes up for a look
+// over it and goes back down - the better ones, more on aim maps. After the state machine (which
+// crouches it every frame there)
+void CCSBot::LsCoverPeekTick()
+{
+	float now = gpGlobals->time;
+	if (!LsFight() || !IsHiding() || !IsAtHidingSpot() || IsAttacking() || LsSkill() < 0.35f || LsPuppetActive())
+	{
+		m_lsCoverPeekUp = false;
+		return;
+	}
+	if (now >= m_lsCoverPeekUntil)
+	{
+		if (m_lsCoverPeekUp)
+		{
+			m_lsCoverPeekUp = false;
+			m_lsCoverPeekUntil = now + RANDOM_FLOAT(2.0f, 4.5f);
+		}
+		else
+		{
+			UTIL_MakeVectors(pev->v_angle);
+			Vector at = GetEyePosition() + gpGlobals->v_forward * 400.0f;
+			if (LsLowCoverToward(at))
+			{
+				m_lsCoverPeekUp = true;
+				m_lsCoverPeekUntil = now + RANDOM_FLOAT(0.7f, 1.4f);
+			}
+			else
+				m_lsCoverPeekUntil = now + 1.5f;
+		}
+	}
+	if (m_lsCoverPeekUp)
+		StandUp();
+}
+
+// aim_, fy_ and awp_ maps with teams: no rounds of rushing across - from cover to cover toward
+// them, a hold at each (a box to peek from), and a push only with an edge (ahead on numbers,
+// one called hurt); rushers hold least, careful players most. Nothing once it's near their spawn
+void CCSBot::LsAimMapTick()
+{
+	float now = gpGlobals->time;
+	int kind = LsMapKind();
+	if (!LsFight() || LsSolo() || now < m_lsAimMapAt || (kind != LSMAP_AIM && kind != LSMAP_FY && kind != LSMAP_AWP))
+		return;
+	m_lsAimMapAt = now + 1.0f;
+	if (CSGameRules()->IsFreezePeriod() || IsAttacking() || IsHiding() || !LsFree() || GetTimeSinceLastSawEnemy() < 2.0f || !m_lastKnownArea)
+		return;
+	const Vector *theirs = LsEnemySpawn(m_iTeam);
+	if (!theirs || (*theirs - pev->origin).IsLengthLessThan(500.0f))
+		return;
+	// (an edge: go)
+	float hp = 100.0f;
+	bool edge = LsTempo() >= 1.0f;
+	for (int i = 1; i <= gpGlobals->maxClients && !edge; i++)
+	{
+		CBasePlayer *p = UTIL_PlayerByIndex(i);
+		edge = p && p->IsAlive() && IsEnemy(p) && LsKnownHurt(p, m_iTeam, &hp) && hp < 50.0f;
+	}
+	if (edge && RANDOM_FLOAT(0.0f, 1.0f) < 0.5f + 0.4f * LsAggro())
+		return;
+	Vector dir = *theirs - pev->origin;
+	dir.z = 0.0f;
+	dir.NormalizeInPlace();
+	Vector ahead = pev->origin + dir * 350.0f;
+	const Vector *spot = FindNearbyHidingSpot(this, &ahead, m_lastKnownArea, 500.0f, false, true);
+	// (a spot that's forward, not back the way it came)
+	if (!spot || float((*theirs - *spot).Length2D()) > float((*theirs - pev->origin).Length2D()) - 120.0f)
+		return;
+	int style = LsStyle();
+	float hold = style == LS_STYLE_RUSHER ? RANDOM_FLOAT(1.5f, 3.0f) : (style == LS_STYLE_CAREFUL || style == LS_STYLE_CAMPER) ? RANDOM_FLOAT(6.0f, 10.0f) : RANDOM_FLOAT(3.5f, 7.0f);
+	Hide(spot, hold, true);
+	LsWhy("aim map: to the next cover");
 }

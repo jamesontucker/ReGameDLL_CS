@@ -1460,6 +1460,16 @@ CBasePlayer *CCSBot::FindMostDangerousThreat()
 				}
 				if (GetAttacker() == pThreat && GetTimeSinceAttacked() < 1.5f)
 					score *= 0.4f;
+				// (one called nearly dead: the quick kill - the ones who listen to callouts)
+				float lsHp = 100.0f;
+				if (LsSkill() > 0.35f && LsKnownHurt(pThreat, m_iTeam, &lsHp) && lsHp < 40.0f)
+					score *= 0.75f;
+				// (darkness, a little: someone still in the dark, far off and not shooting is
+				// noticed a moment later - a small part of it, never up close)
+				if (threat[t].range > 600.0f * 600.0f && pThreat->pev->light_level < 20 && pThreat->pev->velocity.Length2D() < 80.0f
+					&& !(GetAttacker() == pThreat && GetTimeSinceAttacked() < 3.0f) && pThreat != static_cast<CBasePlayer *>(m_enemy)
+					&& RANDOM_FLOAT(0.0f, 1.0f) < 0.4f - 0.2f * LsSkill())
+					continue;
 				if (pThreat == static_cast<CBasePlayer *>(m_enemy))
 					score *= 0.6f;
 				// an AWPer is the one to deal with first, more so one looking this way (the

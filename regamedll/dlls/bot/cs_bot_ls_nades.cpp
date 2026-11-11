@@ -1266,7 +1266,7 @@ bool CCSBot::LsBuyPistolRound()
 void CCSBot::LsPostPlantAware()
 {
 	if (m_iTeam != CT || !TheCSBots()->IsBombPlanted() || m_lsSaving || IsDefusingBomb() || IsAttacking() || !IsHiding()
-		|| LsWeaponMode() || LsOrderActive())
+		|| LsWeaponMode() || LsOrderActive() || !IsDoingScenario())
 	{
 		m_lsPlantHideSince = 0.0f;
 		return;

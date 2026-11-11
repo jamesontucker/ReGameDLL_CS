@@ -408,7 +408,7 @@ void IdleState::OnUpdate(CCSBot *me)
 			// cover, a while at a time, rather than roaming the map; the bold sometimes push, a
 			// rusher mostly)
 			if (LsFight() && me->LsTeamGame() && !TheCSBots()->IsBombPlanted() && !me->GetGameState()->IsLooseBombLocationKnown()
-				&& !me->LsShirksObjective() && TheCSBots()->GetZoneCount() > 0)
+				&& !me->LsShirksObjective() && TheCSBots()->GetZoneCount() > 0 && !me->LsOrderActive())
 			{
 				float push = me->LsStyle() == LS_STYLE_RUSHER ? 0.7f : 0.1f + 0.35f * me->LsAggro();
 				if (RANDOM_FLOAT(0.0f, 1.0f) > push)

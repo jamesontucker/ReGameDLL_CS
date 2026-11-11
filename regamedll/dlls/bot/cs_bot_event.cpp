@@ -82,17 +82,25 @@ void CCSBot::OnEvent(GameEventType event, CBaseEntity *pEntity, CBaseEntity *pOt
 
 	// Loner-Strike: one of its own team hit an enemy who's still up and hurt: "he's lit" (called
 	// by the shooter; once per hit for the whole team, from the first bot that hears it)
+	// (only a bot calls it - a person may not - and only a hit on someone it could see, not a
+	// wallbang it can't judge; the hp as a player would call it, to the nearest ten)
 	if (event == EVENT_PLAYER_TOOK_DAMAGE && pEntity && pEntity->IsPlayer() && pOther && pOther->IsPlayer() && pOther != this && LsFight()
-		&& static_cast<CBasePlayer *>(pOther)->m_iTeam == m_iTeam && IsEnemy(static_cast<CBasePlayer *>(pEntity)) && pEntity->IsAlive()
-		&& pEntity->pev->health < 60.0f)
-		LsCallHurt(static_cast<CBasePlayer *>(pEntity), m_iTeam, pEntity->pev->health);
+		&& static_cast<CBasePlayer *>(pOther)->IsBot() && static_cast<CBasePlayer *>(pOther)->m_iTeam == m_iTeam
+		&& IsEnemy(static_cast<CBasePlayer *>(pEntity)) && pEntity->IsAlive() && pEntity->pev->health < 60.0f
+		&& static_cast<CCSBot *>(pOther)->IsVisible(static_cast<CBasePlayer *>(pEntity), false))
+		LsCallHurt(static_cast<CBasePlayer *>(pEntity), m_iTeam, pEntity->pev->health, pEntity->pev->origin);
 
 	// Loner-Strike: hit: from someone it can't see, through a wall?
 	if (event == EVENT_PLAYER_TOOK_DAMAGE && pEntity == this && pOther && pOther->IsPlayer())
 	{
-		// (running to cover, enemies ignored: hit, it fights back)
+		// (running to cover, enemies ignored: hit, it fights back; hit where it's hiding, that
+		// spot isn't cover - avoided a while)
 		if (LsFight())
+		{
 			m_ignoreEnemiesTimer.Invalidate();
+			if (IsHiding() && IsAtHidingSpot() && m_lastKnownArea)
+				LsForceBadArea(m_lastKnownArea, 15.0f);
+		}
 		LsHurtBy(static_cast<CBasePlayer *>(pOther));
 	}
 
@@ -378,6 +386,11 @@ void CCSBot::OnEvent(GameEventType event, CBaseEntity *pEntity, CBaseEntity *pOt
 	// player_follows needs a player
 	if (!pPlayer)
 		return;
+
+	// Loner-Strike: a hostage calling out heard by a T: a CT's at the hostages
+	if (event == EVENT_HOSTAGE_CALLED_FOR_HELP && m_iTeam == TERRORIST && LsFight() && pEntity
+		&& (pEntity->pev->origin - pev->origin).IsLengthLessThan(1200.0f) && !IsAttacking())
+		LsTold(pEntity->pev->origin);
 
 	if (!LsShirksObjective() && event == EVENT_HOSTAGE_CALLED_FOR_HELP && m_iTeam == CT && IsHunting())
 	{

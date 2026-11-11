@@ -23,6 +23,42 @@ void CCSBot::LsTeamTick()
 		m_lsForTimeRoll = -1;
 	}
 
+	// a CT side well ahead on numbers, half a minute in, no plant: the bold go and find them
+	// (4 v 2: the clock's on the Ts, but so is the win)
+	if (m_iTeam == CT && m_lsTempoPushRound != round && !TheCSBots()->IsBombPlanted() && LsTempo() >= 2.0f && LsFree() && !IsHiding()
+		&& TheCSBots()->GetElapsedRoundTime() > 30.0f && TheCSBots()->GetScenario() == CCSBotManager::SCENARIO_DEFUSE_BOMB)
+	{
+		m_lsTempoPushRound = round;
+		if (LsSkill() > 0.3f && RANDOM_FLOAT(0.0f, 1.0f) < 0.3f + 0.5f * LsAggro())
+		{
+			Hunt();
+			LsWhy("ahead on numbers: hunting");
+		}
+	}
+	// a T starting to plant close by (the beeps of the keypad): heard - a CT goes for it
+	if (m_iTeam == CT && now - m_lsPlantHeardAt > 4.0f && !TheCSBots()->IsBombPlanted() && !IsAttacking())
+	{
+		for (int i = 1; i <= gpGlobals->maxClients; i++)
+		{
+			CBasePlayer *pT = UTIL_PlayerByIndex(i);
+			if (!pT || !pT->IsAlive() || pT->m_iTeam != TERRORIST || !pT->m_pActiveItem || pT->m_pActiveItem->m_iId != WEAPON_C4)
+				continue;
+			if (!static_cast<CC4 *>(pT->m_pActiveItem)->m_bStartedArming || (pT->pev->origin - pev->origin).IsLengthGreaterThan(1300.0f))
+				continue;
+			m_lsPlantHeardAt = now;
+			LsTold(pT->pev->origin);
+			if (LsFree() && RANDOM_FLOAT(0.0f, 1.0f) < 0.4f + 0.5f * LsSkill())
+			{
+				Vector at = pT->pev->origin;
+				Run();
+				Hurry(4.0f);
+				MoveTo(&at, FASTEST_ROUTE);
+				LsWhy("heard the plant");
+			}
+			break;
+		}
+	}
+
 	// a CT AWPer early in the round takes a perch over the site it's going to hold (once a
 	// round; a sniper who knows the map; not with an order on, nor in a fight)
 	if (m_iTeam == CT && m_lsPerchRound != round && LsGunClass(this) == LSG_SNIPER && !TheCSBots()->IsBombPlanted() && LsFree()
@@ -327,8 +363,10 @@ void CCSBot::LsTeamTick()
 	{
 		m_lsSwapCheckAt = now + 2.0f;
 		CBasePlayerItem *pPrimary = m_rgpPlayerItems[PRIMARY_WEAPON_SLOT];
-		bool poor = !pPrimary || pPrimary->m_iId == WEAPON_MP5N || pPrimary->m_iId == WEAPON_TMP || pPrimary->m_iId == WEAPON_MAC10 || pPrimary->m_iId == WEAPON_UMP45
-			|| pPrimary->m_iId == WEAPON_P90 || pPrimary->m_iId == WEAPON_M3 || pPrimary->m_iId == WEAPON_XM1014;
+		// (a newer player often doesn't think of it: as if it had no eye for the better gun)
+		bool lsNotices = RANDOM_FLOAT(0.0f, 1.0f) < 0.35f + 0.65f * LsSkill();
+		bool poor = lsNotices && (!pPrimary || pPrimary->m_iId == WEAPON_MP5N || pPrimary->m_iId == WEAPON_TMP || pPrimary->m_iId == WEAPON_MAC10 || pPrimary->m_iId == WEAPON_UMP45
+			|| pPrimary->m_iId == WEAPON_P90 || pPrimary->m_iId == WEAPON_M3 || pPrimary->m_iId == WEAPON_XM1014);
 		if (poor)
 		{
 			static const char *const better[] = { "models/w_ak47.mdl", "models/w_m4a1.mdl", "models/w_awp.mdl", "models/w_sg552.mdl", "models/w_aug.mdl",
@@ -597,6 +635,8 @@ void CCSBot::LsExecuteGo(const CCSBotManager::Zone *site)
 	{
 		m_lsRoleRound = round;
 		m_lsRole = LsPickRole();
+		m_lsPushArrived = false;
+		m_lsPushGoAt = now;
 		// (a trader a beat behind the entry: close enough to trade, not on its heels)
 		m_lsTradeGoAt = m_lsRole == LSR_TRADE ? now + RANDOM_FLOAT(0.6f, 1.3f) : 0.0f;
 		if (m_lsRole == LSR_SNIPER && LsTakePerch(site, true))
@@ -614,6 +654,8 @@ void CCSBot::LsExecuteGo(const CCSBotManager::Zone *site)
 	if (!pos)
 		return;
 	m_lsPushRound = round;
+	m_lsPushDest = *pos;
+	m_lsPushGoAt = now;
 	if (IsCarryingBomb())
 		SetTask(PLANT_BOMB);
 	// (the flanker takes the quieter way round; the rest the quick one)
@@ -682,8 +724,9 @@ bool CCSBot::LsLurksOtherSite()
 
 bool CCSBot::LsExecuting()
 {
+	// (over for it once it's at its spot in the site, or after 25 s: from there it plays the site)
 	return m_iTeam == TERRORIST && m_lsPushRound == LsRoundSerial() && m_lsExecSite == LsTSite() && !TheCSBots()->IsBombPlanted() && IsAlive()
-		&& !LsOrderActive();
+		&& !LsOrderActive() && !m_lsPushArrived && gpGlobals->time - m_lsPushGoAt < 25.0f && gpGlobals->time >= m_lsPushGoAt;
 }
 
 void CCSBot::LsExecuteTick()
@@ -710,7 +753,18 @@ void CCSBot::LsExecuteTick()
 		m_lsPushRound = -1;
 	}
 	if (m_lsPushRound == round)
+	{
+		// at its spot: it holds there, watching the site, while the bomb comes in (the carrier
+		// goes on to plant)
+		if (!m_lsPushArrived && m_lsRole != LSR_SNIPER && !IsAttacking() && !IsCarryingBomb()
+			&& (m_lsPushDest - pev->origin).Make2D().IsLengthLessThan(150.0f))
+		{
+			m_lsPushArrived = true;
+			Hide(GetLastKnownArea(), RANDOM_FLOAT(6.0f, 14.0f), 300.0f);
+			LsWhy("execute: holding the site");
+		}
 		return;
+	}
 
 	// gone already: one who comes up after it goes straight in
 	float dist = float((site->m_center - pev->origin).Length2D());
@@ -890,6 +944,9 @@ bool CCSBot::LsTeamHeard(GameEventType event, CBasePlayer *pPlayer)
 // play for time (the team is coming, a site can be retaken); the bold ones take the fight
 bool CCSBot::LsPlayForTime()
 {
+	// (once a contact: back once, then it holds where it got to)
+	if (gpGlobals->time - m_lsForTimeAt < 20.0f && gpGlobals->time >= m_lsForTimeAt)
+		return false;
 	if (!LsFight() || !LsTeamGame() || m_iTeam != CT || TheCSBots()->GetScenario() != CCSBotManager::SCENARIO_DEFUSE_BOMB)
 		return false;
 	if (TheCSBots()->IsBombPlanted() || GetNearbyFriendCount() > 0 || OutnumberedCount() < 2)
@@ -904,6 +961,8 @@ bool CCSBot::LsPlayForTime()
 		float numbers = LsTempo() >= 2.0f ? 0.6f : 1.0f;
 		m_lsForTimeRoll = RANDOM_FLOAT(0.0f, 1.0f) < Q_min(0.95f, (LsMatch() ? 0.8f : 0.55f) * (1.2f - bold) * lean * numbers) ? 1 : 0;
 	}
+	if (m_lsForTimeRoll == 1)
+		m_lsForTimeAt = gpGlobals->time;
 	return m_lsForTimeRoll == 1;
 }
 

@@ -610,12 +610,13 @@ void AttackState::OnUpdate(CCSBot *me)
 	}
 
 	// Loner-Strike: hit, it moves (whatever it decided when the fight began)
-	if (LsFight() && !m_dodge && !m_crouchAndHold && me->GetTimeSinceAttacked() < 1.0f)
+	bool lsDucked = LsFight() && (me->m_lsDuckUntil > 0.0f || me->m_lsReloadCrouched);
+	if (LsFight() && !m_dodge && !m_crouchAndHold && !lsDucked && me->GetTimeSinceAttacked() < 1.0f)
 		m_dodge = true;
 
 	// do dodge behavior
 	// If sniping or crouching, stand still.
-	if (m_dodge && !me->IsUsingSniperRifle() && !m_crouchAndHold)
+	if (m_dodge && !me->IsUsingSniperRifle() && !m_crouchAndHold && !lsDucked)
 	{
 		Vector toEnemy = pEnemy->pev->origin - me->pev->origin;
 		float range = toEnemy.Length2D();
@@ -688,7 +689,7 @@ void AttackState::OnUpdate(CCSBot *me)
 			m_firstDodge = false;
 		}
 
-		if (LsFight() && gpGlobals->time < me->m_lsPushUntil && !lsHoldFire)
+		if (LsFight() && gpGlobals->time < me->m_lsPushUntil && !lsHoldFire && !lsDucked)
 			me->MoveForward();
 
 		switch (m_dodgeState)

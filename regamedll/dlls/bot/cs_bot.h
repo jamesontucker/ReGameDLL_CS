@@ -1234,6 +1234,20 @@ public:
 	float m_lsTempo = 0.0f, m_lsTempoAt = -999.0f;
 	float m_lsImpactAt = -999.0f;
 	float m_lsHurtPushAt = -999.0f;					// last went after an enemy called hurt
+	bool m_lsCoverStay = false;						// the last cover pick was where it already is
+	bool m_lsPushArrived = false;					// got to its spot in the push (the push is over for it)
+	Vector m_lsPushDest;
+	float m_lsPushGoAt = 0.0f;
+	float m_lsForTimeAt = -999.0f;					// last fell back to play for time (once a contact)
+	float m_lsSniperShotAt = -999.0f;				// the heard AWPer last fired (the bolt's coming back)
+	float m_lsPlantHeardAt = -999.0f;
+	float m_lsTempoPushRound = -1;
+	void LsPublishState();							// what it's doing, for the plugins (pev->vuser1.y)
+	void LsCoverPeekTick();							// holding behind low cover: down, up for a look, down
+	float m_lsCoverPeekUntil = 0.0f;
+	bool m_lsCoverPeekUp = false;
+	void LsAimMapTick();							// aim_/fy_ maps: from cover to cover, pushing only on an edge
+	float m_lsAimMapAt = 0.0f;
 	void LsFlashWatch();							// a flashbang about to pop in front of it: turn away (the better ones)
 	float m_lsFlashCheckAt = 0.0f, m_lsFlashAwayUntil = 0.0f;
 	bool LsLadderExposed() const;					// enemies about: a ladder is a bad place to be
@@ -1638,8 +1652,8 @@ const Vector *LsEnemySpawn(int team);	// the middle of the other team's spawn (n
 float LsArrival(const CNavArea *area, int team);	// seconds that team needs, running from its spawn, to get there (-1 unknown)
 enum { LSG_NONE, LSG_PISTOL, LSG_DEAGLE, LSG_SMG, LSG_SHOTGUN, LSG_RIFLE, LSG_SNIPER, LSG_MG };
 int LsGunClass(CBasePlayer *pPlayer);	// what kind of gun someone has out
-void LsCallHurt(CBasePlayer *pEnemy, int team, float hp);	// a team was told an enemy's hurt ("he's lit", "1 low")
-bool LsKnownHurt(CBasePlayer *pEnemy, int team, float *hp = nullptr);	// ...and still knows it (no healing in CS)
+void LsCallHurt(CBasePlayer *pEnemy, int team, float hp, const Vector &where);	// a team was told an enemy's hurt ("he's lit", "1 low"), and where
+bool LsKnownHurt(CBasePlayer *pEnemy, int team, float *hp = nullptr, Vector *where = nullptr, float *when = nullptr);	// ...and still knows it (no healing in CS)
 int LsAlive(int team);					// how many of a team are alive (the scoreboard shows it)
 bool LsHabitNear(const Vector &at, float range);	// a person's spot this map (where they killed a bot from)
 int LsMapSerial();						// changes when the map does

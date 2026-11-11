@@ -394,6 +394,8 @@ void CCSBot::Update()
 	LsRushHoldTick();
 	LsHurtCallTick();
 	LsFlashWatch();
+	LsPublishState();
+	LsAimMapTick();
 
 	// (Loner-Strike: who it's fighting, for the plugins to follow (gm_humanbots times its
 	// reaction and aim for the same one): pev->euser4, nothing else uses it)
@@ -935,6 +937,9 @@ void CCSBot::Update()
 	else
 	{
 		m_state->OnUpdate(this);
+
+	// Loner-Strike: a look over the low cover it's hiding behind (after the hide state's crouch)
+	LsCoverPeekTick();
 
 	// Loner-Strike: stepping back out of a door's swing (after the path code, which would walk on)
 	if (LsFight() && gpGlobals->time < m_lsDoorBackUntil)
