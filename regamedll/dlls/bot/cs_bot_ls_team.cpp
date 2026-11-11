@@ -86,18 +86,37 @@ bool CCSBot::LsThreatActive() const
 
 void CCSBot::LsThreatNote()
 {
-	if (!LsFight() || LsSolo() || !LsTeamGame() || !TheCSBots())
+	if (!LsFight() || LsSolo() || !LsTeamGame() || LsWeaponModeOn() || !TheCSBots())
 		return;
 	CBasePlayer *pEnemy = GetEnemy();
 	if (!pEnemy || !pEnemy->IsAlive() || GetTimeSinceLastSawEnemy() > 3.0f)
 		return;
 	float now = gpGlobals->time;
-	// (the same ones it just made up its mind about - a fall back it chose is a retreat too -
-	// aren't news: no fresh decision, round and round)
-	if (m_lsThreatDecided && now - m_lsThreatDecidedAt < 8.0f && (GetLastKnownEnemyPosition() - m_lsThreatPos).IsLengthLessThan(400.0f))
-		return;
 	float skill = LsSkill();
 	int style = LsStyle();
+	bool fresh = !LsThreatActive() || (GetLastKnownEnemyPosition() - m_lsThreatPos).IsLengthGreaterThan(400.0f);
+	// a plan it made stands until something's new: them somewhere else, more of them, a hit taken
+	// since - or it's stuck to it as long as it would (a newer one gets restless sooner, a good one
+	// sees a plan through, careful ones longest, rushers least). A fall back it chose is a retreat
+	// too: not news in itself
+	if (m_lsThreatDecided && LsThreatActive())
+	{
+		float commit = 4.0f + 8.0f * skill;
+		if (style == LS_STYLE_CAREFUL || style == LS_STYLE_CAMPER || style == LS_STYLE_AWPER)
+			commit *= 1.3f;
+		else if (style == LS_STYLE_RUSHER || style == LS_STYLE_KNIFER)
+			commit *= 0.7f;
+		bool news = fresh || GetNearbyEnemyCount() > m_lsThreatCount || GetTimeSinceAttacked() < now - m_lsThreatDecidedAt;
+		if (!news && now - m_lsThreatDecidedAt < commit)
+			return;
+	}
+	// (still the same ones, mid-fight, not decided yet: kept as it is - a cover pick every
+	// moment of a long fight isn't a new sighting each time)
+	if (!m_lsThreatDecided && !fresh)
+	{
+		m_lsThreatCount = Q_max(m_lsThreatCount, GetNearbyEnemyCount());
+		return;
+	}
 	m_lsThreatPos = GetLastKnownEnemyPosition();
 	m_lsThreatFrom = pev->origin;
 	m_lsThreatAt = now;
@@ -106,16 +125,23 @@ void CCSBot::LsThreatNote()
 	m_lsThreatCount = Q_max(1, GetNearbyEnemyCount());
 	m_lsThreatSniper = LsGunClass(pEnemy) == LSG_SNIPER;
 	m_lsThreatDecided = false;
-	// (the better ones make up their minds sooner)
-	m_lsThreatDecideAt = now + 1.0f + 2.5f * (1.0f - skill) + RANDOM_FLOAT(0.0f, 1.0f);
+	// when it makes up its mind: a good player already knows on the way back (a moment); a newer
+	// one once it feels safe, after a pause; rushers fast (impatient), careful ones once settled
+	float think = 0.3f + 2.7f * (1.0f - skill) + RANDOM_FLOAT(0.0f, 0.6f);
+	if (style == LS_STYLE_RUSHER || style == LS_STYLE_KNIFER)
+		think *= 0.6f;
+	else if (style == LS_STYLE_CAREFUL || style == LS_STYLE_CAMPER)
+		think *= 1.3f;
+	m_lsThreatDecideAt = now + think;
 	float keep = 12.0f + 80.0f * skill;
 	if (style == LS_STYLE_CAREFUL || style == LS_STYLE_CAMPER || style == LS_STYLE_AWPER)
 		keep *= 1.3f;
 	else if (style == LS_STYLE_RUSHER || style == LS_STYLE_KNIFER)
 		keep *= 0.8f;
 	m_lsThreatUntil = now + keep;
-	// (and that spot as a little danger in its own memory)
-	CNavArea *area = TheNavAreaGrid.GetNearestNavArea(&m_lsThreatPos);
+	// (and that spot as a little danger in its own memory - once for a new sighting, not again
+	// for every cover pick of one fight)
+	CNavArea *area = fresh ? TheNavAreaGrid.GetNearestNavArea(&m_lsThreatPos) : nullptr;
 	if (area)
 		LsAddDangerNearby(0.25f + 0.1f * float(Q_min(3, m_lsThreatCount)), area, &m_lsThreatPos, 350.0f);
 	LsTraceNote("threat: remembered");
@@ -126,18 +152,28 @@ void CCSBot::LsThreatTick()
 	float now = gpGlobals->time;
 	if (m_lsThreatDecided || !LsThreatActive() || now < m_lsThreatDecideAt)
 		return;
+	// (something else set what it's doing this very moment - a rotation, a step behind a
+	// teammate: that stands; it decides on a later think)
+	if (GetStateTimestamp() >= now)
+		return;
 	// (a CT racing the bomb, a plant, a defuse, hostages, an order, the bomb on its back, the
 	// team's own site take: no choice of its own to make about them - that comes first)
-	if (LsRetakeRush() || IsDefusingBomb() || m_state == &m_plantBombState || IsEscapingFromBomb() || GetHostageEscortCount() > 0
+	// (a CT with the bomb down: the retake or the save decides that)
+	bool ctPlanted = m_iTeam == CT && TheCSBots()->IsBombPlanted();
+	if (ctPlanted || LsRetakeRush() || IsDefusingBomb() || m_state == &m_plantBombState || IsEscapingFromBomb() || GetHostageEscortCount() > 0
 		|| LsOrderActive() || LsPuppetActive() || m_lsSaving || IsCarryingBomb() || m_bIsVIP || LsExecuting())
 	{
 		m_lsThreatDecided = true;
 		m_lsThreatDecidedAt = now;
 		return;
 	}
-	// (out of sight of them first: in a fight it's the fight; and still on its way into cover:
-	// once it's there)
-	if (IsAttacking() || IsEnemyVisible() || (IsHiding() && pev->velocity.Length2D() > 60.0f))
+	// (out of sight of them first: in a fight it's the fight; off a ladder; and a newer or careful
+	// one only once it's in cover and still - a good one already knows on the way back)
+	if (IsAttacking() || IsEnemyVisible() || IsUsingLadder())
+		return;
+	int lsStyle = LsStyle();
+	bool settles = LsSkill() < 0.6f || lsStyle == LS_STYLE_CAREFUL || lsStyle == LS_STYLE_CAMPER;
+	if (settles && !(IsHiding() ? IsAtHidingSpot() : IsNotMoving()))
 		return;
 	m_lsThreatDecided = true;
 	m_lsThreatDecidedAt = now;
@@ -164,7 +200,7 @@ void CCSBot::LsThreatTick()
 	});
 	bool bombMap = TheCSBots()->GetScenario() == CCSBotManager::SCENARIO_DEFUSE_BOMB;
 	bool planted = TheCSBots()->IsBombPlanted();
-	bool mustGo = bombMap && ((planted && m_iTeam == CT) || (!planted && m_iTeam == TERRORIST && LsTimeLeft() < 30.0f));
+	bool mustGo = bombMap && !planted && m_iTeam == TERRORIST && LsTimeLeft() < 30.0f;
 	bool timeOnSide = bombMap && !planted && m_iTeam == CT;
 
 	enum { HOLD, ANGLE, PEEK, ROUND, BACK, FORGET, NUM };
@@ -222,7 +258,8 @@ void CCSBot::LsThreatTick()
 			{
 				const Vector &c = *area->GetCenter();
 				float d = float((c - pev->origin).Length2D());
-				if (d >= bestD || Q_abs(c.z - pev->origin.z) > 200.0f)
+				// (somewhere else: not the spot it's on)
+				if (d >= bestD || d < 150.0f || Q_abs(c.z - pev->origin.z) > 200.0f)
 					continue;
 				float toThreat = float((c - m_lsThreatPos).Length2D());
 				if (toThreat < 300.0f || toThreat > 1600.0f || (c - m_lsThreatFrom).IsLengthLessThan(250.0f) || LsBadArea(area))
@@ -253,16 +290,26 @@ void CCSBot::LsThreatTick()
 	{
 	case HOLD:
 	{
-		// (where it is, eyes on the way they'd come)
-		Vector here = pev->origin;
-		Hide(&here, RANDOM_FLOAT(5.0f, 12.0f) * (careful ? 1.4f : 1.0f), true);
-		LsPreAim(m_lsThreatPos, RANDOM_FLOAT(3.0f, 6.0f));
+		// (in the cover it's in, or on its way to, a while longer; out in the open: a hiding spot
+		// close by, held - eyes on the way they'd come)
+		float secs = RANDOM_FLOAT(5.0f, 12.0f) * (careful ? 1.4f : 1.0f);
+		if (!IsHiding())
+			Hide(m_lastKnownArea, secs, 400.0f, true);
+		float aim = RANDOM_FLOAT(3.0f, 6.0f);
+		if (!LsPreAim(m_lsThreatPos, aim))
+		{
+			Vector at = m_lsThreatPos + Vector(0, 0, HalfHumanHeight);
+			SetLookAt("Loner-Strike: pre-aim", &at, PRIORITY_MEDIUM, aim);
+		}
 		LsWhy("threat: holding it");
 		break;
 	}
 	case PEEK:
 	{
+		// (the move's route comes from its task: this one's the quick way back in)
 		Vector to = m_lsThreatPos;
+		if (pFoe && pFoe->IsAlive())
+			SetTask(MOVE_TO_LAST_KNOWN_ENEMY_POSITION, pFoe);
 		MoveTo(&to, FASTEST_ROUTE);
 		LsWhy("threat: back in on them");
 		break;
@@ -856,7 +903,7 @@ void CCSBot::LsTeamTick()
 	// a while - back and forth between the cover and a teammate in a fight otherwise)
 	if (LsFight() && LsTeamGame() && LsOutOfAmmo() && !LsWeaponModeOn() && !TheCSBots()->IsRoundOver() && !IsAttacking() && LsFree()
 		&& !LsOrderActive() && !IsCarryingBomb() && !m_lsSwapBox.IsValid() && m_state == &m_huntState && now >= m_lsEmptyTagAt
-		&& GetTimeSinceLastSawEnemy() > 3.0f)
+		&& GetTimeSinceLastSawEnemy() > 4.0f && !TheCSBots()->IsBombPlanted())
 	{
 		m_lsEmptyTagAt = now + RANDOM_FLOAT(0.6f, 1.5f);
 		if (m_lsEmptyRound != round)

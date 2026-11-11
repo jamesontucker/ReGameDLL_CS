@@ -1350,10 +1350,10 @@ public:
 	bool LsPickSteady();
 	bool LsMayBackOff(const Vector &toEnemy);
 	bool LsHoldFireToStop(float range);
-	void LsTraceNote(const char *note);
+	void LsTraceNote(const char *note);				// a line in the trace (a #why) without changing what it's doing
 	void LsThreatNote();							// backed off from someone: remembered (cs_bot_ls_team.cpp)
-	void LsThreatTick();							// and what to do about them, once out of sight
-	bool LsThreatActive() const;					// still remembered				// a line in the trace (a #why) without changing what it's doing
+	void LsThreatTick();							// and what to do about them
+	bool LsThreatActive() const;					// still remembered
 	float m_lsStopNoteAt = -10.0f;					// trace: when its stop habit was last noted
 	int LsStopStyle();								// its habit for stopping to shoot: 0 run, 1 crouch, 2 walk, 3 counter-strafe
 	bool LsStopGun() const;							// a gun worth stopping for (rifles, the Deagle)

@@ -5144,6 +5144,9 @@ void CCSBot::LsDoorButton()
 		if (++m_lsDoorSideTries > 3)
 		{
 			m_lsDoorSideTries = 0;
+			// (the area past the door: round it for a minute)
+			Vector past = BrushCenter(pHit) + ahead * 64.0f;
+			m_lsButtonBehind = TheNavAreaGrid.GetNearestNavArea(&past);
 			giveUp();
 			LsWhy("door in the way: another way");
 			return;
@@ -5387,7 +5390,10 @@ bool CCSBot::LsTakeCoverFrom(const Vector &threat, float minMove, bool fromFight
 			LsForTeammates(this, [&](CBasePlayer *pPlayer) {
 				if ((pPlayer->pev->origin - c).IsLengthLessThan(90.0f))
 					taken = true;
+				// (heading there: only one close by it can see going that way - not a teammate's
+				// plan it couldn't know)
 				else if (pPlayer->IsBot() && static_cast<CCSBot *>(pPlayer)->HasPath()
+					&& (pPlayer->pev->origin - pev->origin).IsLengthLessThan(600.0f)
 					&& (static_cast<CCSBot *>(pPlayer)->GetPathEndpoint() - c).IsLengthLessThan(90.0f))
 					taken = true;
 			});

@@ -93,6 +93,10 @@ void CCSBot::Upkeep()
 				// through it, for the ones who know)
 				else if (LsFight() && IsEnemyPartVisible(HEAD) && !IsEnemyPartVisible(CHEST) && LsBangChest())
 					m_aimSpot.z -= feetOffset * 0.25f;
+				// (only the head showing - a face over a crate or through a gap: at the head, a little
+				// low for a newer player; the chest behind the cover is no target)
+				else if (LsFight() && IsEnemyPartVisible(HEAD) && !IsEnemyPartVisible(CHEST) && !IsEnemyPartVisible(LEFT_SIDE) && !IsEnemyPartVisible(RIGHT_SIDE))
+					m_aimSpot.z = m_enemy->pev->origin.z + m_enemy->pev->view_ofs.z - 2.0f - 6.0f * (1.0f - LsSkill());
 				else if (LsFight() && IsEnemyPartVisible(HEAD))
 					m_aimSpot.z += -4.0f + 7.0f * LsSkill();
 
@@ -511,8 +515,12 @@ void CCSBot::Update()
 			// isn't closing its eyes: someone close, or aiming at it, gets shot at)
 			// (but a deliberate move out of someone's line - an AWP's lane, a rush - isn't undone
 			// by that someone aiming at it: only by them being close)
+			// (and a run for cover with the gun mid-reload: only someone right on top of it - it has
+			// nothing to shoot back with until the reload's done)
+			bool lsReloadRun = LsFight() && IsActiveWeaponReloading();
 			bool lsBreakIgnore = LsFight() && !m_ignoreEnemiesTimer.IsElapsed() && m_disposition != IGNORE_ENEMIES
-				&& ((pev->origin - threat->pev->origin).IsLengthLessThan(600.0f) || (IsPlayerLookingAtMe(threat) && gpGlobals->time > m_lsCoverRunUntil));
+				&& ((pev->origin - threat->pev->origin).IsLengthLessThan(lsReloadRun ? 250.0f : 600.0f)
+					|| (!lsReloadRun && IsPlayerLookingAtMe(threat) && gpGlobals->time > m_lsCoverRunUntil));
 			// (out of bullets: only someone right on top of it is a fight)
 			bool lsEmpty = LsFight() && LsOutOfAmmo() && (pev->origin - threat->pev->origin).IsLengthGreaterThan(250.0f);
 			// (out of bullets with someone in view who hasn't shot at it yet: out of their line,

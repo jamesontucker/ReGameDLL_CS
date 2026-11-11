@@ -239,7 +239,9 @@ void AttackState::OnUpdate(CCSBot *me)
 		&& (pEnemy->pev->origin - me->pev->origin).IsLengthGreaterThan(400.0f) && gpGlobals->time - me->m_lsReloadRollAt > 5.0f)
 	{
 		me->m_lsReloadRollAt = gpGlobals->time;
-		if (RANDOM_FLOAT(0.0f, 1.0f) < me->LsReloadCoverChance() && me->LsTakeCoverFrom(pEnemy->pev->origin, 0.0f, true))
+		// (low cover right there: it ducks behind that instead - LsMatchup)
+		if (RANDOM_FLOAT(0.0f, 1.0f) < me->LsReloadCoverChance() && !me->LsLowCoverToward(pEnemy->pev->origin)
+			&& me->LsTakeCoverFrom(pEnemy->pev->origin, 0.0f, true))
 		{
 			me->LsWhy("reloading: out of sight");
 			return;
@@ -703,7 +705,7 @@ void AttackState::OnUpdate(CCSBot *me)
 
 	// Loner-Strike: on top of a teammate, a step aside first
 	// (not one crouched to hold or ducked behind cover to reload: that stays put)
-	if (LsFight() && !m_crouchAndHold && !lsDucked && !me->IsUsingSniperRifle() && me->LsSpaceOut())
+	if (LsFight() && !m_crouchAndHold && !lsDucked && !(lsHoldFire && !lsClosing) && !me->IsUsingSniperRifle() && me->LsSpaceOut())
 		return;
 
 	// do dodge behavior
