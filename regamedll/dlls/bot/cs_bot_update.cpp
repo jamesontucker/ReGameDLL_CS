@@ -453,7 +453,10 @@ void CCSBot::Update()
 			Vector aim, burst;
 			float range = float((threat->pev->origin - pev->origin).Length());
 			// (and not onto a teammate: team Gun Game turns friendly fire on at this level)
-			if (LsFight() && LsNadeOnly() && range > 250.0f && range < 1100.0f && LsPlanThrow(WEAPON_HEGRENADE, threat->pev->origin, 220.0f, &aim, &burst))
+			bool lsPlan = LsFight() && LsNadeOnly() && range > 250.0f && range < 1100.0f && !m_isWaitingToTossGrenade && gpGlobals->time >= m_lsHePlanAt;
+			if (lsPlan)
+				m_lsHePlanAt = gpGlobals->time + 0.75f;
+			if (lsPlan && LsPlanThrow(WEAPON_HEGRENADE, threat->pev->origin, 220.0f, &aim, &burst))
 			{
 				if (LsHeSafe(this, burst))
 				{

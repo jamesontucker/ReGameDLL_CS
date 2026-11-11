@@ -495,11 +495,10 @@ void CCSBot::LsNadeUpdate()
 				m_lsNadePhase = 0;
 			return;
 		}
-		if (!m_isWaitingToTossGrenade && (pWeapon->m_flStartThrow <= 0.0f || now - pWeapon->m_flStartThrow < 0.55f))
-			return;
-
 		// (walking while it gets it out, as people slow to throw)
 		Walk();
+		if (!m_isWaitingToTossGrenade && (pWeapon->m_flStartThrow <= 0.0f || now - pWeapon->m_flStartThrow < 0.55f))
+			return;
 		// walked on too far since it planned this (the flight, and who'd be facing a flash,
 		// were worked out from there): called off; otherwise the same direction from here
 		if ((pev->origin - m_lsNadeFrom).IsLengthGreaterThan(180.0f))
@@ -635,10 +634,11 @@ void CCSBot::LsNadeUpdate()
 			if (toLine > 350.0f && toLine < 1400.0f && meToSite > lineToSite && !TheCSBots()->IsInsideSmokeCloud(&line))
 			{
 				Vector aim, burst;
+				// (decided once a round, whether the throw works out from here or not: no
+				// working out the arcs again every few seconds on the way)
+				m_lsNadeSmokeRolled = true;
 				if (LsPlanThrow(WEAPON_SMOKEGRENADE, line, 200.0f, &aim, &burst))
 				{
-					// decided once a round (a smoke there is either its job or not)
-					m_lsNadeSmokeRolled = true;
 					if (RANDOM_FLOAT(0.0f, 1.0f) < use)
 					{
 						s_lsTeamNadeAt[team][LS_SMOKE] = now;

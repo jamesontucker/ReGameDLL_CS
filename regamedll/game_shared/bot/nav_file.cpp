@@ -951,5 +951,6 @@ NavErrorType LoadNavigationMap()
 
 	// Set up all the ladders
 	BuildLadders();
+	g_lsNavLoads++;	// (Loner-Strike: a new nav, even for the same map: its knowledge starts over)
 	return NAV_OK;
 }

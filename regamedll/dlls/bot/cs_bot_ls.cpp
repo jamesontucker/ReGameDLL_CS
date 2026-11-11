@@ -987,6 +987,10 @@ void CCSBot::LsOrderTick()
 	if (!pLeader || !pLeader->IsAlive() || BotRelationship(pLeader) != BOT_TEAMMATE)
 	{
 		o = LsOrder();
+		pev->vuser1.x = 0.0f;
+		m_lsPuppet.followUntil = 0.0f;
+		if (IsFollowing())
+			StopFollowing();
 		return;
 	}
 	if (!IsFollowing() && now >= o.nextTry && (pLeader->pev->origin - pev->origin).IsLengthLessThan(1500.0f))
@@ -1168,13 +1172,17 @@ void CCSBot::LsPuppetCommand(const char *what, float now)
 		if (ordered && !chat)
 			return;
 		float until = now + Q_min(LsArg(3, 1.0f), most);
+		// (a person's hold is its own length - not stretched to a plugin hold's - and takes the tag)
 		if (chat || until > p.holdUntil)
 		{
-			p.holdUntil = chat ? Q_max(until, p.holdUntil) : until;
+			p.holdUntil = until;
 			Q_strlcpy(p.holdTag, tag);
 		}
 		if (chat)
-			pev->fuser4 = now; m_lsOrderFields = true;	// (taken: gm_botchat reads it)
+		{
+			pev->fuser4 = now;	// (taken: gm_botchat reads it)
+			m_lsOrderFields = true;
+		}
 	}
 	else if (FStrEq(what, "crouch"))
 	{
@@ -2741,6 +2749,7 @@ struct LsMapKnow
 {
 	bool ready = false;						// pairs done: LsSees works
 	bool tried = false;
+	int navLoads = -1;						// the nav it's for (a reload of the same map is a new one)
 	int stage = STAGE_PAIRS;
 	char map[64] = {};
 	size_t count = 0, navSize = 0;
@@ -3412,6 +3421,7 @@ void Finish()
 // A new map, or its nav changed: start again, or carry on from the file
 void Reset()
 {
+	s_know.navLoads = g_lsNavLoads;
 	s_know.ready = false;
 	s_know.tried = true;
 	s_know.stage = STAGE_PAIRS;
@@ -3539,7 +3549,7 @@ void LsSightStep()
 	if (TheCSBots() && (TheCSBots()->IsLearningMap() || TheCSBots()->IsAnalysisRequested()))
 		return;
 	// (the nav replaced, even with the same number of areas: its first area is a new one)
-	if (!s_know.tried || Q_strcmp(s_know.map, STRING(gpGlobals->mapname)) != 0
+	if (!s_know.tried || Q_strcmp(s_know.map, STRING(gpGlobals->mapname)) != 0 || (s_know.navLoads != g_lsNavLoads && !TheNavAreaList.empty())
 		|| (!s_know.areas.empty() && (s_know.count != TheNavAreaList.size() || s_know.areas.front() != TheNavAreaList.front()))
 		|| (s_know.areas.empty() && s_know.navSize != TheNavAreaList.size()))
 		Reset();
@@ -3853,14 +3863,17 @@ namespace
 char s_kindMap[64] = {};
 int s_kind = LSMAP_OBJECTIVE;
 int s_mapSerial = 0;
+int g_lsNavLoads = 0;
+static int s_kindNavLoads = -1;
 Vector s_spawn[2];
 bool s_hasSpawn[2] = {};
 
 void LsMapKindUpdate()
 {
-	if (!gpGlobals->mapname || Q_strcmp(s_kindMap, STRING(gpGlobals->mapname)) == 0)
+	if (!gpGlobals->mapname || (Q_strcmp(s_kindMap, STRING(gpGlobals->mapname)) == 0 && s_kindNavLoads == g_lsNavLoads))
 		return;
 	Q_strlcpy(s_kindMap, STRING(gpGlobals->mapname));
+	s_kindNavLoads = g_lsNavLoads;
 	s_mapSerial++;
 	auto starts = [](const char *prefix) { return Q_strnicmp(s_kindMap, prefix, Q_strlen(prefix)) == 0; };
 	if (starts("aim_") || starts("35hp_") || starts("1v1") || starts("aim-"))
@@ -5714,4 +5727,9 @@ void CCSBot::LsSmokeLaneTick()
 		return;
 	LsNadeStart(WEAPON_SMOKEGRENADE, m_lsSmokeLaneSpot, RANDOM_FLOAT(4.0f, 8.0f));
 	LsWhy("smoking the AWP's lane");
+}
+
+bool CCSBot::LsOrderActive() const
+{
+	return m_lsOrder.kind != 0 && gpGlobals->time < m_lsOrder.until;
 }

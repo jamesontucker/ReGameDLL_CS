@@ -970,6 +970,50 @@ bool CCSBot::LsCornerAhead(Vector *out)
 	float now = gpGlobals->time;
 	Vector eye = GetEyePosition();
 	float base = pev->velocity.Length2D() > 60.0f ? UTIL_VecToYaw(pev->velocity) : pev->v_angle.y;
+
+	// (from the map knowledge when it has this area's corners: one sight check, not a fan of
+	// probes; the probes below are for maps it hasn't studied yet)
+	const LsAreaKnow *lk = m_lastKnownArea ? LsKnow(m_lastKnownArea) : nullptr;
+	if (lk && lk->cornerCount > 0)
+	{
+		float bestK = -1.0f;
+		Vector bestAt;
+		for (int c = 0; c < lk->cornerCount; c++)
+		{
+			const LsKnownCorner &kc = lk->corners[c];
+			Vector at(kc.x, kc.y, kc.z);
+			Vector to = at - pev->origin;
+			float dist = float(to.Length2D());
+			if (dist < 140.0f || dist > 1000.0f)
+				continue;
+			if (Q_abs(NormalizeAngle(UTIL_VecToYaw(to) - base)) > 104.0f)
+				continue;
+			if (now - m_lsGlanceCornerAt < 4.0f && (at - m_lsGlanceCorner).IsLengthLessThan(128.0f))
+				continue;
+			// (just past the edge, the way it opens, at head height)
+			float open = float(kc.yaw) * (360.0f / 256.0f);
+			Vector look = at + Vector(BotCOS(open) * 40.0f, BotSIN(open) * 40.0f, HalfHumanHeight + LsLookHeight());
+			float score = 1000.0f - dist;
+			if (GetTimeSinceLastSawEnemy() < 15.0f && (at - GetLastKnownEnemyPosition()).IsLengthLessThan(800.0f))
+				score += 600.0f;
+			if (score <= bestK)
+				continue;
+			TraceResult tr;
+			UTIL_TraceLine(eye, look, ignore_monsters, ignore_glass, ENT(pev), &tr);
+			if (tr.flFraction < 1.0f)
+				continue;
+			bestK = score;
+			bestAt = look;
+		}
+		if (bestK >= 0.0f)
+		{
+			m_lsGlanceCorner = bestAt;
+			m_lsGlanceCornerAt = now;
+			*out = bestAt;
+			return true;
+		}
+		return false;
+	}
 	float heights[2] = { pev->origin.z, eye.z };
 	int style = LsStyle();
 	bool rusher = style == LS_STYLE_RUSHER || LsAggro() > 0.8f;

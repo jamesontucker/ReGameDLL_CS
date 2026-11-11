@@ -1209,6 +1209,7 @@ public:
 	bool LsTakeCoverFrom(const Vector &threat, float minMove, bool fromFight = false, float holdSecs = -1.0f);	// to the nearest spot out of its sight, a short hold there
 	bool LsMatchup(CBasePlayer *pEnemy, bool crouchAndHold);		// mid-fight: the wrong gun for this range (an AWP down a lane): out of it
 	Vector LsDefuseSpot(const Vector &bomb);		// beside the bomb, the side away from the threat
+	bool LsOrderActive() const;
 	bool LsLowCoverToward(const Vector &at);	// low cover right by it that way (crouch behind it)
 	float LsFallMargin();						// how close to dying from a drop it'll go (pros never close)
 	EntityHandle<CBasePlayer> m_lsMatchupEnemy;	// the enemy whose matchup it weighed (once a fight)
@@ -1248,7 +1249,10 @@ public:
 	bool m_lsCoverPeekUp = false;
 	void LsAimMapTick();							// aim_/fy_ maps: from cover to cover, pushing only on an edge
 	float m_lsAimMapAt = 0.0f;
-	float m_lsSmokeLaneAt = 0.0f;					// a smoke for the AWP lane it just got out of, thrown from cover then
+	float m_lsSmokeLaneAt = 0.0f;
+	float m_lsHePlanAt = 0.0f;						// Gun Game's grenade level: next time it works out an arc
+	float m_lsExecCheckAt = 0.0f;
+	float m_lsJiggleJumpUntil = 0.0f;				// mid jump-peek (in the air: still the jiggle)					// a smoke for the AWP lane it just got out of, thrown from cover then
 	Vector m_lsSmokeLaneSpot;
 	void LsSmokeLaneTick();
 	void LsFlashWatch();							// a flashbang about to pop in front of it: turn away (the better ones)
@@ -1345,7 +1349,6 @@ private:
 	LsOrder m_lsOrder;
 	bool m_lsOrderFields = false;					// fuser4/vuser1 hold this code's order marks (cleared on respawn)
 	void LsOrderTick();
-	bool LsOrderActive() const { return m_lsOrder.kind != 0 && gpGlobals->time < m_lsOrder.until; }
 	void LsCheckMap();
 	void LsAddDangerToArea(const CNavArea *area, float amount);
 	LsDanger m_lsDanger[96];						// this bot's own danger memory, by area id (a fixed table:
@@ -1651,6 +1654,7 @@ bool LsExposureReady();
 // Loner-Strike: what kind of map this is (by its name and objectives): how bots play it
 enum { LSMAP_OBJECTIVE, LSMAP_AIM, LSMAP_FY, LSMAP_AWP, LSMAP_KNIFE, LSMAP_OTHER };
 int LsMapKind();
+extern int g_lsNavLoads;					// navs loaded so far (a same-name reload is a new nav)
 const Vector *LsEnemySpawn(int team);	// the middle of the other team's spawn (null if none)
 float LsArrival(const CNavArea *area, int team);	// seconds that team needs, running from its spawn, to get there (-1 unknown)
 enum { LSG_NONE, LSG_PISTOL, LSG_DEAGLE, LSG_SMG, LSG_SHOTGUN, LSG_RIFLE, LSG_SNIPER, LSG_MG };
@@ -2331,7 +2335,7 @@ public:
 
 					// if we need to get there in a hurry, ignore minor pain
 					// (Loner-Strike: less of it hurt)
-					const float painTolerance = (15.0f * m_bot->LsAggro() + 10.0f) * Q_min(1.0f, float(m_bot->pev->health) / 100.0f);
+					const float painTolerance = (15.0f * m_bot->LsAggro() + 10.0f) * (LsFight() ? Q_min(1.0f, float(m_bot->pev->health) / 100.0f) : 1.0f);
 					if (m_route != FASTEST_ROUTE || fallDamage > painTolerance)
 					{
 						// cost is proportional to how much it hurts when we fall

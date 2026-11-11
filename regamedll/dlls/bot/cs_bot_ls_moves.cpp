@@ -152,7 +152,7 @@ bool CCSBot::LsCornerMoves(Vector *goal)
 	// a jiggle under way: out, back (and maybe once more)
 	if (now < m_lsJiggleUntil)
 	{
-		if (!LsCornerFree(this))
+		if (now >= m_lsJiggleJumpUntil && !LsCornerFree(this))
 		{
 			m_lsJiggleUntil = 0.0f;
 			return false;
@@ -286,6 +286,7 @@ bool CCSBot::LsCornerMoves(Vector *goal)
 		if (m_lsJumpPeek)
 		{
 			Jump(MUST_JUMP);
+			m_lsJiggleJumpUntil = now + 0.9f;
 			m_lsJiggleLeft = 1;
 			m_lsJumpPeek = false;
 		}
@@ -791,6 +792,10 @@ bool CCSBot::LsCalm(bool pluginLooks) const
 // would carry on from the new place at the old one, and the path is from somewhere else
 void CCSBot::LsStartOver()
 {
+	m_lsCornerAt = Vector(99999.0f, 99999.0f, 99999.0f);
+	m_lsCornerPlan = 0;
+	m_lsJiggleUntil = 0.0f;
+	m_lsJiggleJumpUntil = 0.0f;
 	m_lsBangUntil = 0.0f;
 	m_lsPrefireUntil = 0.0f;
 	m_lsBackUntil = 0.0f;
@@ -910,6 +915,8 @@ bool CCSBot::LsBlindTick()
 	}
 	if (now >= m_lsBlindTurnAt)
 	{
+		if (m_lsBlindWay == 3)
+			StandUp();
 		m_lsBlindTurnAt = now + RANDOM_FLOAT(0.4f, 0.9f);
 		float r = RANDOM_FLOAT(0.0f, 1.0f);
 		// 0 back off, 1/2 strafe, 3 crouch and hold, 4 stand still

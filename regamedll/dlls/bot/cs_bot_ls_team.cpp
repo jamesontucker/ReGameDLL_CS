@@ -131,6 +131,8 @@ void CCSBot::LsTeamTick()
 		m_lsFetchCheckAt = now + 1.0f;
 		if (LsBombFetcher() == this)
 		{
+			if (LsPuppetActive() && !LsOrderActive())
+				LsPuppetRelease();
 			FetchBomb();
 			LsWhy("fetch-bomb");
 		}
@@ -327,7 +329,7 @@ void CCSBot::LsTeamTick()
 		CBasePlayerItem *pMine = m_rgpPlayerItems[PRIMARY_WEAPON_SLOT];
 		if (IsAttacking() || !IsMovingTo() || now > m_lsSwapUntil)
 			m_lsSwapBox = nullptr;
-		else if ((pBox->pev->origin - pev->origin).Make2D().IsLengthLessThan(80.0f))
+		else if ((pBox->pev->origin - pev->origin).IsLengthLessThan(90.0f))
 		{
 			if (pMine)
 			{
@@ -680,7 +682,7 @@ bool CCSBot::LsTakePerch(const CCSBotManager::Zone *site, bool tSide)
 	float siteToOwn = float((mid - *own).Length2D());
 	CNavArea *best = nullptr;
 	float bestScore = -1e9f;
-	for (unsigned short i = 0; ; i++)
+	for (unsigned short i = 0; i < 65000; i++)
 	{
 		CNavArea *a = LsKnowArea(i);
 		if (!a)
@@ -790,7 +792,10 @@ void CCSBot::LsExecuteTick()
 		return;
 	}
 
-	// the team left and the clock: whether to wait at all
+	// the team left and the clock: whether to wait at all (looked at a few times a second)
+	if (now < m_lsExecCheckAt)
+		return;
+	m_lsExecCheckAt = now + 0.3f;
 	int alive = 0, staged = 0;
 	for (int i = 1; i <= gpGlobals->maxClients; i++)
 	{
@@ -1356,6 +1361,15 @@ void CCSBot::LsHideNearBomb(const Vector &bomb)
 	}
 	const Vector *best = nullptr;
 	float bestScore = -1e9f;
+	// (the teammates and where they hide, gathered once)
+	Vector mates[MAX_CLIENTS], mateSpots[MAX_CLIENTS];
+	int nm = 0, ns = 0;
+	LsForTeammates(this, [&](CBasePlayer *pPlayer) {
+		if (nm < MAX_CLIENTS)
+			mates[nm++] = pPlayer->pev->origin;
+		if (pPlayer->IsBot() && static_cast<CCSBot *>(pPlayer)->IsHiding() && ns < MAX_CLIENTS)
+			mateSpots[ns++] = static_cast<CCSBot *>(pPlayer)->m_hideState.GetHidingSpot();
+	});
 	for (auto pSpot : TheHidingSpotList)
 	{
 		const Vector *pos = pSpot->GetPosition();
@@ -1363,16 +1377,10 @@ void CCSBot::LsHideNearBomb(const Vector &bomb)
 		if (d < 150.0f || d > 1000.0f || fabs(pos->z - bomb.z) > 250.0f)
 			continue;
 		bool taken = false;
-		LsForTeammates(this, [&](CBasePlayer *pPlayer) {
-			if ((pPlayer->pev->origin - *pos).IsLengthLessThan(300.0f))
-				taken = true;
-			else if (pPlayer->IsBot())
-			{
-				CCSBot *pBot = static_cast<CCSBot *>(pPlayer);
-				if (pBot->IsHiding() && (pBot->m_hideState.GetHidingSpot() - *pos).IsLengthLessThan(300.0f))
-					taken = true;
-			}
-		});
+		for (int m = 0; m < nm && !taken; m++)
+			taken = (mates[m] - *pos).IsLengthLessThan(300.0f);
+		for (int m = 0; m < ns && !taken; m++)
+			taken = (mateSpots[m] - *pos).IsLengthLessThan(300.0f);
 		if (taken)
 			continue;
 		TraceResult tr;

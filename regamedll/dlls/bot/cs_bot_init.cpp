@@ -220,6 +220,19 @@ void CCSBot::ResetValues()
 	m_lsCoverPeekUntil = 0.0f;
 	m_lsCoverPeekUp = false;
 	m_lsAimMapAt = 0.0f;
+	m_lsHePlanAt = 0.0f;
+	m_lsExecCheckAt = 0.0f;
+	m_lsJiggleJumpUntil = 0.0f;
+	// (a respawn that doesn't go through RoundRespawn: no order or plugin marks carried over)
+	if (LsFight())
+	{
+		m_lsOrder = LsOrder();
+		if (m_lsOrderFields)
+		{
+			pev->fuser4 = 0.0f;
+			pev->vuser1.x = 0.0f;
+		}
+	}
 	m_lsSmokeLaneAt = 0.0f;
 	pev->vuser1.y = 0.0f;
 	m_lsFlashCheckAt = 0.0f;
