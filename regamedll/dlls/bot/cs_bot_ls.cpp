@@ -5438,7 +5438,7 @@ static int LsMapOpenness()
 		return s_lean;
 	s_serial = LsMapSerial();
 	s_lean = 0;
-	std::vector<float> far;
+	std::vector<float> views;
 	for (size_t i = 0; i < s_know.count && i < s_know.inView.size(); i++)
 	{
 		const CNavArea *a = s_know.areas[i];
@@ -5452,12 +5452,12 @@ static int LsMapOpenness()
 				continue;
 			best = Q_max(best, float((*s_know.areas[v.first]->GetCenter() - *a->GetCenter()).Length()));
 		}
-		far.push_back(best);
+		views.push_back(best);
 	}
-	if (far.size() < 20)
+	if (views.size() < 20)
 		return 0;
-	std::sort(far.begin(), far.end());
-	float q = far[(size_t)(far.size() * 0.75f)];
+	std::sort(views.begin(), views.end());
+	float q = views[(size_t)(views.size() * 0.75f)];
 	s_lean = q > 2050.0f ? 1 : q < 1300.0f ? -1 : 0;
 	return s_lean;
 }
