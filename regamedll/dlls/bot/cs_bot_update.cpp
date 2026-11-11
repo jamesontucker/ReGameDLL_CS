@@ -89,6 +89,10 @@ void CCSBot::Upkeep()
 				// (Loner-Strike: the head showing: aimed about the middle of the chest, a little
 				// higher for a good player; the recoil climbs from there. Stomach height (stock) gave
 				// 22-29% headshot kills, +2..+11 units 40-46%, +4..+20 41-52%; a pub is about 30-38%)
+				// (Loner-Strike: only the head over something a bullet goes through: the chest,
+				// through it, for the ones who know)
+				else if (LsFight() && IsEnemyPartVisible(HEAD) && !IsEnemyPartVisible(CHEST) && LsBangChest())
+					m_aimSpot.z -= feetOffset * 0.25f;
 				else if (LsFight() && IsEnemyPartVisible(HEAD))
 					m_aimSpot.z += -4.0f + 7.0f * LsSkill();
 

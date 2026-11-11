@@ -195,6 +195,18 @@ void HuntState::OnUpdate(CCSBot *me)
 			}
 		}
 
+		// Loner-Strike: on a bomb or hostage map: somewhere worth going - forward, toward the
+		// objectives and the other side, never wandering back to its own spawn
+		if (LsFight() && !LsSolo() && TheCSBots()->GetScenario() != CCSBotManager::SCENARIO_DEATHMATCH)
+		{
+			m_huntArea = me->LsObjectiveHuntArea();
+			if (m_huntArea && me->ComputePath(m_huntArea, nullptr, SAFEST_ROUTE))
+			{
+				me->LsWhy("hunt: forward");
+				return;
+			}
+		}
+
 		me->LsWhy("hunt-stock");
 		m_huntArea = nullptr;
 		float oldest = 0.0f;
@@ -220,17 +232,21 @@ void HuntState::OnUpdate(CCSBot *me)
 		}
 
 		// if all the areas were too small, pick one at random
-		int which = RANDOM_LONG(0, areaCount - 1);
-
-		areaCount = 0;
-		for (auto area : TheNavAreaList)
+		// (Loner-Strike: only then - stock always overwrote the oldest-area pick with this)
+		if (!m_huntArea || !LsFight())
 		{
-			m_huntArea = area;
+			int which = RANDOM_LONG(0, areaCount - 1);
 
-			if (which == areaCount)
-				break;
+			areaCount = 0;
+			for (auto area : TheNavAreaList)
+			{
+				m_huntArea = area;
 
-			which--;
+				if (which == areaCount)
+					break;
+
+				which--;
+			}
 		}
 
 		if (m_huntArea)

@@ -598,6 +598,14 @@ void AttackState::OnUpdate(CCSBot *me)
 	}
 	else
 		me->m_lsHoldSince = 0.0f;
+	// (Loner-Strike: the wrong gun for the distance and it isn't being shot at: no spraying from
+	// out of range - in closer first)
+	if (LsFight() && me->LsOutOfRange(pEnemy, lsRange))
+	{
+		lsHoldFire = true;
+		if (gpGlobals->time > me->m_lsPushUntil && !me->IsUsingSniperRifle())
+			me->m_lsPushUntil = gpGlobals->time + RANDOM_FLOAT(0.8f, 1.4f);
+	}
 
 	if (gpGlobals->time > m_reacquireTimestamp && !lsHoldFire)
 		me->FireWeaponAtEnemy();

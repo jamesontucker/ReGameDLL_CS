@@ -1852,9 +1852,16 @@ void CCSBot::LsSneak()
 		if (GetLastKnownArea() && LsKnows(LSK_TIMINGS) && !LsRushing())
 		{
 			float arrive = LsArrival(GetLastKnownArea(), m_iTeam == CT ? TERRORIST : CT);
-			contact = arrive > 0.0f && elapsed > arrive - 2.0f && elapsed < arrive + 10.0f;
+			// (only somewhere it takes them a while to reach: not by its own spawn)
+			contact = arrive > 10.0f && elapsed > arrive - 2.0f && elapsed < arrive + 10.0f;
 		}
-		want = danger > 0.1f || (lateRound && m_lsSneakLate) || IsNoiseHeard() || contact;
+		// (a noise close by and fresh, not gunfire across the map)
+		bool noiseClose = IsNoiseHeard() && gpGlobals->time - m_noiseTimestamp < 6.0f && (m_noisePosition - pev->origin).IsLengthLessThan(1200.0f);
+		want = danger > 0.1f || (lateRound && m_lsSneakLate) || noiseClose || contact;
+		// (nobody creeps out of their own spawn: nothing's near yet, unless it's heard close)
+		const Vector *home = LsEnemySpawn(m_iTeam == CT ? TERRORIST : CT);
+		if (want && home && (*home - pev->origin).IsLengthLessThan(1000.0f) && !noiseClose)
+			want = false;
 	}
 	// the last one alive against some of them, with time for it: quiet (a clutch is won by
 	// not being heard), whoever it is, once it's not a newer player
@@ -2011,6 +2018,7 @@ static FILE *LsTraceFile()
 			return nullptr;
 		fprintf(s_file, "#cols,time,id,team,state,task,enemy,leader,goal_x,goal_y,noise_x,noise_y,why,why_ago,speed,view_off,attacking,look,x,y,z,hp,weapon,crouched\n");
 		fprintf(s_file, "#cols_why,time,id,team,x,y,z,why\n");
+		fprintf(s_file, "#cols_attack,time,id,team,enemy,since_first_saw,range\n");
 	}
 	static char s_map[64] = "";
 	static float s_last = 0.0f;
@@ -2041,6 +2049,19 @@ void CCSBot::LsWhy(const char *why)
 
 // ls_mark [note]: a moment the person playing flagged (a key bound to it): found again later
 // among the bots' lines around that time
+void CCSBot::LsTraceAttack()
+{
+	if (cv_bot_ls_trace.value <= 0.0f)
+		return;
+	FILE *f = LsTraceFile();
+	CBasePlayer *pEnemy = GetEnemy();
+	if (!f || !pEnemy)
+		return;
+	fprintf(f, "#attack,%.2f,%d,%d,%d,%.2f,%.0f\n", gpGlobals->time, entindex(), m_iTeam, pEnemy->entindex(),
+		gpGlobals->time - m_firstSawEnemyTimestamp, float((pEnemy->pev->origin - pev->origin).Length()));
+	fflush(f);
+}
+
 void LsTraceMark()
 {
 	FILE *f = LsTraceFile();
@@ -5371,7 +5392,10 @@ void CCSBot::LsNoteDeath(CBasePlayer *pKiller)
 void CCSBot::LsImpactNearMate(CBasePlayer *pShooter, const Vector &impact)
 {
 	float now = gpGlobals->time;
-	if (now - m_lsImpactAt < 2.0f || !pShooter->IsPlayer() || !pShooter->IsAlive() || !IsEnemy(pShooter) || IsAttacking() || LsSolo())
+	if (now - m_lsImpactAt < 6.0f || !pShooter->IsPlayer() || !pShooter->IsAlive() || !IsEnemy(pShooter) || IsAttacking() || LsSolo())
+		return;
+	// (already on a fresh noise: that comes first)
+	if (IsNoiseHeard() && now - m_noiseTimestamp < 4.0f)
 		return;
 	if ((impact - pev->origin).IsLengthLessThan(150.0f) || (impact - pev->origin).IsLengthGreaterThan(1300.0f))
 		return;
@@ -5383,7 +5407,7 @@ void CCSBot::LsImpactNearMate(CBasePlayer *pShooter, const Vector &impact)
 	if (!mate)
 		return;
 	m_lsImpactAt = now;
-	if (RANDOM_FLOAT(0.0f, 1.0f) > 0.3f + 0.7f * LsSkill())
+	if (RANDOM_FLOAT(0.0f, 1.0f) > 0.2f + 0.4f * LsSkill())
 		return;
 	// (the shooter as heard, roughly)
 	float err = float((pShooter->pev->origin - pev->origin).Length()) * 0.12f;
@@ -5810,4 +5834,104 @@ void CCSBot::LsSmokeLaneTick()
 bool CCSBot::LsOrderActive() const
 {
 	return m_lsOrder.kind != 0 && gpGlobals->time < m_lsOrder.until;
+}
+
+// ---- objective hunting, range, shooting through cover --------------------------------------
+
+// Somewhere worth going on an objective map, out of a few dozen areas: not one nearer its own
+// spawn than it is now (no wandering home), on the way to the other side; a T leans to the
+// round's site and the bomb sites, a CT to the ways the Ts come; ones its team hasn't looked
+// at lately first
+CNavArea *CCSBot::LsObjectiveHuntArea()
+{
+	int n = (int)TheNavAreaList.size();
+	if (n < 2)
+		return nullptr;
+	const Vector *own = LsEnemySpawn(m_iTeam == CT ? TERRORIST : CT);
+	const Vector *theirs = LsEnemySpawn(m_iTeam);
+	if (!own || !theirs)
+		return nullptr;
+	float myHome = float((*own - pev->origin).Length2D());
+	const CCSBotManager::Zone *site = (m_iTeam == TERRORIST) ? LsTSite() : nullptr;
+	static std::vector<CNavArea *> s_list;
+	static int s_serial = -1;
+	if (s_serial != g_lsNavLoads || (int)s_list.size() != n)
+	{
+		s_serial = g_lsNavLoads;
+		s_list.assign(TheNavAreaList.begin(), TheNavAreaList.end());
+	}
+	CNavArea *best = nullptr;
+	float bestScore = -1e9f;
+	for (int t = 0; t < 40; t++)
+	{
+		CNavArea *a = s_list[RANDOM_LONG(0, n - 1)];
+		const Extent *e = a->GetExtent();
+		if (e->hi.x - e->lo.x < 100.0f || e->hi.y - e->lo.y < 100.0f || !LsHeadroom(a))
+			continue;
+		const Vector &c = *a->GetCenter();
+		float home = float((*own - c).Length2D());
+		if (home < myHome - 150.0f)
+			continue;
+		float score = Q_min(60.0f, gpGlobals->time - a->GetClearedTimestamp(m_iTeam - 1)) * 10.0f;
+		score += 0.3f * (home - myHome);
+		if (site)
+			score -= 0.4f * float((c - site->m_center).Length2D());
+		else if (m_iTeam == TERRORIST)
+		{
+			float nearest = 1e9f;
+			for (int z = 0; z < TheCSBots()->GetZoneCount(); z++)
+				nearest = Q_min(nearest, float((c - TheCSBots()->GetZone(z)->m_center).Length2D()));
+			score -= 0.3f * nearest;
+		}
+		score += RANDOM_FLOAT(0.0f, 150.0f);
+		if (score > bestScore)
+		{
+			bestScore = score;
+			best = a;
+		}
+	}
+	return best;
+}
+
+// Its gun can't do anything from here (a shotgun across a room, an SMG or a pistol down a long
+// lane) and the enemy isn't on it: a player who knows closes in instead of spraying; a newer one
+// sprays anyway. One called nearly dead is worth a go from anywhere
+bool CCSBot::LsOutOfRange(CBasePlayer *pEnemy, float range)
+{
+	if (!LsFight() || LsSkill() < 0.3f || !pEnemy)
+		return false;
+	int mine = LsGunClass(this);
+	bool tooFar = (mine == LSG_SHOTGUN && range > 900.0f) || (mine == LSG_SMG && range > 1600.0f) || (mine == LSG_PISTOL && range > 1500.0f);
+	if (!tooFar)
+		return false;
+	float hp = 100.0f;
+	if (LsKnownHurt(pEnemy, m_iTeam, &hp) && hp < 30.0f)
+		return false;
+	// (it's shooting at it: no standing there taking it - fire back)
+	if (GetAttacker() == pEnemy && GetTimeSinceAttacked() < 1.5f)
+		return false;
+	return true;
+}
+
+// Only the enemy's head showing over something (a box, a thin wall) and the bullet would go
+// through it at the chest: the better players who know what's bangable aim there. Looked at a
+// few times a second
+bool CCSBot::LsBangChest()
+{
+	float now = gpGlobals->time;
+	if (now < m_lsBangChestAt)
+		return m_lsBangChest;
+	m_lsBangChestAt = now + 0.3f;
+	m_lsBangChest = false;
+	CBasePlayer *pEnemy = m_enemy;
+	CBasePlayerWeapon *pGun = GetActiveWeapon();
+	if (!LsFight() || !pEnemy || !pGun || LsSkill() < 0.55f || !LsKnows(LSK_PENETRATION))
+		return false;
+	int cls = LsGunClass(this);
+	if (cls != LSG_RIFLE && cls != LSG_SNIPER && cls != LSG_DEAGLE && cls != LSG_MG)
+		return false;
+	Vector chest = pEnemy->pev->origin + Vector(0, 0, 10.0f);
+	TraceResult first;
+	m_lsBangChest = LsBulletGetsThrough(this, pGun->m_iId, GetEyePosition(), chest, &first);
+	return m_lsBangChest;
 }

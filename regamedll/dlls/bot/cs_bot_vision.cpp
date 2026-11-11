@@ -1508,6 +1508,15 @@ CBasePlayer *CCSBot::FindMostDangerousThreat()
 				float lsHp = 100.0f;
 				if (LsSkill() > 0.35f && LsKnownHurt(pThreat, m_iTeam, &lsHp) && lsHp < 40.0f)
 					score *= 0.75f;
+				// (only a head or a shoulder showing - over a box, round an edge - far off and not
+				// shooting: easier to miss than a whole body; the better players miss it less)
+				if (threat[t].range > 500.0f * 500.0f && pThreat != static_cast<CBasePlayer *>(m_enemy)
+					&& !(GetAttacker() == pThreat && GetTimeSinceAttacked() < 3.0f))
+				{
+					unsigned char parts = 0;
+					if (IsVisible(pThreat, false, &parts) && !(parts & CHEST) && RANDOM_FLOAT(0.0f, 1.0f) < 0.45f * (1.0f - 0.6f * LsSkill()))
+						continue;
+				}
 				// (darkness, a little: someone still in the dark, far off and not shooting is
 				// noticed a moment later - a small part of it, never up close)
 				if (threat[t].range > 600.0f * 600.0f && pThreat->pev->light_level < 20 && pThreat->pev->velocity.Length2D() < 80.0f
@@ -1934,18 +1943,25 @@ void CCSBot::LsWallSanity()
 
 	float moving = pev->velocity.Length2D();
 	float goYaw = moving > 60.0f ? UTIL_VecToYaw(pev->velocity) : pev->v_angle.y;
+	// (walking at a wall its path turns away from just ahead: that's a corner it's about to
+	// round - the path's own look ahead has it, not a turn off somewhere else)
+	if (moving > 60.0f && HasPath() && m_pathIndex < m_pathLength - 1 && (m_goalPosition - pev->origin).IsLengthLessThan(350.0f))
+		return;
 	float best = -1.0f;
 	Vector bestAt = eye;
 	for (int k = 0; k < 12; k++)
 	{
 		float yaw = pev->v_angle.y + 30.0f * float(k <= 6 ? k : k - 12);
+		// (on the move: forward of it only - never a look back over the shoulder from here)
+		if (moving > 60.0f && Q_abs(NormalizeAngle(yaw - goYaw)) > 80.0f)
+			continue;
 		Vector dir(BotCOS(yaw), BotSIN(yaw), 0.0f);
 		float open = 1500.0f * LsClearTo(eye, eye + dir * 1500.0f, ENT(pev));
 		if (open < 300.0f)
 			continue;
 		float score = open - 2.0f * float(Q_abs(NormalizeAngle(yaw - pev->v_angle.y)));
-		if (moving > 60.0f && Q_abs(NormalizeAngle(yaw - goYaw)) < 35.0f)
-			score += 400.0f;
+		if (moving > 60.0f)
+			score += 600.0f - 8.0f * float(Q_abs(NormalizeAngle(yaw - goYaw)));
 		if (score > best)
 		{
 			best = score;

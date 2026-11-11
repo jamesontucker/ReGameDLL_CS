@@ -448,9 +448,12 @@ const Vector *CCSBot::LsOffAngle(const Vector *stockPick, const Vector *pos, CNa
 	// (a sneaky one, now and then, takes the darkest of them: a small part of it, only between
 	// spots that are already good angles)
 	int style = LsStyle();
-	if ((style == LS_STYLE_NINJA || style == LS_STYLE_LURKER || style == LS_STYLE_CAMPER) && offCount > 1 && RANDOM_FLOAT(0.0f, 1.0f) < 0.5f)
+	int pick = RANDOM_LONG(0, offCount - 1);
+	if ((style == LS_STYLE_NINJA || style == LS_STYLE_LURKER || style == LS_STYLE_CAMPER) && offCount > 1 && RANDOM_FLOAT(0.0f, 1.0f) < 0.2f)
 	{
-		int dark = 0, least = 9999;
+		// (only a clearly darker one - shade's never worth more than the angle and cover all
+		// these spots already have)
+		int dark = pick, least = LsLightAt(*offAngle[pick]), first = least;
 		for (int i = 0; i < offCount && i < 12; i++)
 		{
 			int light = LsLightAt(*offAngle[i]);
@@ -460,9 +463,10 @@ const Vector *CCSBot::LsOffAngle(const Vector *stockPick, const Vector *pos, CNa
 				dark = i;
 			}
 		}
-		return offAngle[dark];
+		if (first - least > 40)
+			pick = dark;
 	}
-	return offAngle[RANDOM_LONG(0, offCount - 1)];
+	return offAngle[pick];
 }
 
 // ---- prefiring --------------------------------------------------------------------------
@@ -633,6 +637,7 @@ bool CCSBot::LsScopesClose()
 // up the wrong way, holding walk or crouch for a moment
 void CCSBot::LsAttackBegins(bool crouchAndHold)
 {
+	LsTraceAttack();
 	m_lsPanicUntil = 0.0f;
 	m_lsPanicKind = 0;
 	if (!LsFight() || LsMatch() || IsUsingKnife() || IsUsingLadder() || IsBlind())

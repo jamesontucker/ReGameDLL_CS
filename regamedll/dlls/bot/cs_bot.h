@@ -1253,7 +1253,13 @@ public:
 	float m_lsHePlanAt = 0.0f;						// Gun Game's grenade level: next time it works out an arc
 	float m_lsExecCheckAt = 0.0f;
 	float m_lsJiggleJumpUntil = 0.0f;
-	int m_lsRetakeWayRound = -1;					// the round it picked its way into a retake
+	int m_lsRetakeWayRound = -1;
+	CNavArea *LsObjectiveHuntArea();				// somewhere worth going on an objective map: forward, not back to its spawn
+	bool LsOutOfRange(CBasePlayer *pEnemy, float range);	// its gun can't do anything from here: close in, don't spray
+	bool LsBangChest();								// only a head showing over something a bullet goes through: the chest, through it
+	float m_lsBangChestAt = 0.0f;
+	bool m_lsBangChest = false;
+	void LsTraceAttack();							// bot_ls_trace: a fight starting, and how long it took to react					// the round it picked its way into a retake
 	void LsRetakeApproach();				// mid jump-peek (in the air: still the jiggle)					// a smoke for the AWP lane it just got out of, thrown from cover then
 	Vector m_lsSmokeLaneSpot;
 	void LsSmokeLaneTick();
