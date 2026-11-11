@@ -1508,15 +1508,6 @@ CBasePlayer *CCSBot::FindMostDangerousThreat()
 				float lsHp = 100.0f;
 				if (LsSkill() > 0.35f && LsKnownHurt(pThreat, m_iTeam, &lsHp) && lsHp < 40.0f)
 					score *= 0.75f;
-				// (only a head or a shoulder showing - over a box, round an edge - far off and not
-				// shooting: easier to miss than a whole body; the better players miss it less)
-				if (threat[t].range > 500.0f * 500.0f && pThreat != static_cast<CBasePlayer *>(m_enemy)
-					&& !(GetAttacker() == pThreat && GetTimeSinceAttacked() < 3.0f))
-				{
-					unsigned char parts = 0;
-					if (IsVisible(pThreat, false, &parts) && !(parts & CHEST) && RANDOM_FLOAT(0.0f, 1.0f) < 0.45f * (1.0f - 0.6f * LsSkill()))
-						continue;
-				}
 				// (darkness, a little: someone still in the dark, far off and not shooting is
 				// noticed a moment later - a small part of it, never up close)
 				if (threat[t].range > 600.0f * 600.0f && pThreat->pev->light_level < 20 && pThreat->pev->velocity.Length2D() < 80.0f
@@ -1848,13 +1839,15 @@ bool CCSBot::IsNoticable(const CBasePlayer *pPlayer, unsigned char visibleParts)
 		{
 			// crouching and motionless - very tough to notice
 			closeChance = 80.0f;
-			farChance = 5.0f;		// takes about three seconds to notice (50% chance)
+			farChance = LsFight() ? 25.0f : 5.0f;		// takes about three seconds to notice (50% chance)
 		}
 		// standing
 		else
 		{
+			// (Loner-Strike: someone standing in plain view far off is still seen - stock's 10%
+			// a quarter second left a person holding an angle unseen for seconds at 800 units)
 			closeChance = 100.0f;
-			farChance = 10.0f;
+			farChance = LsFight() ? 50.0f : 10.0f;
 		}
 	}
 
@@ -1866,6 +1859,15 @@ bool CCSBot::IsNoticable(const CBasePlayer *pPlayer, unsigned char visibleParts)
 
 	// scale by skill level
 	noticeChance *= (0.5f + 0.5f * GetProfile()->GetSkill());
+
+	// Loner-Strike: where in the view: someone near the middle of it is seen at once, one at the
+	// edge of the view less readily (attention, as a person's)
+	if (LsFight())
+	{
+		Vector to = pPlayer->pev->origin - pev->origin;
+		float off = float(fabs(NormalizeAngle(UTIL_VecToYaw(to) - pev->v_angle.y)));
+		noticeChance *= off < 15.0f ? 2.5f : off < 35.0f ? 1.4f : 0.7f;
+	}
 
 	// if we are alert, our chance of noticing is much higher
 	//if (IsAlert())
