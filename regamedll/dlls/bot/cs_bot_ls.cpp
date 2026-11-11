@@ -4406,13 +4406,14 @@ bool CCSBot::LsMatchup(CBasePlayer *pEnemy)
 	else if (GetTimeSinceAttacked() < 0.3f && now > m_lsDuckAt && !IsReloading() && pEnemy->IsAlive())
 	{
 		// (not like clockwork: a while before the next, and sometimes it just stays up)
-		m_lsDuckAt = now + RANDOM_FLOAT(2.5f, 4.0f);
+		m_lsDuckAt = now + RANDOM_FLOAT(1.5f, 4.0f);
 		int kind = LsMapKind();
 		bool aim = kind == LSMAP_AIM || kind == LSMAP_FY || kind == LSMAP_AWP;
 		float odds = aim ? 0.3f + 0.5f * LsSkill() : 0.4f * LsSkill();
 		if (LsSkill() > 0.35f && RANDOM_FLOAT(0.0f, 1.0f) < odds && LsLowCoverToward(pEnemy->pev->origin))
 		{
-			m_lsDuckUntil = now + RANDOM_FLOAT(0.5f, 1.0f);
+			// (a quick dip and straight back up for the better ones; newer ones stay down longer)
+			m_lsDuckUntil = now + RANDOM_FLOAT(0.3f, 0.6f) + 0.4f * (1.0f - LsSkill());
 			Crouch();
 			LsWhy("down behind cover");
 		}
