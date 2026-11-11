@@ -55,6 +55,8 @@ void AttackState::OnEnter(CCSBot *me)
 
 	m_repathTimer.Invalidate();
 	m_haveSeenEnemy = me->IsEnemyVisible();
+	m_lsVisibleFor = 0.0f;
+	m_lsVisibleAt = gpGlobals->time;
 	m_nextDodgeStateTimestamp = 0.0f;
 	m_firstDodge = true;
 	m_isEnemyHidden = false;
@@ -209,6 +211,10 @@ void AttackState::OnUpdate(CCSBot *me)
 	// keep track of whether we have seen our enemy at least once yet
 	if (!m_haveSeenEnemy)
 		m_haveSeenEnemy = me->IsEnemyVisible();
+	// (Loner-Strike: and for how long, this fight)
+	if (me->IsEnemyVisible())
+		m_lsVisibleFor += Q_min(0.5f, gpGlobals->time - m_lsVisibleAt);
+	m_lsVisibleAt = gpGlobals->time;
 
 	// Loner-Strike: the wrong gun for this range, a flashed enemy to push, low cover to reload behind
 	// Loner-Strike: out of bullets, the knife all it has left: not a charge at someone shooting
@@ -584,7 +590,9 @@ void AttackState::OnUpdate(CCSBot *me)
 		// Loner-Strike: only a glimpse of them (gone before it could react): a careful or good
 		// player doesn't charge through the gap after them - it holds an angle where they went;
 		// the bold and the newer ones go after them
-		if (LsFight() && !LsSolo() && !m_haveSeenEnemy)
+		// (a glimpse: under about 0.6 s in view this fight - a quick player recognises someone in
+		// a frame, so "seen at all" isn't the test; the ones who don't hold go after them below)
+		if (LsFight() && !LsSolo() && (!m_haveSeenEnemy || m_lsVisibleFor < 0.6f))
 		{
 			int style = me->LsStyle();
 			float holdOdds = (0.15f + 0.6f * me->LsSkill()) * (1.0f - 0.5f * me->LsAggro())
@@ -595,13 +603,11 @@ void AttackState::OnUpdate(CCSBot *me)
 				return;
 			}
 		}
-		else
-		{
-			// move to last known position of enemy
-			me->SetTask(CCSBot::MOVE_TO_LAST_KNOWN_ENEMY_POSITION, pEnemy);
-			me->MoveTo(&me->GetLastKnownEnemyPosition());
-			return;
-		}
+
+		// move to last known position of enemy
+		me->SetTask(CCSBot::MOVE_TO_LAST_KNOWN_ENEMY_POSITION, pEnemy);
+		me->MoveTo(&me->GetLastKnownEnemyPosition());
+		return;
 	}
 
 	// if we can't see our enemy at the moment, and were shot by

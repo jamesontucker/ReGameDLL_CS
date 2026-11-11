@@ -104,6 +104,8 @@ protected:
 	CountdownTimer m_repathTimer;
 	float m_scopeTimestamp;
 	bool m_haveSeenEnemy;
+	float m_lsVisibleFor = 0.0f;			// Loner-Strike: seconds the enemy has been in view this fight
+	float m_lsVisibleAt = 0.0f;
 	bool m_isEnemyHidden;
 	float m_reacquireTimestamp;
 	float m_shieldToggleTimestamp;
@@ -1745,6 +1747,7 @@ float LsTimeLeft();	// the round's time left (a lot, when the round never runs o
 int LsRoundSerial();
 const CCSBotManager::Zone *LsTSite();	// the Ts' site this round
 void LsTeamCall(const CCSBotManager::Zone *zone, bool rush);	// a person called the site ("rush b"): the team's site, rushed or gathered
+void LsTeamCallOff();					// "nvm": the call's rush is off (the site it named stays)
 bool LsTeamCalled(bool *rush);			// a person called this round's site (and whether it was a rush)
 void LsCtSiteDeath(CBasePlayer *pVictim);	// a CT down by a site: two in seconds and the site's being hit
 void LsTSiteDeath(CBasePlayer *pVictim);	// a T down at it early: two and the team goes for the other	// a count of rounds that only goes up (a restart sets the game's own back to 0)

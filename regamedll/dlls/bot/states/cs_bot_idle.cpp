@@ -421,7 +421,9 @@ void IdleState::OnUpdate(CCSBot *me)
 					if (LsMatch())
 						push *= 0.6f;
 					me->m_lsCtPushRound = LsRoundSerial();
-					me->m_lsCtPush = RANDOM_FLOAT(0.0f, 1.0f) < push;
+					// (decided late - it spent the opening on an order or following someone - it
+					// doesn't wander off alone mid-round)
+					me->m_lsCtPush = TheCSBots()->GetElapsedRoundTime() < 25.0f && RANDOM_FLOAT(0.0f, 1.0f) < push;
 					me->m_lsCtPushed = false;
 				}
 				// (the push is the round's first move; after it, back to a site)
@@ -457,7 +459,10 @@ void IdleState::OnUpdate(CCSBot *me)
 					if (area)
 					{
 						me->SetTask(CCSBot::GUARD_BOMB_ZONE);
-						me->Hide(area, RANDOM_FLOAT(15.0f, 40.0f), 900.0f);
+						// (a spot on or close by the site: within 900 they scattered into the
+						// approaches - nuke's lobby, hut, outside - one by one, and the Ts' pack
+						// met them alone)
+						me->Hide(area, RANDOM_FLOAT(15.0f, 40.0f), 600.0f);
 						me->SetDisposition(CCSBot::OPPORTUNITY_FIRE);
 						me->LsWhy("hold-site");
 						return;

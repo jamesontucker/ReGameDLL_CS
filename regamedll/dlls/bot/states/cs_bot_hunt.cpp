@@ -168,7 +168,12 @@ void HuntState::OnUpdate(CCSBot *me)
 	// (Loner-Strike: stopped a moment to hold an angle on a sound: no moving on, and the eyes
 	// stay on that angle - still hunting, so no re-plan when it's over)
 	if (LsFight() && gpGlobals->time < me->m_lsHuntHoldUntil)
+	{
+		// (standing still on purpose: not stuck, and not giving up on the area it's in)
+		me->ClearMovement();
+		me->ResetStuckMonitor();
 		return;
+	}
 
 	// look around
 	me->UpdateLookAround();

@@ -87,7 +87,7 @@ void CCSBot::LsTeamTick()
 	// careful mostly go, a camper anchoring its own site mostly stays, a newer player often
 	// doesn't read it at all; in a match nearly all of them go. Decided once per hit
 	if (m_iTeam == CT && s_hitRound == round && s_hitCount >= 2 && now - s_hitAt < 12.0f && m_lsRotateHitAt != s_hitStart
-		&& !TheCSBots()->IsBombPlanted() && LsFree() && !IsAttacking() && !LsOrderActive() && !LsLoner())
+		&& !TheCSBots()->IsBombPlanted() && LsFree() && !IsAttacking() && !LsOrderActive() && !LsSolo())
 	{
 		m_lsRotateHitAt = s_hitStart;
 		const CCSBotManager::Zone *zone = TheCSBots()->GetZone(s_hitZone);
@@ -832,7 +832,8 @@ int CCSBot::LsPickRole()
 			CCSBot *pB = static_cast<CCSBot *>(pT);
 			// (nor ones whose part is already plain: a flanker-to-be, the sniper, the bomb, one in a fight)
 			int st = pB->LsStyle();
-			if (pB->IsCarryingBomb() || pB->IsAttacking() || LsGunClass(pB) == LSG_SNIPER
+			if (pB->IsCarryingBomb() || pB->IsAttacking() || LsGunClass(pB) == LSG_SNIPER || pB->m_state == &pB->m_fetchBombState
+				|| pB->m_lsPlantOrderRound == round
 				|| ((st == LS_STYLE_LURKER || st == LS_STYLE_NINJA) && s_roleCount[LSR_FLANK] == 0 && alive >= 3))
 				continue;
 			if (pB->m_lsRoleRound == round || pB->LsOrderActive() || pB->LsLurksOtherSite() || !s_execSite
@@ -1038,10 +1039,13 @@ void CCSBot::LsExecuteTick()
 	// a person's call: a rush goes now; and one who said yes heads for the site from wherever it
 	// is (running for a rush), the push picking it up once it's close
 	bool callRush = false;
-	bool called = LsTeamCalled(&callRush) && m_lsCallRound == round;
+	// (and on a rush the bomb carrier goes with them: it only heard where the team's going)
+	bool called = LsTeamCalled(&callRush) && (m_lsCallRound == round || (callRush && IsCarryingBomb()));
 	if (LsTeamCalled(&callRush) && callRush && s_execGoAt <= 0.0f)
 		s_execGoAt = now;
-	if (called && dist >= 1700.0f && !IsAttacking() && now >= m_lsExecCheckAt
+	// (not over a cover run, an avenge hold, a trade or a noise it's looking into: those first)
+	if (called && dist >= 1700.0f && !IsAttacking() && now >= m_lsExecCheckAt && (LsFree() || IsCarryingBomb()) && !IsHiding()
+		&& m_ignoreEnemiesTimer.IsElapsed() && now - m_lsCoverPickAt > 3.0f && m_state != &m_investigateNoiseState
 		&& (!HasPath() || (GetPathEndpoint() - site->m_center).IsLengthGreaterThan(900.0f)))
 	{
 		m_lsExecCheckAt = now + 0.5f;
@@ -1431,7 +1435,8 @@ void CCSBot::LsAvenge(CBasePlayer *pVictim, CBasePlayer *pKiller)
 	{
 		float secs = RANDOM_FLOAT(3.0f, 6.0f) * (0.7f + 0.6f * (1.0f - LsAggro())) * (lean > 1.2f ? 1.4f : 1.0f);
 		// (already holding a spot: it stays there - only the eyes go to the killer's angle)
-		if (!(IsHiding() && IsAtHidingSpot()))
+		// (and one on its way to cover keeps going there - only the eyes turn)
+		if (!IsHiding() && gpGlobals->time - m_lsCoverPickAt > 3.0f)
 			Hide(GetLastKnownArea(), secs, 250.0f, true);
 		// (the eyes stay on that angle for the hold, not just the first glance: the glance
 		// above would block the pre-aim's lower priority)

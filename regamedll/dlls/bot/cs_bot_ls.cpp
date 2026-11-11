@@ -552,6 +552,12 @@ void LsTeamCall(const CCSBotManager::Zone *zone, bool rush)
 		}
 }
 
+void LsTeamCallOff()
+{
+	if (s_callRound == LsRoundSerial())
+		s_callRush = false;
+}
+
 bool LsTeamCalled(bool *rush)
 {
 	bool on = s_callRound == LsRoundSerial();
@@ -1176,13 +1182,18 @@ void Bot_LsServerCommand()
 	// the bomb or a ladder
 	// (push: a person's call for the team's site counts even if this one is busy - in a fight,
 	// carrying the bomb; only its own joining in waits on that)
-	if (FStrEq(what, "push") && me->m_iTeam == TERRORIST && TheCSBots()->GetScenario() == CCSBotManager::SCENARIO_DEFUSE_BOMB
-		&& !TheCSBots()->IsBombPlanted())
+	// (the whole of it here, not behind the busy gate below: it's a mark, not a move - a bot in a
+	// fight joins the push once the fight's over; a "no" is a "no" even mid-fight)
+	if (FStrEq(what, "push"))
 	{
-		Vector at(LsArg(3), LsArg(4), LsArg(5));
-		LsTeamCall(TheCSBots()->GetClosestZone(&at), LsArg(6) == 1.0f);
-		if (LsArg(6) >= 3.0f)
-			return;
+		if (me->m_iTeam == TERRORIST && TheCSBots()->GetScenario() == CCSBotManager::SCENARIO_DEFUSE_BOMB && !TheCSBots()->IsBombPlanted())
+		{
+			Vector at(LsArg(3), LsArg(4), LsArg(5));
+			LsTeamCall(TheCSBots()->GetClosestZone(&at), LsArg(6) == 1.0f);
+			if (LsArg(6) < 3.0f)
+				me->LsPuppetCommand(what, now);
+		}
+		return;
 	}
 	bool order = FStrEq(what, "goto") || FStrEq(what, "push") || FStrEq(what, "follow") || (FStrEq(what, "hold") && CMD_ARGC() > 4 && FStrEq(CMD_ARGV(4), "bc"));
 	// (look ... 2: an urgent turn, toward someone it senses behind it mid-fight: only an
@@ -1244,10 +1255,12 @@ void CCSBot::LsPuppetCommand(const char *what, float now)
 			m_lsOrder = LsOrder();
 			pev->vuser1.x = 0.0f;
 			// (out of a called push too: back to its own game)
+			// (out of the push, back to its own game - not sent to the other site - and no more
+			// forced rush for the team)
 			if (m_lsCallRound == LsRoundSerial())
 			{
 				m_lsCallRound = -1;
-				m_lsCallSkipRound = LsRoundSerial();
+				LsTeamCallOff();
 				if (LsExecuting())
 					Idle();
 			}
@@ -1390,8 +1403,12 @@ void CCSBot::LsPuppetCommand(const char *what, float now)
 		m_lsCallRound = round;
 		m_lsCallSkipRound = -1;
 		m_lsOrder = LsOrder();
-		p.holdUntil = p.crouchUntil = p.lookUntil = 0.0f;
-		p.holdTag[0] = '\0';
+		// (a plugin's hold goes; one in a fight keeps fighting - the push waits for it)
+		if (!IsAttacking())
+		{
+			p.holdUntil = p.crouchUntil = p.lookUntil = 0.0f;
+			p.holdTag[0] = '\0';
+		}
 		m_lsExecCheckAt = 0.0f;
 		pev->fuser4 = now; m_lsOrderFields = true;	// (taken: gm_botchat reads it)
 		pev->vuser1.x = now + 30.0f;
