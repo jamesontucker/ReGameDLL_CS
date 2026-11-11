@@ -615,8 +615,11 @@ void CCSBot::LsTeamTick()
 	// out of bullets with no gun lying in sight: most keep a step behind the nearest teammate (a
 	// trade, and a gun from the next one to fall) rather than hunt with the knife; a knifer, and
 	// some rushers and bold newer players, keep on with the knife (decided once a round)
+	// (not while there's an enemy about: it stays in the cover it took until they're out of sight
+	// a while - back and forth between the cover and a teammate in a fight otherwise)
 	if (LsFight() && LsTeamGame() && LsOutOfAmmo() && !LsWeaponModeOn() && !TheCSBots()->IsRoundOver() && !IsAttacking() && LsFree()
-		&& !LsOrderActive() && !IsCarryingBomb() && !m_lsSwapBox.IsValid() && m_state == &m_huntState && now >= m_lsEmptyTagAt)
+		&& !LsOrderActive() && !IsCarryingBomb() && !m_lsSwapBox.IsValid() && m_state == &m_huntState && now >= m_lsEmptyTagAt
+		&& GetTimeSinceLastSawEnemy() > 3.0f)
 	{
 		m_lsEmptyTagAt = now + RANDOM_FLOAT(0.6f, 1.5f);
 		if (m_lsEmptyRound != round)
