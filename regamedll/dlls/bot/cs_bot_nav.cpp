@@ -225,6 +225,31 @@ void CCSBot::MoveTowardsPosition(const Vector *pos)
 			}
 		}
 
+		// Loner-Strike: a ledge up ahead, at speed: the jump goes a little earlier. From the 30-unit
+		// look the face was about 14 units off, and at a run the bot met the wall before it was
+		// up high enough - stuck against the ledge, jumping again and again. Only for a real
+		// ledge: floor still under the near look, a flat top past the face (not stairs or a slope)
+		if (!jumped && LsFight())
+		{
+			float speed = float(pev->velocity.Length2D());
+			if (speed > 120.0f)
+			{
+				float early = 30.0f + Q_min(34.0f, 0.13f * speed);
+				Vector nearAhead = pev->origin + 30.0f * aheadRay;
+				nearAhead.z += HalfHumanHeight;
+				Vector farAhead = pev->origin + early * aheadRay;
+				farAhead.z += HalfHumanHeight;
+				float nearGround, farGround;
+				Vector farNormal;
+				if (GetSimpleGroundHeightWithFloor(&nearAhead, &nearGround) && nearGround - GetFeetZ() < StepHeight * 0.5f
+					&& GetSimpleGroundHeightWithFloor(&farAhead, &farGround, &farNormal) && farNormal.z > 0.9f
+					&& farGround - GetFeetZ() > StepHeight && farGround - GetFeetZ() < JumpCrouchHeight)
+				{
+					jumped = DiscontinuityJump(farGround);
+				}
+			}
+		}
+
 		if (!jumped)
 		{
 			// close up jumping

@@ -536,6 +536,21 @@ void CCSBot::SetLookAt(const char *desc, const Vector *pos, PriorityType pri, fl
 			}
 		}
 	}
+	// (and no look round - a noise up on the level above included - steeper than about 40
+	// degrees up: people look up to the edge it came from, not straight overhead for seconds;
+	// grenade throws lob high on purpose and are left alone)
+	if (LsFight() && desc && Q_strncmp(desc, "Grenade", 7))
+	{
+		Vector eye = pev->origin + pev->view_ofs;
+		Vector to = *pos - eye;
+		float across = Q_max(48.0f, float(to.Length2D()));
+		if (to.z > 0.84f * across)
+		{
+			lsLevelled = *pos;
+			lsLevelled.z = eye.z + 0.84f * across;
+			pos = &lsLevelled;
+		}
+	}
 
 	// if already looking at this spot, just extend the time
 	const float tolerance = 10.0f;
@@ -848,8 +863,13 @@ void CCSBot::UpdateLookAround(bool updateNow)
 		m_lsCornerCheckAt = gpGlobals->time + gap;
 		// (a newer player misses checks; a good one rarely does)
 		Vector corner;
-		if (RANDOM_FLOAT(0.0f, 1.0f) < 0.35f + 0.65f * skill && LsCornerAhead(&corner))
+		if (RANDOM_FLOAT(0.0f, 1.0f) < 0.35f + 0.65f * skill && LsCornerAhead(&corner)
+			// (the same edge it just checked: once is enough - walking past one far corner it
+			// kept being picked again and again, eyes stuck off to the side for seconds)
+			&& !(gpGlobals->time - m_lsLastCornerLookAt < 4.0f && (corner - m_lsLastCornerLook).Make2D().IsLengthLessThan(200.0f)))
 		{
+			m_lsLastCornerLook = corner;
+			m_lsLastCornerLookAt = gpGlobals->time;
 			// a newer player's eyes land roughly on it (low, off to a side); a good one's crosshair
 			// sits on the edge at head height, and stays there while it walks past (slicing the pie)
 			float sloppy = 1.0f - skill;

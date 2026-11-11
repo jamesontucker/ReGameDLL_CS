@@ -411,11 +411,17 @@ void CCSBot::LsTeamTick()
 				});
 				if (taken)
 					continue;
+				// (one try at each: it went for this one and didn't end up with it - can't take it,
+				// or something else pulled it away - it doesn't keep going back and forth)
+				if (static_cast<CBaseEntity *>(m_lsSwapLast) == pBox && now - m_lsSwapLastAt < 15.0f)
+					continue;
 				Vector to = pBox->pev->origin;
 				MoveTo(&to, FASTEST_ROUTE);
 				if (!HasPath())
 					continue;
 				m_lsSwapBox = pBox;
+				m_lsSwapLast = pBox;
+				m_lsSwapLastAt = now;
 				m_lsSwapUntil = now + 6.0f;
 				LsWhy("swap-gun");
 				break;
@@ -953,9 +959,53 @@ bool CCSBot::LsTeamHeard(GameEventType event, CBasePlayer *pPlayer)
 			}
 		}
 	}
-	// close behind them, not on top of them
-	Vector to = pPlayer->pev->origin - pev->origin;
-	Vector spot = pPlayer->pev->origin - to * (200.0f / d);
+	// near them for the trade, but its own angle: a spot 220-500 from them, clear of every
+	// teammate, that sees where the enemy is (or the teammate's area, when it doesn't know) -
+	// two players stacked on one spot are one spray's work; the nearer such spot to it. A
+	// newer player sometimes just runs in right behind them
+	const Vector &mate = pPlayer->pev->origin;
+	CNavArea *foeArea = pFoe && pFoe->IsAlive() ? TheNavAreaGrid.GetNearestNavArea(&pFoe->pev->origin) : nullptr;
+	CNavArea *mateArea = TheNavAreaGrid.GetNearestNavArea(&mate);
+	CNavArea *bestArea = nullptr;
+	float bestCost = 1e9f;
+	if (RANDOM_FLOAT(0.0f, 1.0f) < 0.4f + 0.6f * LsSkill())
+	{
+		for (auto area : TheNavAreaList)
+		{
+			const Vector &c = *area->GetCenter();
+			float fromMate = float((c - mate).Length2D());
+			if (fromMate < 220.0f || fromMate > 500.0f || Q_abs(c.z - mate.z) > 160.0f)
+				continue;
+			if (area->GetAttributes() & (NAV_JUMP | NAV_CROUCH))
+				continue;
+			if (foeArea ? !LsSees(area, foeArea) : (mateArea && !LsSees(area, mateArea)))
+				continue;
+			bool crowded = false;
+			LsForTeammates(this, [&](CBasePlayer *pOther) {
+				if ((pOther->pev->origin - c).IsLengthLessThan(200.0f))
+					crowded = true;
+			});
+			if (crowded)
+				continue;
+			// (nearer it, and not out past the teammate toward the enemy)
+			float cost = float((c - pev->origin).Length2D());
+			if (pFoe && pFoe->IsAlive() && (c - pFoe->pev->origin).Length2D() < (mate - pFoe->pev->origin).Length2D())
+				cost += 400.0f;
+			if (cost < bestCost)
+			{
+				bestCost = cost;
+				bestArea = area;
+			}
+		}
+	}
+	Vector spot;
+	if (bestArea)
+		spot = *bestArea->GetCenter();
+	else
+	{
+		Vector to = mate - pev->origin;
+		spot = mate - to * (200.0f / d);
+	}
 	MoveTo(&spot, FASTEST_ROUTE);
 	LsWhy("trade");
 	return true;

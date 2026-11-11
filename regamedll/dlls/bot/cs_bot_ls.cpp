@@ -1525,6 +1525,8 @@ CNavArea *CCSBot::LsPickHuntArea()
 		});
 	}
 
+	const Vector *ownSpawn = LsEnemySpawn(m_iTeam == CT ? TERRORIST : CT);
+
 	// (half the picks, when there's been gunfire in the last 10 s)
 	bool pullFight = m_lsFightHeardAt > 0.0f && gpGlobals->time - m_lsFightHeardAt < 10.0f && RANDOM_FLOAT(0.0f, 1.0f) < 0.5f;
 
@@ -1591,6 +1593,12 @@ CNavArea *CCSBot::LsPickHuntArea()
 			// and in deathmatch: not where it keeps getting killed
 			if (LsSolo() && LsOwnMemory())
 				score -= 800.0f * Q_min(1.0f, LsGetDanger(area));
+
+			// (a round with objectives: never back toward its own spawn - the wide-open places
+			// nobody's in are mostly the side's own backyard, and a loner kept wandering home)
+			if (!LsSolo() && TheCSBots()->GetScenario() != CCSBotManager::SCENARIO_DEATHMATCH && ownSpawn
+				&& (*c - *ownSpawn).Length2D() < (pev->origin - *ownSpawn).Length2D() - 200.0f)
+				score -= 3000.0f;
 
 			// near what this side looks after
 			if (kept)
@@ -4169,7 +4177,9 @@ bool CCSBot::LsScanAngles(bool holding)
 			TraceResult tr;
 			UTIL_TraceLine(eye, at[a], ignore_monsters, ENT(pev), &tr);
 			float len = float((at[a] - eye).Length());
-			if (tr.flFraction < 1.0f && tr.flFraction * len < Q_min(300.0f, 0.6f * len))
+			// (it has to actually see the place: the line gets there, or to within a step or so
+			// of it - a canyon wall 400 units off on a 1500-unit line is still a wall stare)
+			if (tr.flFraction < 1.0f && len - tr.flFraction * len > Q_max(120.0f, 0.12f * len))
 				continue;
 		}
 		float score = 1.0f + float(an.weight);
@@ -4211,6 +4221,16 @@ bool CCSBot::LsScanAngles(bool holding)
 		if (behind[a])
 			score *= fresh ? 0.03f : (style == LS_STYLE_CAREFUL || style == LS_STYLE_CAMPER) ? 0.25f : 0.1f;
 		// (checked a moment ago)
+		// (the same place, by where it is: walking along, each step's areas list their own
+		// neighbouring bits of the same far spot - those count as the one it just checked)
+		for (int r = 0; r < 8; r++)
+		{
+			if (!m_lsScanArea[r] || now - m_lsScanAt[r] >= (holding ? 6.0f : 4.0f) || m_lsScanArea[r] == an.area + 1)
+				continue;
+			CNavArea *was = LsKnowArea(m_lsScanArea[r] - 1);
+			if (was && (*was->GetCenter() - tc).IsLengthLessThan(250.0f))
+				score *= 0.15f;
+		}
 		for (int r = 0; r < 8; r++)
 			if (m_lsScanArea[r] == an.area + 1 && now - m_lsScanAt[r] < (holding ? 6.0f : 4.0f))
 				score *= 0.2f;
@@ -4934,6 +4954,10 @@ bool CCSBot::LsTakeCoverFrom(const Vector &threat, float minMove, bool fromFight
 {
 	if (!m_lastKnownArea || IsUsingLadder() || (IsAttacking() && !fromFight))
 		return false;
+	// (it picked a spot a moment ago and is on its way: that stands - two reasons for cover at
+	// once, a reload and a fight, picked one after the other each think)
+	if (gpGlobals->time - m_lsCoverPickAt < 0.8f)
+		return true;
 	// (never off a plant, a defuse, a run from the bomb, or with hostages following)
 	if (m_state == &m_plantBombState || m_state == &m_defuseBombState || IsEscapingFromBomb() || m_hostageEscortCount > 0)
 		return false;
@@ -5014,6 +5038,7 @@ bool CCSBot::LsTakeCoverFrom(const Vector &threat, float minMove, bool fromFight
 	travel *= 1.4f;
 	Hurry(travel + 0.5f);
 	Hide(&spot, hold + travel);
+	m_lsCoverPickAt = gpGlobals->time;
 	// (on the way it shoots what it meets but doesn't go off after noises - the shot that sent
 	// it there is one)
 	SetDisposition(OPPORTUNITY_FIRE);
@@ -5895,6 +5920,58 @@ void CCSBot::LsPublishState()
 			flags |= 16;
 	}
 	pev->vuser1.y = float(flags);
+	LsPressureTick();
+}
+
+// Pressure: what's coming at it right now - damage taken in the last few seconds, teammates
+// going down near it, more than one enemy on it, and being low. It builds and fades (about 3 s).
+// How a bot takes it is who it is: the weaker, the bolder and the hot-headed crack - faster
+// clicks, longer sprays, shakier aim - while a strong player tightens up and picks its shots,
+// as good players do. Published for the aim plugin in vuser1.z: above 0 the strain toward
+// panic, below 0 composure (0 none). Not for stock bots
+void CCSBot::LsPressureTick()
+{
+	float now = gpGlobals->time;
+	float dt = Q_min(1.0f, Q_max(0.0f, now - m_lsPressureAt));
+	m_lsPressureAt = now;
+	if (!LsFight() || !IsAlive())
+	{
+		m_lsPressure = 0.0f;
+		m_lsPressureHp = pev->health;
+		pev->vuser1.z = 0.0f;
+		return;
+	}
+	// (fading: about a third left after 3 s)
+	m_lsPressure *= Q_max(0.0f, 1.0f - dt / 3.0f);
+	// (hits: a full health bar's worth is a lot of pressure)
+	float lost = m_lsPressureHp - pev->health;
+	if (lost > 0.0f)
+		m_lsPressure += lost / 70.0f;
+	m_lsPressureHp = pev->health;
+	// (a teammate dropping close by)
+	if (now - m_lsPressureDeathAt > 1.5f && LsRecentDeathNear(m_iTeam, pev->origin, 900.0f, 1.0f))
+	{
+		m_lsPressure += 0.35f;
+		m_lsPressureDeathAt = now;
+	}
+	// (more than one on it)
+	if (GetNearbyEnemyCount() >= 2 && GetTimeSinceLastSawEnemy() < 1.0f)
+		m_lsPressure += 0.25f * dt * float(Q_min(GetNearbyEnemyCount(), 4) - 1);
+	m_lsPressure = Q_min(m_lsPressure, 1.5f);
+	float felt = Q_max(m_lsPressure, pev->health < 35.0f ? 0.35f : 0.0f);
+	// (how it takes it: skill most, then temper - careful players and campers keep their heads,
+	// rushers and the hot-headed lose it - and the bot's own nerves)
+	int style = LsStyle();
+	float temper = (style == LS_STYLE_CAREFUL || style == LS_STYLE_CAMPER) ? 0.7f : (style == LS_STYLE_RUSHER || style == LS_STYLE_KNIFER) ? 1.25f : 1.0f;
+	temper *= (0.75f + 0.5f * LsAggro()) * (0.7f + 0.6f * LsTrait(53));
+	float skill = LsSkill();
+	float crack = powf(Q_max(0.0f, 1.0f - skill), 1.3f) * temper;
+	float strain = 0.0f;
+	if (crack > 0.12f)
+		strain = felt * crack * 2.0f;
+	else if (skill > 0.7f)
+		strain = -felt * Q_min(1.0f, (skill - 0.7f) / 0.25f);
+	pev->vuser1.z = strain;
 }
 
 // Holding a spot behind low cover (stock hides crouched): now and then it comes up for a look

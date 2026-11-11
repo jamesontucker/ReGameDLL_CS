@@ -1478,6 +1478,16 @@ private:
 	int m_lsMoraleHideRound = -1;					// the round it hid on low morale (once is enough)
 	float m_lsSwapCheckAt = 0.0f;
 	EntityHandle<CBaseEntity> m_lsSwapBox;		// the gun it's walking over to swap for
+	EntityHandle<CBaseEntity> m_lsSwapLast;		// the last one it went for (one try each)
+	float m_lsSwapLastAt = 0.0f;
+	float m_lsCoverPickAt = 0.0f;					// when it last picked a spot to take cover at
+	Vector m_lsLastCornerLook;						// the last corner it checked, and when
+	float m_lsLastCornerLookAt = 0.0f;
+	float m_lsPressure = 0.0f;						// how much is coming at it right now (hits taken, teammates dropping, outnumbered)
+	float m_lsPressureAt = 0.0f;
+	float m_lsPressureHp = 100.0f;
+	float m_lsPressureDeathAt = 0.0f;
+	void LsPressureTick();							// builds and fades it; publishes the strain for the aim plugin
 	float m_lsSwapUntil = 0.0f;
 	float m_lsSwapDropAt = 0.0f;					// when it dropped its own for the swap
 	Vector m_lsSwapDropPos;					// mid-round: next look for a better gun on the floor
