@@ -67,6 +67,15 @@ void LsCtSiteDeath(CBasePlayer *pVictim)
 	s_hitAt = now;
 }
 
+// Out of bullets, how likely it still goes in with the knife: a knifer often, a rusher or a bold
+// newer player now and then, nearly never a good careful one
+static float LsEmptyDare(const CCSBot *me)
+{
+	int style = me->LsStyle();
+	float base = style == LS_STYLE_KNIFER ? 0.5f : style == LS_STYLE_RUSHER ? 0.25f : 0.04f + 0.1f * me->LsAggro();
+	return base * (1.2f - me->LsSkill());
+}
+
 void CCSBot::LsTeamTick()
 {
 	if (!LsFight() || !LsTeamGame() || !IsAlive())
@@ -599,6 +608,50 @@ void CCSBot::LsTeamTick()
 		}
 	}
 
+	// out of bullets with no gun lying in sight: most keep a step behind the nearest teammate (a
+	// trade, and a gun from the next one to fall) rather than hunt with the knife; a knifer, and
+	// some rushers and bold newer players, keep on with the knife (decided once a round)
+	if (LsFight() && LsTeamGame() && LsOutOfAmmo() && !LsWeaponModeOn() && !TheCSBots()->IsRoundOver() && !IsAttacking() && LsFree()
+		&& !LsOrderActive() && !IsCarryingBomb() && !m_lsSwapBox.IsValid() && m_state == &m_huntState && now >= m_lsEmptyTagAt)
+	{
+		m_lsEmptyTagAt = now + RANDOM_FLOAT(0.6f, 1.5f);
+		if (m_lsEmptyRound != round)
+		{
+			m_lsEmptyRound = round;
+			m_lsEmptyBold = RANDOM_FLOAT(0.0f, 1.0f) < Q_min(1.0f, 2.0f * LsEmptyDare(this));
+		}
+		CBasePlayer *pMate = nullptr;
+		float best = 2500.0f;
+		LsForTeammates(this, [&](CBasePlayer *pPlayer) {
+			float d = float((pPlayer->pev->origin - pev->origin).Length());
+			if (d < best)
+			{
+				best = d;
+				pMate = pPlayer;
+			}
+		});
+		// (already just behind them: it waits there, not back and forth between them and the hunt)
+		if (!m_lsEmptyBold && pMate && best < 300.0f)
+		{
+			if (!LsPuppetActive())
+			{
+				m_lsPuppet.any = true;
+				m_lsPuppet.holdUntil = now + RANDOM_FLOAT(1.2f, 2.0f);
+				Q_strlcpy(m_lsPuppet.holdTag, "ls");
+				LsWhy("out of ammo: with a teammate");
+			}
+		}
+		else if (!m_lsEmptyBold && pMate)
+		{
+			Vector back = pev->origin - pMate->pev->origin;
+			back.z = 0.0f;
+			float len = float(back.Length());
+			Vector spot = pMate->pev->origin + (len > 1.0f ? back * (RANDOM_FLOAT(140.0f, 220.0f) / len) : Vector(0, 0, 0));
+			MoveTo(&spot, SAFEST_ROUTE);
+			LsWhy("out of ammo: with a teammate");
+		}
+	}
+
 	// the round's over: a bot without a gun picks one up from the floor close by
 	if (TheCSBots()->IsRoundOver() && m_lsPickupRound != round && !m_bHasPrimary && !IsAttacking() && !LsWeaponModeOn())
 	{
@@ -1122,6 +1175,12 @@ bool CCSBot::LsTeamHeard(GameEventType event, CBasePlayer *pPlayer)
 		return false;
 	if (!LsFree() || TheCSBots()->IsRoundOver() || LsRushing())
 		return false;
+	// (an empty gun: not running in to help - only the odd knifer or reckless one goes anyway)
+	if (LsOutOfAmmo() && RANDOM_FLOAT(0.0f, 1.0f) >= LsEmptyDare(this))
+	{
+		m_lsTradeAt = gpGlobals->time;
+		return false;
+	}
 	// (a bot shooting glass, the sky or a wall isn't in a fight)
 	if (pPlayer->IsBot() && !static_cast<CCSBot *>(pPlayer)->IsAttacking())
 		return false;

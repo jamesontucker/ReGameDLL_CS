@@ -980,13 +980,29 @@ void CCSBot::LsCallBuy(int plan)
 		m_lsBuyPlan = plan;
 }
 
-// A save round: nothing, or a better pistol for some when there's money for it
+// Topping up a pistol's magazines out of habit: nearly every good player does; a newer one, or a
+// rusher or knifer in a hurry, now and then forgets and finds out mid-fight
+static bool LsAmmoMinded(const CCSBot *me)
+{
+	float p = 0.7f + 0.27f * me->LsSkill();
+	int style = me->LsStyle();
+	if (style == LS_STYLE_CAREFUL || style == LS_STYLE_CAMPER || style == LS_STYLE_AWPER)
+		p += 0.1f;
+	else if (style == LS_STYLE_RUSHER || style == LS_STYLE_KNIFER)
+		p -= 0.15f;
+	return RANDOM_FLOAT(0.0f, 1.0f) < p;
+}
+
+// A save round: nothing, or a better pistol for some when there's money for it - and bullets for
+// the pistol (one emptied last round stays empty otherwise)
 void CCSBot::LsBuyEco()
 {
 	CBasePlayerItem *pPistol = m_rgpPlayerItems[PISTOL_SLOT];
 	bool stockPistol = !pPistol || pPistol->m_iId == WEAPON_GLOCK18 || pPistol->m_iId == WEAPON_USP;
 	if (TheCSBots()->AllowPistols() && stockPistol && m_iAccount >= 1400 && LsTrait(46) < (LsMatch() ? 0.25f : 0.45f))
 		ClientCommand("deagle");
+	if (TheCSBots()->AllowPistols() && LsAmmoMinded(this))
+		ClientCommand("secammo");
 	PrintIfWatched("Saving this round.\n");
 }
 
@@ -1241,17 +1257,29 @@ bool CCSBot::LsBuyPistolRound()
 	bool ct = m_iTeam == CT;
 	// (the careful ones, campers, AWPers and the better players now and then take a spare
 	// magazine: fewer run dry and end up with the knife)
+	// (after the pistol it buys, not before: bought first they went into the pistol it then
+	// dropped)
 	int style = LsStyle();
-	if ((style == LS_STYLE_CAREFUL || style == LS_STYLE_CAMPER || style == LS_STYLE_AWPER || LsSkill() > 0.65f) && LsTrait(49) < 0.5f
-		&& TheCSBots()->AllowPistols())
-		ClientCommand("secammo");
+	bool spare = (style == LS_STYLE_CAREFUL || style == LS_STYLE_CAMPER || style == LS_STYLE_AWPER || LsSkill() > 0.65f) && LsTrait(49) < 0.5f
+		&& TheCSBots()->AllowPistols();
 	if (t < 0.35f)
+	{
+		if (spare)
+			ClientCommand("secammo");
 		return false;					// the usual: a vest
+	}
 	if (t < 0.55f && TheCSBots()->AllowPistols())
+	{
+		// (a Deagle comes with one magazine: the money left goes on more, as people do)
 		ClientCommand("deagle");
+		if (LsAmmoMinded(this))
+			ClientCommand("secammo");
+	}
 	else if (t < 0.7f && TheCSBots()->AllowPistols())
 	{
 		ClientCommand(ct ? "fn57" : "p228");
+		if (spare)
+			ClientCommand("secammo");
 		if (TheCSBots()->AllowGrenades())
 			ClientCommand("flash");
 	}

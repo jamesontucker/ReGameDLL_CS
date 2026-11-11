@@ -1503,6 +1503,9 @@ private:
 	int m_lsWinReloadRound = -1;
 	int m_lsMoraleHideRound = -1;					// the round it hid on low morale (once is enough)
 	float m_lsSwapCheckAt = 0.0f;
+	float m_lsEmptyTagAt = 0.0f;					// out of bullets: when it next looks for a teammate to stay behind
+	int m_lsEmptyRound = -1;
+	bool m_lsEmptyBold = false;						// this round, out of bullets, it keeps on with the knife
 	EntityHandle<CBaseEntity> m_lsSwapBox;		// the gun it's walking over to swap for
 	EntityHandle<CBaseEntity> m_lsSwapLast[4];	// the last few it went for (one try each)
 	float m_lsSwapLastAt[4] = {};
