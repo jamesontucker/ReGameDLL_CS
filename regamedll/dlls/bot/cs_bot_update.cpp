@@ -510,7 +510,7 @@ void CCSBot::Update()
 			bool lsBreakIgnore = LsFight() && !m_ignoreEnemiesTimer.IsElapsed() && m_disposition != IGNORE_ENEMIES
 				&& ((pev->origin - threat->pev->origin).IsLengthLessThan(600.0f) || (IsPlayerLookingAtMe(threat) && gpGlobals->time > m_lsCoverRunUntil));
 			// (out of bullets: only someone right on top of it is a fight)
-			bool lsEmpty = LsFight() && LsOutOfAmmo() && (pev->origin - threat->pev->origin).IsLengthGreaterThan(300.0f);
+			bool lsEmpty = LsFight() && LsOutOfAmmo() && (pev->origin - threat->pev->origin).IsLengthGreaterThan(250.0f);
 			switch (lsEmpty ? IGNORE_ENEMIES : lsBreakIgnore ? m_disposition : GetDisposition())
 			{
 			case IGNORE_ENEMIES:
@@ -569,7 +569,7 @@ void CCSBot::Update()
 		}
 
 		// if we aren't attacking but we are being attacked, retaliate
-		if (GetDisposition() != IGNORE_ENEMIES && !IsAttacking() && !(LsFight() && LsOutOfAmmo() && (pev->origin - threat->pev->origin).IsLengthGreaterThan(300.0f)))
+		if (GetDisposition() != IGNORE_ENEMIES && !IsAttacking() && !(LsFight() && LsOutOfAmmo() && (pev->origin - threat->pev->origin).IsLengthGreaterThan(250.0f)))
 		{
 			const float recentAttackDuration = 1.0f;
 			if (GetTimeSinceAttacked() < recentAttackDuration)

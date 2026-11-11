@@ -499,7 +499,9 @@ void CCSBot::SetLookAt(const char *desc, const Vector *pos, PriorityType pri, fl
 	// couple of seconds in an area, a look around (low priority: a hiding spot, an approach
 	// point, a corner) well behind the way it's going is let go; a reaction (a noise, an enemy,
 	// being shot at: medium and up) still turns it
-	if (pri == PRIORITY_LOW && LsFight() && !IsNotMoving() && !IsAttacking() && (gpGlobals->time - m_lsScanInAt < 2.0f || LsAboutToEnter()))
+	// (a really weak player - some newbies, always the same ones - still looks back going in)
+	bool lsSloppy = LsSkill() < 0.3f && LsTrait(52) < 0.35f;
+	if (pri == PRIORITY_LOW && LsFight() && !lsSloppy && !IsNotMoving() && !IsAttacking() && (gpGlobals->time - m_lsScanInAt < 2.0f || LsAboutToEnter()))
 	{
 		float heading = UTIL_VecToYaw(pev->velocity);
 		if (Q_abs(NormalizeAngle(UTIL_VecToYaw(*pos - pev->origin) - heading)) > 100.0f)
@@ -657,7 +659,16 @@ void CCSBot::UpdateLookAround(bool updateNow)
 				if (!IsViewMoving())
 				{
 					float range = ComputeWeaponSightRange();
-					AdjustZoom(range);
+					// (Loner-Strike: scoped only holding an angle someone could come down - a long
+					// clear view, from a spot or a perch, once the round's under way; not at a box in
+					// spawn)
+					if (LsFight() && (range < 600.0f || IsSafe() || !(IsHiding() || GetTask() == MOVE_TO_SNIPER_SPOT)))
+					{
+						if (GetZoomLevel() != NO_ZOOM)
+							SecondaryAttack();
+					}
+					else
+						AdjustZoom(range);
 				}
 				else
 				{
@@ -1273,7 +1284,13 @@ CBasePlayer *CCSBot::FindMostDangerousThreat()
 
 #ifdef REGAMEDLL_ADD
 			// do we notice this enemy? (always notice current enemy)
-			if (pPlayer != currentThreat)
+			// (Loner-Strike: and once noticed, still noticed for a moment: the roll repeated every
+			// think, failing now and then, kept dropping someone in plain view out of the reaction
+			// and stretched a 0.3 s reaction into seconds)
+			int lsIdx = pPlayer->entindex() - 1;
+			bool lsNoticed = LsFight() && lsIdx >= 0 && lsIdx < MAX_CLIENTS && m_watchInfo[lsIdx].isEnemy && m_watchInfo[lsIdx].timestamp > 0.0f
+				&& gpGlobals->time - m_watchInfo[lsIdx].timestamp < 1.5f;
+			if (pPlayer != currentThreat && !lsNoticed)
 			{
 				if (!IsNoticable(pPlayer, visParts))
 				{

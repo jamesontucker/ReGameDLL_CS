@@ -366,7 +366,7 @@ void CCSBot::LsTeamTick()
 	}
 	else if (!TheCSBots()->IsRoundOver() && now >= m_lsSwapCheckAt && !IsAttacking() && !LsOrderActive() && !IsCarryingBomb() && LsFree()
 		&& !CSGameRules()->IsFreezePeriod() && !LsWeaponModeOn() && (!TheCSBots()->IsBombPlanted() || LsOutOfAmmo()) && GetHostageEscortCount() == 0
-		&& GetTask() != DEFUSE_BOMB && GetTask() != COLLECT_HOSTAGES && GetTask() != RESCUE_HOSTAGES && (GetTimeSinceLastSawEnemy() > 8.0f || (LsOutOfAmmo() && GetTimeSinceLastSawEnemy() > 1.5f)))
+		&& GetTask() != DEFUSE_BOMB && GetTask() != COLLECT_HOSTAGES && GetTask() != RESCUE_HOSTAGES && (GetTimeSinceLastSawEnemy() > 8.0f || LsOutOfAmmo()))
 	{
 		m_lsSwapCheckAt = now + (LsOutOfAmmo() ? 0.5f : 2.0f);
 		bool empty = LsOutOfAmmo();
@@ -382,13 +382,22 @@ void CCSBot::LsTeamTick()
 			CBaseEntity *pBox = nullptr;
 			while ((pBox = UTIL_FindEntityByClassname(pBox, "weaponbox")))
 			{
-				// (out of bullets: any gun at all, and from further off)
-				if ((pBox->pev->origin - pev->origin).IsLengthGreaterThan(empty ? 900.0f : 450.0f))
+				// (out of bullets: any gun at all, and from further off - with enemies about only one
+				// right there, a dive for it)
+				float reach = !empty ? 450.0f : GetTimeSinceLastSawEnemy() > 1.5f ? 900.0f : 350.0f;
+				if ((pBox->pev->origin - pev->origin).IsLengthGreaterThan(reach))
 					continue;
 				bool good = empty;
 				for (const char *g : better)
 					good = good || FStrEq(STRING(pBox->pev->model), g);
 				if (!good || !FVisible(pBox->pev->origin + Vector(0, 0, 8)))
+					continue;
+				// (not out in the spot a teammate just died in, for a better gun - with no bullets
+				// left, yes)
+				// (a careful or good player leaves it; the greedy and the newer ones sometimes go
+				// for the AK anyway)
+				if (!empty && LsRecentDeathNear(m_iTeam, pBox->pev->origin, 400.0f, 15.0f)
+					&& RANDOM_FLOAT(0.0f, 1.0f) < Q_min(0.95f, (0.3f + 0.65f * LsSkill()) * (1.0f - 0.4f * LsAggro())))
 					continue;
 				// (one a living player dropped, a gift or a swap of their own, isn't fair game)
 				CBaseEntity *pOwner = pBox->pev->owner ? CBaseEntity::Instance(pBox->pev->owner) : nullptr;
@@ -1102,6 +1111,24 @@ void CCSBot::LsAvenge(CBasePlayer *pVictim, CBasePlayer *pKiller)
 	float err = away * (0.15f - 0.08f * LsSkill());
 	Vector heard = pKiller->pev->origin + Vector(RANDOM_FLOAT(-err, err), RANDOM_FLOAT(-err, err), HalfHumanHeight);
 	SetLookAt("Loner-Strike: where the shots came from", &heard, PRIORITY_HIGH, RANDOM_FLOAT(1.0f, 2.0f));
+	// (a player who knows better doesn't walk to the body - the killer's waiting round that
+	// corner: it holds an angle on it, eyes on where the shots came from, and lets them come
+	// or a teammate trade; the bold and the newer ones go in, as people do)
+	// (how likely, and how long: skill and patience say hold, boldness says go - campers and
+	// careful players sit on it longest, lurkers and ninjas a while, rushers hardly ever)
+	int style = LsStyle();
+	float lean = (style == LS_STYLE_CAMPER || style == LS_STYLE_CAREFUL) ? 1.35f : (style == LS_STYLE_LURKER || style == LS_STYLE_NINJA) ? 1.1f
+		: (style == LS_STYLE_RUSHER || style == LS_STYLE_KNIFER) ? 0.25f : 1.0f;
+	float holdOdds = Q_min(0.95f, (0.15f + 0.75f * LsSkill()) * (1.0f - 0.55f * LsAggro()) * lean);
+	bool holds = !LsSolo() && RANDOM_FLOAT(0.0f, 1.0f) < holdOdds;
+	if (holds && LsFree() && !IsAttacking())
+	{
+		float secs = RANDOM_FLOAT(3.0f, 6.0f) * (0.7f + 0.6f * (1.0f - LsAggro())) * (lean > 1.2f ? 1.4f : 1.0f);
+		Hide(GetLastKnownArea(), secs, 250.0f, true);
+		LsPreAim(heard, RANDOM_FLOAT(3.0f, 5.0f));
+		LsWhy("avenge: holding the angle");
+		return;
+	}
 	Hurry(RANDOM_FLOAT(4.0f, 7.0f));
 	if (LsFree() && !LsLoner())
 	{
@@ -1123,7 +1150,12 @@ bool CCSBot::LsFetchesBomb()
 	// (where a teammate just died: not straight into that angle alone - with a teammate close,
 	// or once a few seconds have gone by, or when the clock says now)
 	CBaseEntity *pBomb = TheCSBots()->GetLooseBomb();
-	if (pBomb && LsBombHot(pBomb->pev->origin) && LsTimeLeft() > 30.0f && LsSkill() > 0.3f)
+	// (careful players always wait for company; rushers sometimes just grab it - a steady
+	// lean per bot)
+	int fetchStyle = LsStyle();
+	float careful = (fetchStyle == LS_STYLE_CAREFUL || fetchStyle == LS_STYLE_CAMPER) ? 1.0f
+		: (fetchStyle == LS_STYLE_RUSHER || fetchStyle == LS_STYLE_KNIFER) ? 0.4f : 0.3f + 0.6f * LsSkill() - 0.3f * LsAggro();
+	if (pBomb && LsBombHot(pBomb->pev->origin) && LsTimeLeft() > 30.0f && LsTrait(51) < careful)
 	{
 		bool company = false;
 		LsForTeammates(this, [&](CBasePlayer *pPlayer) {

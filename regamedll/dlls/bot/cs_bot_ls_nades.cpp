@@ -659,7 +659,8 @@ void CCSBot::LsNadeUpdate()
 	// players still get caught fumbling with one
 	bool closeThreat = (IsNoiseHeard() && LsWithin(m_noiseTimestamp, 2.5f) && (m_noisePosition - pev->origin).IsLengthLessThan(700.0f))
 		|| (GetTimeSinceLastSawEnemy() < 3.0f && (GetLastKnownEnemyPosition() - pev->origin).IsLengthLessThan(900.0f));
-	if (closeThreat && LsSkill() > 0.35f)
+	// (the better the player, the more surely the gun stays up)
+	if (closeThreat && RANDOM_FLOAT(0.0f, 1.0f) < 0.2f + 0.8f * LsSkill())
 		return;
 
 	// a flash round the corner ahead, where enemies are likely (decided once a corner)
@@ -1238,6 +1239,12 @@ bool CCSBot::LsBuyPistolRound()
 	m_lsPistolBought = true;
 	float t = LsTrait(47);
 	bool ct = m_iTeam == CT;
+	// (the careful ones, campers, AWPers and the better players now and then take a spare
+	// magazine: fewer run dry and end up with the knife)
+	int style = LsStyle();
+	if ((style == LS_STYLE_CAREFUL || style == LS_STYLE_CAMPER || style == LS_STYLE_AWPER || LsSkill() > 0.65f) && LsTrait(49) < 0.5f
+		&& TheCSBots()->AllowPistols())
+		ClientCommand("secammo");
 	if (t < 0.35f)
 		return false;					// the usual: a vest
 	if (t < 0.55f && TheCSBots()->AllowPistols())

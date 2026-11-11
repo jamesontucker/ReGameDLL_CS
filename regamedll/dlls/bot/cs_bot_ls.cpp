@@ -2779,7 +2779,9 @@ void CCSBot::LsCheckBeforePlant()
 		if ((pPlayer->pev->origin - pev->origin).IsLengthLessThan(600.0f))
 			cover++;
 	});
-	float chance = (0.35f + 0.55f * LsSkill()) * (cover ? 0.5f : 1.0f);
+	int style = LsStyle();
+	float lean = (style == LS_STYLE_CAREFUL || style == LS_STYLE_CAMPER) ? 1.3f : (style == LS_STYLE_RUSHER || style == LS_STYLE_KNIFER) ? 0.4f : 1.0f;
+	float chance = (0.35f + 0.55f * LsSkill()) * (cover ? 0.5f : 1.0f) * lean;
 	if (RANDOM_FLOAT(0.0f, 1.0f) > chance)
 		return;
 	Vector look;
@@ -2791,7 +2793,7 @@ void CCSBot::LsCheckBeforePlant()
 		look = *way->GetCenter() + Vector(0, 0, HalfHumanHeight + LsLookHeight());
 	else
 		return;
-	float secs = RANDOM_FLOAT(0.35f, 0.8f);
+	float secs = RANDOM_FLOAT(0.35f, 0.8f) * (lean > 1.2f ? 1.3f : 1.0f);
 	SetLookAt("Loner-Strike: checking", &look, PRIORITY_HIGH, secs);
 	m_lsCheckUntil = gpGlobals->time + secs;
 	m_lsObjUseAt = m_lsCheckUntil;
@@ -4160,8 +4162,10 @@ bool CCSBot::LsScanAngles(bool holding)
 			for (int r = 0; r < 8; r++)
 				if (m_lsScanArea[r] == an.area + 1)
 					lastAt = Q_max(lastAt, m_lsScanAt[r]);
+			// (a good player sweeps every way in, in turn; a newer one's checks are patchier -
+			// one stared at longer, another forgotten)
 			if (now - lastAt > 10.0f)
-				score *= 1.8f;
+				score *= 1.0f + 0.8f * skill;
 		}
 		// (a teammate close by already watching it: on the radar, looking that way)
 		bool covered = false;
@@ -5085,7 +5089,7 @@ bool CCSBot::LsMatchup(CBasePlayer *pEnemy, bool crouchAndHold)
 	float hurtHp = 100.0f;
 	// (with health to spare: pushing a one-shot enemy on 10 hp is trading, not winning)
 	if (LsKnownHurt(pEnemy, m_iTeam, &hurtHp) && hurtHp < 40.0f && now > m_lsPushUntil && !IsUsingSniperRifle() && !LsSolo()
-		&& pev->health >= 40.0f
+		&& pev->health >= 55.0f - 30.0f * LsAggro()
 		&& range < 1000.0f && RANDOM_FLOAT(0.0f, 1.0f) < 0.25f + 0.5f * skill * LsTeamwork() + 0.25f * LsAggro())
 	{
 		m_lsPushUntil = now + RANDOM_FLOAT(0.8f, 1.5f);
@@ -5591,7 +5595,7 @@ void CCSBot::LsHurtCallTick()
 {
 	float now = gpGlobals->time;
 	if (!LsFight() || LsSolo() || now - m_lsHurtPushAt < 6.0f || !LsFree() || IsHiding() || LsRushing() || TheCSBots()->IsBombPlanted()
-		|| pev->health < 50.0f)
+		|| pev->health < 65.0f - 30.0f * LsAggro())
 		return;
 	m_lsHurtPushAt = now - 4.0f;	// (looked at once every two seconds or so)
 	for (int i = 1; i <= gpGlobals->maxClients; i++)
@@ -5602,6 +5606,11 @@ void CCSBot::LsHurtCallTick()
 		if (!pEnemy || !pEnemy->IsAlive() || !IsEnemy(pEnemy) || !LsKnownHurt(pEnemy, m_iTeam, &hp, &at, &when) || hp > 35.0f)
 			continue;
 		if (now - when > 6.0f)
+			continue;
+		// (not running into where teammates just died chasing them - the better ones hold for it)
+		// (more the better and the more patient it is; the bold still go)
+		if (LsRecentDeathNear(m_iTeam, at, 600.0f, 10.0f)
+			&& RANDOM_FLOAT(0.0f, 1.0f) < Q_min(0.95f, (0.2f + 0.7f * LsSkill()) * (1.0f - 0.5f * LsAggro())))
 			continue;
 		// (where the callout said: where they were hit, not where they are now)
 		float d = float((at - pev->origin).Length());
@@ -5998,7 +6007,11 @@ bool CCSBot::LsOutOfRange(CBasePlayer *pEnemy, float range)
 	// (it's shooting at it: no standing there taking it - fire back)
 	if (GetAttacker() == pEnemy && GetTimeSinceAttacked() < 1.5f)
 		return false;
-	return true;
+	// (the patient close in; rushers and the impatient spray from there now and then - a steady
+	// lean per bot, not a coin each think)
+	int style = LsStyle();
+	float sprays = (style == LS_STYLE_RUSHER || style == LS_STYLE_KNIFER) ? 0.5f : 0.35f * LsAggro() * (1.0f - LsSkill());
+	return LsTrait(50) >= sprays;
 }
 
 // Only the enemy's head showing over something (a box, a thin wall) and the bullet would go

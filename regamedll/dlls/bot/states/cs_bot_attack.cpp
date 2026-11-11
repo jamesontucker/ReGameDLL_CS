@@ -213,7 +213,8 @@ void AttackState::OnUpdate(CCSBot *me)
 	// Loner-Strike: the wrong gun for this range, a flashed enemy to push, low cover to reload behind
 	// Loner-Strike: out of bullets, the knife all it has left: not a charge at someone shooting
 	// it - away to cover (and a gun off the floor), unless they're right there
-	if (LsFight() && me->LsOutOfAmmo() && (pEnemy->pev->origin - me->pev->origin).IsLengthGreaterThan(300.0f))
+	// (a band between this and where it starts a knife fight, 250: no flipping at the edge)
+	if (LsFight() && me->LsOutOfAmmo() && (pEnemy->pev->origin - me->pev->origin).IsLengthGreaterThan(380.0f))
 	{
 		if (me->LsTakeCoverFrom(pEnemy->pev->origin, 0.0f, true))
 		{

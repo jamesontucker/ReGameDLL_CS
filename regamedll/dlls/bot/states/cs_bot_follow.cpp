@@ -224,6 +224,17 @@ void FollowState::OnUpdate(CCSBot *me)
 
 		me->ResetStuckMonitor();
 
+		// (Loner-Strike: already a few steps off a leader who's hardly moving: it stays and looks
+		// round, rather than shuffling up to them)
+		float lsGap = float((m_leader->pev->origin - me->pev->origin).Length2D());
+		if (LsFight() && leaderSpeed < 100.0f && lsGap > 150.0f && lsGap < 450.0f)
+		{
+			me->DestroyPath();
+			m_repathInterval.Start(0.5f);
+			m_idleTimer.Reset();
+			return;
+		}
+
 		const float runSpeed = 200.0f;
 		const float collectRange = (leaderSpeed > runSpeed) ? 600.0f : 400.0f;
 		FollowTargetCollector collector(m_leader);
@@ -241,10 +252,26 @@ void FollowState::OnUpdate(CCSBot *me)
 			CNavArea *target = nullptr;
 			Vector targetPos;
 
+			// Loner-Strike: personal space - places a few steps from the leader, not on top of
+			// them (it kept closing right in, then wandering off when bored, then back)
+			CNavArea *spaced[FollowTargetCollector::MAX_TARGET_AREAS];
+			int spacedCount = 0;
+			if (LsFight())
+			{
+				for (int a = 0; a < collector.m_targetAreaCount; a++)
+				{
+					float d = float((*collector.m_targetArea[a]->GetCenter() - m_leader->pev->origin).Length2D());
+					if (d > 180.0f && d < 500.0f)
+						spaced[spacedCount++] = collector.m_targetArea[a];
+				}
+			}
+			CNavArea **pool = spacedCount ? spaced : collector.m_targetArea;
+			int poolCount = spacedCount ? spacedCount : collector.m_targetAreaCount;
+
 			// if we are idle, pick a random area
 			if (m_idleTimer.IsElapsed())
 			{
-				target = collector.m_targetArea[RANDOM_LONG(0, collector.m_targetAreaCount - 1)];
+				target = pool[RANDOM_LONG(0, poolCount - 1)];
 				targetPos = *target->GetCenter();
 				me->PrintIfWatched("%4.1f: Bored. Repathing to a new nearby area\n", gpGlobals->time);
 			}
@@ -257,9 +284,9 @@ void FollowState::OnUpdate(CCSBot *me)
 				float closeRangeSq = 9999999999.9f;
 				Vector close;
 
-				for (int a = 0; a < collector.m_targetAreaCount; a++)
+				for (int a = 0; a < poolCount; a++)
 				{
-					area = collector.m_targetArea[a];
+					area = pool[a];
 					area->GetClosestPointOnArea(&me->pev->origin, &close);
 
 					real_t rangeSq = (me->pev->origin - close).LengthSquared();
