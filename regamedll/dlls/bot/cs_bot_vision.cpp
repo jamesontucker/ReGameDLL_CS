@@ -1333,7 +1333,7 @@ CBasePlayer *CCSBot::FindMostDangerousThreat()
 			if (LsFight() && (m_watchInfo[idx].timestamp <= 0.0f || gpGlobals->time - m_watchInfo[idx].timestamp > 3.0f))
 			{
 				LsTraceSeen(pPlayer);
-				if (!IsAttacking() && pPlayer != currentThreat)
+				if (!IsAttacking() && pPlayer != GetBotEnemy())
 				{
 					Vector at = pPlayer->pev->origin + Vector(0, 0, HalfHumanHeight);
 					SetLookAt("Loner-Strike: caught the eye", &at, PRIORITY_HIGH, 0.6f);
