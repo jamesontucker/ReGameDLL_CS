@@ -230,6 +230,9 @@ void CCSBot::ResetValues()
 		m_lsRecent[i] = Vector(99999.0f, 99999.0f, 99999.0f);
 	m_lsRecentNext = 0;
 	m_lsRecentAt = 0.0f;
+	m_lsCoverRunUntil = 0.0f;
+	m_lsMatchupUntil = 0.0f;
+	m_lsHuntRetryAt = 0.0f;
 	// (a respawn that doesn't go through RoundRespawn: no order or plugin marks carried over)
 	if (LsFight())
 	{
@@ -277,7 +280,7 @@ void CCSBot::ResetValues()
 	m_lsDoorBackUntil = 0.0f;
 	m_lsDoor = nullptr;
 	m_lsDoorCheckAt = 0.0f;
-	for (int r = 0; r < 4; r++)
+	for (int r = 0; r < 8; r++)
 	{
 		m_lsScanArea[r] = 0;
 		m_lsScanAt[r] = 0.0f;

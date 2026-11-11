@@ -886,8 +886,8 @@ private:
 	float m_lsCrouchWalkSince = 0.0f;
 	float m_lsCrouchWalkNext = 0.0f;		// not again before (a cooldown after a few steps)
 	void LsBumpCheck();					// Loner-Strike: an enemy bumping into it is noticed, wherever it's looking
-	unsigned short m_lsScanArea[4] = {};	// the last angles it checked (knowledge area index + 1), and when
-	float m_lsScanAt[4] = {};
+	unsigned short m_lsScanArea[8] = {};	// the last angles it checked (knowledge area index + 1), and when
+	float m_lsScanAt[8] = {};
 	int m_lsScanNextSlot = 0;
 	float m_lsScanNext = 0.0f;
 	const CNavArea *m_lsScanInArea = nullptr;	// the area it last walked into, and when
@@ -1269,7 +1269,11 @@ public:
 	int m_lsRecentNext = 0;
 	float m_lsRecentAt = 0.0f;
 	void LsNoteWhereItIs();
-	bool LsBeenNear(const Vector &at, float range) const;							// bot_ls_trace: a fight starting, and how long it took to react					// the round it picked its way into a retake
+	bool LsBeenNear(const Vector &at, float range) const;
+	bool LsBehindMe(const Vector &at) const;
+	float m_lsCoverRunUntil = 0.0f;					// on a deliberate cover move (a matchup, a rush): aiming at it doesn't pull it back out
+	float m_lsMatchupUntil = 0.0f;					// the matchup with m_lsMatchupEnemy decided until (not re-weighed each new fight)
+	float m_lsHuntRetryAt = 0.0f;					// every hunting goal failed: a moment before trying again		// behind the way it's going (a new goal there is a U-turn)							// bot_ls_trace: a fight starting, and how long it took to react					// the round it picked its way into a retake
 	void LsRetakeApproach();				// mid jump-peek (in the air: still the jiggle)					// a smoke for the AWP lane it just got out of, thrown from cover then
 	Vector m_lsSmokeLaneSpot;
 	void LsSmokeLaneTick();

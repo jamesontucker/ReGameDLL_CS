@@ -505,8 +505,10 @@ void CCSBot::Update()
 			bool doAttack = false;
 			// (Loner-Strike: a moment of "ignore them" while falling back or running for cover
 			// isn't closing its eyes: someone close, or aiming at it, gets shot at)
+			// (but a deliberate move out of someone's line - an AWP's lane, a rush - isn't undone
+			// by that someone aiming at it: only by them being close)
 			bool lsBreakIgnore = LsFight() && !m_ignoreEnemiesTimer.IsElapsed() && m_disposition != IGNORE_ENEMIES
-				&& ((pev->origin - threat->pev->origin).IsLengthLessThan(600.0f) || IsPlayerLookingAtMe(threat));
+				&& ((pev->origin - threat->pev->origin).IsLengthLessThan(600.0f) || (IsPlayerLookingAtMe(threat) && gpGlobals->time > m_lsCoverRunUntil));
 			// (out of bullets: only someone right on top of it is a fight)
 			bool lsEmpty = LsFight() && LsOutOfAmmo() && (pev->origin - threat->pev->origin).IsLengthGreaterThan(300.0f);
 			switch (lsEmpty ? IGNORE_ENEMIES : lsBreakIgnore ? m_disposition : GetDisposition())

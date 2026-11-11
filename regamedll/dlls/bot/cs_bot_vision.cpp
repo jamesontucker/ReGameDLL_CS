@@ -671,9 +671,15 @@ void CCSBot::UpdateLookAround(bool updateNow)
 		if (!m_lastKnownArea)
 			return;
 
-		// (Loner-Strike: holding a spot, its angles from the map knowledge first)
+		// (Loner-Strike: holding a spot, its angles from the map knowledge first - and with them
+		// known, nothing else: the stock approach points are for maps it hasn't studied)
 		if (LsScanAngles(true))
 			return;
+		{
+			const LsAreaKnow *lk = LsFight() ? LsKnow(m_lastKnownArea) : nullptr;
+			if (lk && lk->angleCount > 0)
+				return;
+		}
 
 		if (gpGlobals->time < m_lookAroundStateTimestamp)
 			return;

@@ -175,7 +175,8 @@ void HuntState::OnUpdate(CCSBot *me)
 	// if we have reached our destination area, pick a new one
 	// if our path fails, pick a new one
 	// (Loner-Strike: or, every bot for itself, it finds itself walking with a teammate)
-	if (me->GetLastKnownArea() == m_huntArea || me->UpdatePathMovement() != CCSBot::PROGRESSING || (me->LsLoner() && me->LsShouldSpread()))
+	if ((me->GetLastKnownArea() == m_huntArea || me->UpdatePathMovement() != CCSBot::PROGRESSING || (me->LsLoner() && me->LsShouldSpread()))
+		&& !(LsFight() && gpGlobals->time < me->m_lsHuntRetryAt))
 	{
 		// Loner-Strike: every bot for itself: somewhere its teammates aren't (and on a hostage
 		// map every T, so the Ts hold the building rather than wander to the CT spawn)
@@ -252,7 +253,10 @@ void HuntState::OnUpdate(CCSBot *me)
 		if (m_huntArea)
 		{
 			// create a new path to a far away area of the map
-			me->ComputePath(m_huntArea, nullptr, SAFEST_ROUTE);
+			// (Loner-Strike: no way there either: a moment before trying again, not a fresh pick
+			// every think standing on the spot)
+			if (!me->ComputePath(m_huntArea, nullptr, SAFEST_ROUTE) && LsFight())
+				me->m_lsHuntRetryAt = gpGlobals->time + 1.0f;
 		}
 	}
 }

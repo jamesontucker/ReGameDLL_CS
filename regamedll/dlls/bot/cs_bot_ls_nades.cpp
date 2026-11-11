@@ -654,6 +654,14 @@ void CCSBot::LsNadeUpdate()
 	if (IsSafe())
 		return;
 
+	// someone right there (heard a moment ago close by, or seen just now): the gun stays up -
+	// a grenade in hand when they walk round the corner costs a second to swap back. Newer
+	// players still get caught fumbling with one
+	bool closeThreat = (IsNoiseHeard() && LsWithin(m_noiseTimestamp, 2.5f) && (m_noisePosition - pev->origin).IsLengthLessThan(700.0f))
+		|| (GetTimeSinceLastSawEnemy() < 3.0f && (GetLastKnownEnemyPosition() - pev->origin).IsLengthLessThan(900.0f));
+	if (closeThreat && LsSkill() > 0.35f)
+		return;
+
 	// a flash round the corner ahead, where enemies are likely (decided once a corner)
 	Vector corner, beyond;
 	if (LsHasNade(WEAPON_FLASHBANG) && LsNadeCorner(&corner, &beyond))

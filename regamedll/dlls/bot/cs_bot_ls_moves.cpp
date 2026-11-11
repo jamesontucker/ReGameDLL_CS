@@ -1267,7 +1267,12 @@ void CCSBot::LsHandUpdate(float goalYaw, float goalPitch, float dt)
 		// (a new thing to look at, calmly: a reaction first, mostly quick, now and then slow: a
 		// log-normal delay, shorter for the skilled. In a fight the stock reaction already applies)
 		float jump = sqrtf(NormalizeAngle(goalYaw - h.lastY) * NormalizeAngle(goalYaw - h.lastY) + NormalizeAngle(goalPitch - h.lastP) * NormalizeAngle(goalPitch - h.lastP));
-		if (!fight && jump > 20.0f)
+		// (back round to face the way it's running, after a look elsewhere: nothing to react
+		// to - people turn back to where they're going at once, and briskly)
+		bool backAhead = !fight && pev->velocity.Length2D() > 150.0f && Q_abs(NormalizeAngle(goalYaw - UTIL_VecToYaw(pev->velocity))) < 30.0f;
+		if (backAhead)
+			h.reactUntil = now;
+		else if (!fight && jump > 20.0f)
 		{
 			float z = (RANDOM_FLOAT(-1.0f, 1.0f) + RANDOM_FLOAT(-1.0f, 1.0f) + RANDOM_FLOAT(-1.0f, 1.0f)) * 0.577f;
 			float base = 0.12f + 0.06f * (1.0f - skill);
@@ -1293,7 +1298,7 @@ void CCSBot::LsHandUpdate(float goalYaw, float goalPitch, float dt)
 			// fight. Keeps the faster flicks from becoming inhuman snaps)
 			// (batch 23: a person flicks past 90 deg per 0.1 s once or twice a minute; the bots
 			// almost never did)
-			float vmax = fight ? 700.0f + 450.0f * skill : 520.0f + 260.0f * skill;
+			float vmax = (fight || backAhead) ? 700.0f + 450.0f * skill : 520.0f + 260.0f * skill;
 			dur = Q_max(dur, 1.875f * off / vmax);
 			if (m_lsPuppet.fast && now < m_lsPuppet.lookUntil)
 				dur *= 0.6f;

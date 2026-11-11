@@ -1509,6 +1509,9 @@ CNavArea *CCSBot::LsPickHuntArea()
 			// - Ts at the hostages - where pacing is the point)
 			if (!kept && LsBeenNear(*c, 600.0f))
 				score -= 2000.0f;
+			// (nor turning round on the way somewhere for a new goal)
+			if (!kept && LsBehindMe(*c))
+				score -= 1500.0f;
 
 			// somewhere to go, not where it is
 			float fromMe = (*c - pev->origin).Length2D();
@@ -4037,7 +4040,10 @@ bool CCSBot::LsScanAngles(bool holding)
 	if (!LsFight() || !m_lastKnownArea)
 		return false;
 	float now = gpGlobals->time;
-	if (now < m_lsScanNext || IsLookingAtSpot(PRIORITY_LOW))
+	// (the stock hide state's approach-point look has no end: it doesn't keep the angles from
+	// being checked in turn while holding)
+	bool approachLook = m_lookAtDesc && !Q_strcmp(m_lookAtDesc, "Approach Point (Hiding)");
+	if (now < m_lsScanNext || (IsLookingAtSpot(PRIORITY_LOW) && !(holding && approachLook)))
 		return false;
 	const LsAreaKnow *k = LsKnow(m_lastKnownArea);
 	if (!k || k->angleCount == 0)
@@ -4109,11 +4115,22 @@ bool CCSBot::LsScanAngles(bool holding)
 		float off = float(Q_abs(NormalizeAngle(UTIL_VecToYaw(tc - pev->origin) - heading)));
 		behind[a] = !holding && off > 100.0f;
 		if (behind[a])
-			score *= fresh ? 0.03f : (style == LS_STYLE_CAREFUL || style == LS_STYLE_CAMPER) ? 0.4f : 0.2f;
+			score *= fresh ? 0.03f : (style == LS_STYLE_CAREFUL || style == LS_STYLE_CAMPER) ? 0.25f : 0.1f;
 		// (checked a moment ago)
-		for (int r = 0; r < 4; r++)
-			if (m_lsScanArea[r] == an.area + 1 && now - m_lsScanAt[r] < 4.0f)
+		for (int r = 0; r < 8; r++)
+			if (m_lsScanArea[r] == an.area + 1 && now - m_lsScanAt[r] < (holding ? 6.0f : 4.0f))
 				score *= 0.2f;
+		// (holding a spot: one not looked at for a good while gets its turn - every way in,
+		// checked in rotation, not one stared at)
+		if (holding)
+		{
+			float lastAt = -999.0f;
+			for (int r = 0; r < 8; r++)
+				if (m_lsScanArea[r] == an.area + 1)
+					lastAt = Q_max(lastAt, m_lsScanAt[r]);
+			if (now - lastAt > 10.0f)
+				score *= 1.8f;
+		}
 		// (a teammate close by already watching it: on the radar, looking that way)
 		bool covered = false;
 		for (int m = 1; m <= gpGlobals->maxClients && !covered; m++)
@@ -4152,7 +4169,7 @@ bool CCSBot::LsScanAngles(bool holding)
 		if (ahead >= 0)
 		{
 			aheadChecked = false;
-			for (int r = 0; r < 4; r++)
+			for (int r = 0; r < 8; r++)
 				if (m_lsScanArea[r] == k->angles[ahead].area + 1 && now - m_lsScanAt[r] < 4.0f)
 					aheadChecked = true;
 		}
@@ -4217,7 +4234,7 @@ bool CCSBot::LsScanAngles(bool holding)
 	SetLookAt("Loner-Strike: angle", &look, PRIORITY_LOW, hold, true, 8.0f);
 	m_lsScanArea[m_lsScanNextSlot] = (unsigned short)(k->angles[bestA].area + 1);
 	m_lsScanAt[m_lsScanNextSlot] = now;
-	m_lsScanNextSlot = (m_lsScanNextSlot + 1) % 4;
+	m_lsScanNextSlot = (m_lsScanNextSlot + 1) % 8;
 	m_lsScanNext = now + hold * 0.8f + RANDOM_FLOAT(0.1f, 0.5f) * (1.0f - skill);
 	return true;
 }
@@ -5054,6 +5071,7 @@ bool CCSBot::LsMatchup(CBasePlayer *pEnemy, bool crouchAndHold)
 	if (pDone == pEnemy)
 		return false;
 	m_lsMatchupEnemy = pEnemy;
+	m_lsMatchupUntil = now + 15.0f;
 	int mine = LsGunClass(this), theirs = LsGunClass(pEnemy);
 	bool bad = false;
 	// (an AWPer that just fired: the bolt's coming back - the better ones swing on it)
@@ -5094,6 +5112,7 @@ bool CCSBot::LsMatchup(CBasePlayer *pEnemy, bool crouchAndHold)
 	const CNavArea *here = m_lastKnownArea;
 	if (!LsTakeCoverFrom(pEnemy->pev->origin, 64.0f, true))
 		return false;
+	m_lsCoverRunUntil = now + 2.5f;
 	if (here)
 		LsForceBadArea(here, 6.0f + 8.0f * LsSkill());
 	// (an AWP's lane: from cover, a smoke across it - then the lane, smoked, is crossed)
@@ -5246,6 +5265,7 @@ bool CCSBot::LsRushed(const Vector *threat)
 	}
 	if (!LsTakeCoverFrom(from, 0.0f, IsAttacking(), team ? wait : -1.0f))
 		return false;
+	m_lsCoverRunUntil = now + 2.5f;
 	if (m_lsCoverStay)
 		here = nullptr;
 	if (team)
@@ -5879,6 +5899,9 @@ CNavArea *CCSBot::LsObjectiveHuntArea()
 		// (not back where it's been the last half minute: no circling round)
 		if (LsBeenNear(c, 600.0f))
 			continue;
+		// (nor one behind the way it's going: no turning round on the way in for a new goal)
+		if (LsBehindMe(c))
+			continue;
 		float score = Q_min(60.0f, gpGlobals->time - a->GetClearedTimestamp(m_iTeam - 1)) * 10.0f;
 		score += 0.3f * (home - myHome);
 		if (site)
@@ -5988,4 +6011,21 @@ bool CCSBot::LsBeenNear(const Vector &at, float range) const
 		if ((m_lsRecent[i] - at).Make2D().IsLengthLessThan(range))
 			return true;
 	return false;
+}
+
+// Behind it, the way it's been going (moving, or the way its path ran): a new goal there means
+// turning round - fine for a reason (a call, a fight, a switch of site), not for a fresh hunt pick
+bool CCSBot::LsBehindMe(const Vector &at) const
+{
+	Vector2D way;
+	if (pev->velocity.Length2D() > 60.0f)
+		way = pev->velocity.Make2D();
+	else
+		return false;
+	way.NormalizeInPlace();
+	Vector2D to = (at - pev->origin).Make2D();
+	float len = float(to.Length());
+	if (len < 400.0f)
+		return false;
+	return float(DotProduct(to, way)) / len < -0.3f;
 }
