@@ -425,7 +425,15 @@ void CCSBot::OnEvent(GameEventType event, CBaseEntity *pEntity, CBaseEntity *pOt
 
 		GetChatter()->HostagesBeingTaken();
 
-		if (!GetGameState()->GetNearestVisibleFreeHostage() && m_task != GUARD_HOSTAGE_RESCUE_ZONE && GuardRandomZone())
+		// (Loner-Strike: the rescue zone they'll take it to - the nearest to the hostage - and the
+		// better ones wait partway along the way back, not at a random zone)
+		if (LsFight() && !GetGameState()->GetNearestVisibleFreeHostage() && m_task != GUARD_HOSTAGE_RESCUE_ZONE && LsCutOffRescue(pEntity->pev->origin))
+		{
+			m_task = GUARD_HOSTAGE_RESCUE_ZONE;
+			m_taskEntity = nullptr;
+			SetDisposition(OPPORTUNITY_FIRE);
+		}
+		else if (!GetGameState()->GetNearestVisibleFreeHostage() && m_task != GUARD_HOSTAGE_RESCUE_ZONE && GuardRandomZone())
 		{
 			m_task = GUARD_HOSTAGE_RESCUE_ZONE;
 			m_taskEntity = nullptr;

@@ -732,7 +732,17 @@ void CCSBot::ReloadCheck()
 	if (IsActiveWeaponClipEmpty())
 	{
 		// high-skill players switch to pistol instead of reloading during combat
-		if (GetProfile()->GetSkill() > 0.5f && IsAttacking())
+		// (Loner-Strike: when the enemy's close enough for a pistol to matter - far off, a reload
+		// behind cover is better - and mid-level players do it some of the time)
+		bool lsSwitch = GetProfile()->GetSkill() > 0.5f && IsAttacking();
+		if (LsFight() && IsAttacking())
+		{
+			CBasePlayer *pFoe = GetEnemy();
+			float range = pFoe ? float((pFoe->pev->origin - pev->origin).Length()) : 9999.0f;
+			float skill = LsSkill();
+			lsSwitch = range < 1300.0f && (skill > 0.5f || (skill > 0.3f && RANDOM_FLOAT(0.0f, 1.0f) < 0.4f));
+		}
+		if (lsSwitch)
 		{
 			if (!GetActiveWeapon()->IsPistol() && !IsPistolEmpty())
 			{

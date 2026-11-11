@@ -1218,6 +1218,7 @@ public:
 	float m_lsReloadCrouchAt = 0.0f;			// whether to crouch for this reload was decided (until then)
 	float m_lsKnifeOkUntil = 0.0f;
 	// round knowledge (batch 3): the kill feed and radar, its own last death, the numbers
+	bool LsCutOffRescue(const Vector &hostage);		// a hostage taken: to the rescue zone it'll go to, or partway
 	void LsTold(const Vector &at);					// a teammate's callout: an enemy there
 	void LsFeed(CBasePlayer *pVictim, CBasePlayer *pKiller);	// a teammate died (radar spot, the gun in the feed)
 	void LsNoteDeath(CBasePlayer *pKiller);			// it died: where (avoided next round), and a person's spot

@@ -1354,3 +1354,40 @@ const CCSBotManager::Zone *CCSBot::LsPlantOrder() const
 {
 	return m_lsPlantOrderRound == LsRoundSerial() ? m_lsPlantOrderZone : nullptr;
 }
+
+// A hostage being led away (heard): the CTs take it to the nearest rescue zone, so that's the
+// one to cover. The better players wait partway along the way back - a third of the way from
+// the zone toward the hostage - to catch them on the way; the rest guard the zone. One already
+// close to the hostage leaves it to the noise (it goes after them)
+bool CCSBot::LsCutOffRescue(const Vector &hostage)
+{
+	if ((hostage - pev->origin).IsLengthLessThan(700.0f))
+		return false;
+	const CCSBotManager::Zone *best = nullptr;
+	float bestD = 1e9f;
+	for (int i = 0; i < TheCSBots()->GetZoneCount(); i++)
+	{
+		const CCSBotManager::Zone *zone = TheCSBots()->GetZone(i);
+		float d = float((zone->m_center - hostage).Length2D());
+		if (d < bestD)
+		{
+			bestD = d;
+			best = zone;
+		}
+	}
+	if (!best)
+		return false;
+	CNavArea *spot = nullptr;
+	if (LsSkill() > 0.4f && bestD > 600.0f)
+	{
+		Vector partway = best->m_center + (hostage - best->m_center) * 0.33f;
+		spot = TheNavAreaGrid.GetNearestNavArea(&partway);
+	}
+	if (!spot)
+		spot = TheCSBots()->GetRandomAreaInZone(best);
+	if (!spot)
+		return false;
+	Hide(spot, RANDOM_FLOAT(20.0f, 35.0f), 500.0f);
+	LsWhy("cut off the rescue");
+	return true;
+}
