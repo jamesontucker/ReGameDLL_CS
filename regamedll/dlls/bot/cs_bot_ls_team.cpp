@@ -295,6 +295,9 @@ void CCSBot::LsThreatTick()
 		float secs = RANDOM_FLOAT(5.0f, 12.0f) * (careful ? 1.4f : 1.0f);
 		if (!IsHiding())
 			Hide(m_lastKnownArea, secs, 400.0f, true);
+		// (already in cover: that hide runs on a while longer, from now)
+		else if (m_state == &m_hideState)
+			m_hideState.SetDuration((now - GetStateTimestamp()) + secs);
 		float aim = RANDOM_FLOAT(3.0f, 6.0f);
 		if (!LsPreAim(m_lsThreatPos, aim))
 		{
@@ -310,13 +313,17 @@ void CCSBot::LsThreatTick()
 		Vector to = m_lsThreatPos;
 		if (pFoe && pFoe->IsAlive())
 			SetTask(MOVE_TO_LAST_KNOWN_ENEMY_POSITION, pFoe);
+		else
+			SetTask(SEEK_AND_DESTROY);
 		MoveTo(&to, FASTEST_ROUTE);
 		LsWhy("threat: back in on them");
 		break;
 	}
 	case ROUND:
 	{
+		// (not a chase left over from the fight: that task would take the straight way in)
 		Vector to = m_lsThreatPos;
+		SetTask(SEEK_AND_DESTROY);
 		MoveTo(&to, SAFEST_ROUTE);
 		LsWhy("threat: going round");
 		break;
@@ -336,6 +343,7 @@ void CCSBot::LsThreatTick()
 		if (pMate)
 		{
 			Vector to = pMate->pev->origin;
+			SetTask(SEEK_AND_DESTROY);
 			MoveTo(&to, SAFEST_ROUTE);
 		}
 		else
