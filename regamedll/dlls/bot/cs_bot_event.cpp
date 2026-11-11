@@ -72,6 +72,17 @@ void CCSBot::OnEvent(GameEventType event, CBaseEntity *pEntity, CBaseEntity *pOt
 	if (event == EVENT_PLAYER_TOOK_DAMAGE && pOther == this)
 		m_lsShotsNoHit = 0;
 
+	// Loner-Strike: hit: from someone it can't see, through a wall?
+	if (event == EVENT_PLAYER_TOOK_DAMAGE && pEntity == this && pOther && pOther->IsPlayer())
+		LsHurtBy(static_cast<CBasePlayer *>(pOther));
+
+	// Loner-Strike: something breaking (the event carries the glass, not who broke it)
+	if (event == EVENT_BREAK_GLASS || event == EVENT_BREAK_WOOD || event == EVENT_BREAK_METAL || event == EVENT_BREAK_CONCRETE)
+	{
+		LsHeardBreak(pEntity);
+		return;
+	}
+
 	// Loner-Strike: an enemy's bullets landing close (or passing close): being shot at
 	if (event == EVENT_BULLET_IMPACT)
 	{

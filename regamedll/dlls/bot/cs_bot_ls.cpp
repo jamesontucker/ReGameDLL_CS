@@ -1994,6 +1994,20 @@ void CCSBot::LsShotAt(CBasePlayer *pShooter, const Vector &impact)
 		return;
 	}
 	SetLookAt("Loner-Strike: shot at", &from, PRIORITY_HIGH, RANDOM_FLOAT(1.0f, 2.0f));
+	// shot at from somewhere it can't see (an AWP down a lane most of all): the better ones get
+	// out of that line first, and come back by another way (the spot it was in is avoided a
+	// while); newer ones turn and look about in the open. Less in deathmatch, and rushers less
+	if (!keepsGoing && !IsAttacking())
+	{
+		CBasePlayerWeapon *pGun = static_cast<CBasePlayerWeapon *>(pShooter->m_pActiveItem);
+		bool sniper = pGun && (pGun->m_iId == WEAPON_AWP || pGun->m_iId == WEAPON_SCOUT || pGun->m_iId == WEAPON_G3SG1 || pGun->m_iId == WEAPON_SG550);
+		float odds = (0.1f + 0.75f * LsSkill() + (sniper ? 0.2f : 0.0f)) * (LsTeamGame() ? 1.0f : 0.5f) * (LsStyle() == LS_STYLE_RUSHER ? 0.6f : 1.0f);
+		if (RANDOM_FLOAT(0.0f, 1.0f) < odds && LsTakeCoverFrom(m_lsShotFrom, 64.0f))
+		{
+			if (sniper && m_lastKnownArea)
+				LsForceBadArea(m_lastKnownArea, 25.0f);
+		}
+	}
 	CNavArea *area = TheNavAreaGrid.GetNavArea(&m_lsShotFrom);
 	if (!area)
 		area = TheNavAreaGrid.GetNearestNavArea(&m_lsShotFrom);
@@ -2355,6 +2369,42 @@ void CCSBot::LsHeard(GameEventType event, CBasePlayer *pPlayer, float dist)
 		LsPuppetRelease();
 	bool busy = m_state == &m_plantBombState || m_state == &m_defuseBombState || IsUsingLadder() || m_lsSaving || LsPuppetActive() || IsBlind();
 
+	// an enemy scoping a sniper rifle: there's an AWPer about, roughly there
+	if (event == EVENT_WEAPON_ZOOMED)
+	{
+		CBasePlayerWeapon *pGun = static_cast<CBasePlayerWeapon *>(pPlayer->m_pActiveItem);
+		if (pGun && (pGun->m_iId == WEAPON_AWP || pGun->m_iId == WEAPON_SCOUT || pGun->m_iId == WEAPON_G3SG1 || pGun->m_iId == WEAPON_SG550))
+		{
+			m_lsSniperHeard = pPlayer;
+			m_lsSniperSpot = pPlayer->pev->origin;
+			m_lsSniperHeardAt = now;
+		}
+		return;
+	}
+
+	// in a fight, someone else heard running at it close (a knife rush, a flank): the better
+	// ones turn to meet it (after finishing one nearly dead in front of them), newer ones
+	// tunnel on the fight they're in
+	if (IsAttacking() && event == EVENT_PLAYER_FOOTSTEP && pPlayer != GetEnemy() && dist < 500.0f && now - m_lsRunnerAt > 1.2f && !IsBlind())
+	{
+		Vector vel = pPlayer->pev->velocity;
+		Vector toMe = pev->origin - pPlayer->pev->origin;
+		if (vel.Length2D() > 180.0f && vel.x * toMe.x + vel.y * toMe.y > 0.0f && RANDOM_FLOAT(0.0f, 1.0f) < 0.1f + 0.85f * skill
+			&& !IsVisible(pPlayer, true))
+		{
+			CBasePlayer *pEnemy = GetEnemy();
+			if (!(pEnemy && IsEnemyVisible() && pEnemy->pev->health < 30.0f && skill > 0.5f))
+			{
+				m_lsRunner = pPlayer;
+				m_lsRunnerSpot = pPlayer->pev->origin + Vector(0, 0, HalfHumanHeight);
+				m_lsRunnerUntil = now + 0.25f + 0.35f * (1.0f - skill);
+				m_lsRunnerAt = now;
+				LsWhy("someone running at it");
+			}
+		}
+		return;
+	}
+
 	// in a fight with them: their reload is the moment to push
 	if (IsAttacking())
 	{
@@ -2364,7 +2414,9 @@ void CCSBot::LsHeard(GameEventType event, CBasePlayer *pPlayer, float dist)
 	}
 	if (busy)
 		return;
-	if (event != EVENT_WEAPON_RELOADED && event != EVENT_PLAYER_FOOTSTEP && event != EVENT_WEAPON_FIRED)
+	// (a door opening, a landing from a drop: someone's coming that way)
+	bool coming = event == EVENT_DOOR || event == EVENT_PLAYER_LANDED_FROM_HEIGHT;
+	if (event != EVENT_WEAPON_RELOADED && event != EVENT_PLAYER_FOOTSTEP && event != EVENT_WEAPON_FIRED && !coming)
 		return;
 	if (dist > 900.0f)
 		return;
@@ -2417,10 +2469,13 @@ void CCSBot::LsHeard(GameEventType event, CBasePlayer *pPlayer, float dist)
 			return;
 	}
 
-	// pre-aim where they'd come out
-	if ((event == EVENT_PLAYER_FOOTSTEP || event == EVENT_WEAPON_RELOADED) && dist < 700.0f && now - m_lsPreAimAt > 1.5f && RANDOM_FLOAT(0.0f, 1.0f) < 0.4f + 0.5f * skill)
+	// pre-aim where they'd come out (a door or a landing more surely: they're on their way)
+	if ((event == EVENT_PLAYER_FOOTSTEP || event == EVENT_WEAPON_RELOADED || coming) && dist < (coming ? 1000.0f : 700.0f) && now - m_lsPreAimAt > 1.5f
+		&& RANDOM_FLOAT(0.0f, 1.0f) < (coming ? 0.6f + 0.4f * skill : 0.4f + 0.5f * skill))
 	{
 		m_lsPreAimAt = now;
+		if (LsPreAim(heard, RANDOM_FLOAT(1.5f, 3.0f)))
+			return;
 		Vector eye = pev->origin + pev->view_ofs;
 		Vector from = heard + Vector(0, 0, HalfHumanHeight);
 		Vector step = eye - from;
@@ -4114,4 +4169,174 @@ float LsMapSafeTime()
 	if (!ct || !t)
 		return 20.0f;
 	return Q_max(0.0f, float((*ct - *t).Length2D()) * 0.5f / 250.0f - 2.0f);
+}
+
+// ---- sounds and being shot at (batch 2) --------------------------------------------------
+
+// Where a sound will come out: of the angles enemies appear from here (map knowledge), the
+// one leading to where it was heard. False if none fits (the old walk-back trace is used)
+bool CCSBot::LsPreAim(const Vector &heard, float secs)
+{
+	if (!m_lastKnownArea)
+		return false;
+	const LsAreaKnow *k = LsKnow(m_lastKnownArea);
+	if (!k || !k->angleCount)
+		return false;
+	CNavArea *ha = TheNavAreaGrid.GetNearestNavArea(&heard);
+	int best = -1;
+	float bestD = 900.0f;
+	for (int a = 0; a < k->angleCount; a++)
+	{
+		CNavArea *t = LsKnowArea(k->angles[a].area);
+		if (!t)
+			continue;
+		float d = (t == ha) ? 0.0f : float((*t->GetCenter() - heard).Length());
+		// (an angle the sound's area can see into is the way it'd come)
+		if (ha && t != ha && LsSightReady() && LsSees(ha, t))
+			d *= 0.6f;
+		if (d < bestD)
+		{
+			bestD = d;
+			best = a;
+		}
+	}
+	if (best < 0)
+		return false;
+	CNavArea *t = LsKnowArea(k->angles[best].area);
+	Vector at = *t->GetCenter() + Vector(0, 0, HalfHumanHeight + LsLookHeight());
+	SetLookAt("Loner-Strike: pre-aim", &at, PRIORITY_MEDIUM, secs);
+	return true;
+}
+
+// Glass, a vent cover, a board breaking close by, with none of its own team there: someone's
+// coming through. Newer players don't always register what it means
+void CCSBot::LsHeardBreak(CBaseEntity *pBreak)
+{
+	if (!LsFight() || !pBreak || IsBlind() || (CBaseEntity *)m_lsBreak == pBreak)
+		return;
+	Vector at = BrushCenter(pBreak);
+	float dist = float((at - pev->origin).Length());
+	if (dist > 1100.0f)
+		return;
+	bool ours = false;
+	LsForTeammates(this, [&](CBasePlayer *pPlayer) {
+		if ((pPlayer->pev->origin - at).IsLengthLessThan(250.0f))
+			ours = true;
+	});
+	if (ours || RANDOM_FLOAT(0.0f, 1.0f) > 0.5f + 0.5f * LsSkill())
+		return;
+	CNavArea *area = TheNavAreaGrid.GetNearestNavArea(&at);
+	if (!area)
+		return;
+	m_noisePosition = at;
+	m_noiseArea = area;
+	m_noisePriority = PRIORITY_MEDIUM;
+	m_noiseTimestamp = gpGlobals->time;
+	if (!IsAttacking() && !LsPreAim(at, RANDOM_FLOAT(1.5f, 3.0f)))
+	{
+		Vector look = at;
+		SetLookAt("Loner-Strike: something broke", &look, PRIORITY_MEDIUM, RANDOM_FLOAT(1.0f, 2.0f));
+	}
+	LsWhy("heard something break");
+}
+
+// The nearest spot (within 500 units, at least minMove away, not toward the threat) a
+// standing head there is out of the threat's sight: it runs there
+bool CCSBot::LsTakeCoverFrom(const Vector &threat, float minMove)
+{
+	if (!m_lastKnownArea || IsUsingLadder() || IsAttacking())
+		return false;
+	Vector from = threat + Vector(0, 0, 17.0f);
+	float threatD = float((pev->origin - threat).Length());
+	CNavArea *queue[48];
+	int head = 0, tail = 0;
+	queue[tail++] = m_lastKnownArea;
+	CNavArea *best = nullptr;
+	float bestD = 500.0f;
+	while (head < tail)
+	{
+		CNavArea *area = queue[head++];
+		Vector c = *area->GetCenter();
+		float d = float((c - pev->origin).Length2D());
+		if (d > 500.0f)
+			continue;
+		if (d >= minMove && d < bestD && (c - threat).Length() > threatD - 100.0f && !LsBadArea(area))
+		{
+			TraceResult tr;
+			UTIL_TraceLine(from, c + Vector(0, 0, 62.0f), ignore_monsters, ignore_glass, ENT(pev), &tr);
+			if (tr.flFraction < 1.0f)
+			{
+				best = area;
+				bestD = d;
+			}
+		}
+		for (int dir = 0; dir < NUM_DIRECTIONS; dir++)
+		{
+			int n = area->GetAdjacentCount((NavDirType)dir);
+			for (int i = 0; i < n && tail < 48; i++)
+			{
+				CNavArea *adj = area->GetAdjacentArea((NavDirType)dir, i);
+				bool seen = false;
+				for (int j = 0; j < tail && !seen; j++)
+					seen = queue[j] == adj;
+				if (adj && !seen)
+					queue[tail++] = adj;
+			}
+		}
+	}
+	if (!best)
+		return false;
+	Vector spot = *best->GetCenter();
+	Run();
+	MoveTo(&spot, FASTEST_ROUTE);
+	LsWhy("to cover");
+	return true;
+}
+
+// Hit by someone it can't see, with a wall between: being wallbanged. That spot isn't safe
+// this round: out of it (to somewhere else out of their line), and paths avoid it a while.
+// Newer players often stay put
+void CCSBot::LsHurtBy(CBasePlayer *pAttacker)
+{
+	float now = gpGlobals->time;
+	if (!LsFight() || !IsAlive() || !pAttacker->IsAlive() || !IsEnemy(pAttacker) || now < m_lsHurtCheckAt)
+		return;
+	m_lsHurtCheckAt = now + 1.0f;
+	if (IsVisible(pAttacker, false))
+		return;
+	TraceResult tr;
+	UTIL_TraceLine(pAttacker->pev->origin + pAttacker->pev->view_ofs, GetEyePosition(), ignore_monsters, ignore_glass, ENT(pAttacker->pev), &tr);
+	if (tr.flFraction >= 1.0f)
+		return;
+	if (RANDOM_FLOAT(0.0f, 1.0f) > 0.25f + 0.7f * LsSkill())
+		return;
+	if (m_lastKnownArea)
+		LsForceBadArea(m_lastKnownArea, 30.0f);
+	if (LsTakeCoverFrom(pAttacker->pev->origin, 150.0f))
+		LsWhy("wallbanged: moving");
+}
+
+// Mid-fight, turning to someone heard running at it (the aim leaves its enemy a moment): seen
+// now, it's the one fought
+bool CCSBot::LsRunnerGlance()
+{
+	if (!LsFight() || gpGlobals->time >= m_lsRunnerUntil)
+		return false;
+	CBasePlayer *pRunner = m_lsRunner;
+	if (!pRunner || !pRunner->IsAlive() || IsBlind())
+	{
+		m_lsRunnerUntil = 0.0f;
+		return false;
+	}
+	if (IsVisible(pRunner, false))
+	{
+		m_lsRunnerUntil = 0.0f;
+		Attack(pRunner);
+		return false;
+	}
+	m_lsRunnerSpot = pRunner->pev->origin + Vector(0, 0, HalfHumanHeight);
+	Vector ang = UTIL_VecToAngles(m_lsRunnerSpot - GetEyePosition());
+	ang.x = 360.0f - ang.x;
+	SetLookAngles(ang.y, ang.x);
+	return true;
 }

@@ -38,7 +38,10 @@ void CCSBot::Upkeep()
 		TogglePrimaryAttack();
 
 	// aiming must be smooth - update often
-	if (IsAimingAtEnemy())
+	// (Loner-Strike: or a quick turn to someone heard running at it mid-fight)
+	if (LsRunnerGlance())
+		;
+	else if (IsAimingAtEnemy())
 	{
 		UpdateAimOffset();
 

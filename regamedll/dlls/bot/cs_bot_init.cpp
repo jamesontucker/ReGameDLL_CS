@@ -199,6 +199,11 @@ void CCSBot::ResetValues()
 	m_lsButton = nullptr;
 	m_lsButtonUntil = 0.0f;
 	m_lsButtonBehind = nullptr;
+	m_lsRunner = nullptr;
+	m_lsRunnerUntil = 0.0f;
+	m_lsRunnerAt = 0.0f;
+	m_lsSniperHeard = nullptr;
+	m_lsSniperHeardAt = -999.0f;
 	m_lsBreak = nullptr;
 	m_lsBreakUntil = 0.0f;
 	m_lsDoorBackUntil = 0.0f;

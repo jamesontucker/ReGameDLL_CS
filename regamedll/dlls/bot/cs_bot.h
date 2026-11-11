@@ -1201,6 +1201,19 @@ public:
 	bool LsWallbang(float notSeenEnemyTime);		// spraying a thin wall the enemy just went behind (true while it does)
 	bool LsRadioOk(GameEventType event);			// whether this radio message is sent (bot_ls_fight)
 	void LsShotAt(CBasePlayer *pShooter, const Vector &impact);	// enemy bullets landing or passing close
+	void LsHeardBreak(CBaseEntity *pBreak);		// glass, a vent cover, a board breaking: someone's there
+	void LsHurtBy(CBasePlayer *pAttacker);		// hit: through a wall? that spot's not safe
+	bool LsPreAim(const Vector &heard, float secs);	// look where a sound will come out (the area's angles)
+	bool LsTakeCoverFrom(const Vector &threat, float minMove);	// to the nearest spot out of its sight
+	bool LsRunnerGlance();						// mid-fight, a turn to someone heard running at it
+	EntityHandle<CBasePlayer> m_lsRunner;		// ...who, where, until when, and when it last did
+	Vector m_lsRunnerSpot;
+	float m_lsRunnerUntil = 0.0f;
+	float m_lsRunnerAt = 0.0f;
+	float m_lsHurtCheckAt = 0.0f;
+	EntityHandle<CBasePlayer> m_lsSniperHeard;	// an enemy heard scoping a sniper rifle, where, when
+	Vector m_lsSniperSpot;
+	float m_lsSniperHeardAt = -999.0f;
 	float LsObjUseAt() const { return m_lsObjUseAt; }	// planting/defusing started again then (after a threat)
 	void LsObjectiveBegins() { m_lsObjStops = 0; m_lsForTimeRoll = -1; }	// a plant or defuse starts
 	void LsFightBegins() {}							// a new fight (playing for time is decided once a round)
