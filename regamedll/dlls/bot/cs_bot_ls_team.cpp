@@ -9,6 +9,32 @@
 #include "precompiled.h"
 
 // Team play each frame (cheap: timers first)
+// How far apart two places are for site purposes: height counts two and a half times (nuke's
+// sites are one above the other: flat, they're the same place)
+static float LsSiteDist(const Vector &a, const Vector &b)
+{
+	Vector d = a - b;
+	d.z *= 2.5f;
+	return float(d.Length());
+}
+
+static const CCSBotManager::Zone *LsNearZone(const Vector &at)
+{
+	const CCSBotManager::Zone *best = nullptr;
+	float bestD = 1e9f;
+	for (int z = 0; TheCSBots() && z < TheCSBots()->GetZoneCount(); z++)
+	{
+		const CCSBotManager::Zone *zone = TheCSBots()->GetZone(z);
+		float d = LsSiteDist(zone->m_center, at);
+		if (d < bestD)
+		{
+			bestD = d;
+			best = zone;
+		}
+	}
+	return best;
+}
+
 // A site being hit, as a CT side reads it off the radar and the kill feed: teammates dropping
 // by one site within seconds. No commander - each CT elsewhere decides for itself whether to
 // go (see LsTeamTick)
@@ -26,8 +52,8 @@ void LsCtSiteDeath(CBasePlayer *pVictim)
 		return;
 	s_hitDeathAt = now;
 	s_hitVictim = pVictim->entindex();
-	const CCSBotManager::Zone *zone = TheCSBots()->GetClosestZone(&pVictim->pev->origin);
-	if (!zone || (zone->m_center - pVictim->pev->origin).Make2D().IsLengthGreaterThan(1100.0f))
+	const CCSBotManager::Zone *zone = LsNearZone(pVictim->pev->origin);
+	if (!zone || LsSiteDist(zone->m_center, pVictim->pev->origin) > 1100.0f)
 		return;
 	int z = zone->m_index;
 	if (s_hitRound != LsRoundSerial() || s_hitZone != z || now - s_hitAt > 12.0f)
@@ -65,8 +91,8 @@ void CCSBot::LsTeamTick()
 	{
 		m_lsRotateHitAt = s_hitStart;
 		const CCSBotManager::Zone *zone = TheCSBots()->GetZone(s_hitZone);
-		float d = zone ? float((zone->m_center - pev->origin).Length2D()) : 0.0f;
-		if (zone && d > 1000.0f && d < 4500.0f)
+		float d = zone ? LsSiteDist(zone->m_center, pev->origin) : 0.0f;
+		if (zone && d > 600.0f && d < 5000.0f && LsNearZone(pev->origin) != zone)
 		{
 			int style = LsStyle();
 			bool anchoring = style == LS_STYLE_CAMPER && GetTask() == GUARD_BOMB_ZONE;
@@ -86,6 +112,47 @@ void CCSBot::LsTeamTick()
 					m_lsRotateZone = s_hitZone;
 					m_lsRotateZoneUntil = now + 45.0f;
 					LsWhy("rotate: site hit");
+				}
+			}
+		}
+	}
+
+	// hostage maps: a CT on its way in for the hostages, a short walk out and out of their
+	// sight, with few teammates near, waits a few seconds for the others rather than walking in
+	// alone (the Ts inside hold together; one at a time, the CTs were picked off - on assault
+	// they lost four rounds in five). Once a round; rushers and knifers just go, the patient
+	// wait longest
+	if (m_iTeam == CT && TheCSBots()->GetScenario() == CCSBotManager::SCENARIO_RESCUE_HOSTAGES && m_lsHostStageRound != round
+		&& GetTask() == COLLECT_HOSTAGES && GetHostageEscortCount() == 0 && IsMovingTo() && HasPath() && LsTimeLeft() > 50.0f && LsFree()
+		&& !IsAttacking() && !IsEnemyVisible() && GetFriendsRemaining() >= 2 && !LsOrderActive() && now >= m_lsExecCheckAt)
+	{
+		m_lsExecCheckAt = now + 0.3f;
+		float walk = GetPathDistanceRemaining();
+		int style = LsStyle();
+		if (style == LS_STYLE_RUSHER || style == LS_STYLE_KNIFER || LsLoner())
+			m_lsHostStageRound = round;
+		else if (walk > 500.0f && walk < 1100.0f)
+		{
+			TraceResult tr;
+			UTIL_TraceLine(GetEyePosition(), GetPathEndpoint() + Vector(0, 0, 48.0f), ignore_monsters, ENT(pev), &tr);
+			if (tr.flFraction < 1.0f)
+			{
+				m_lsHostStageRound = round;
+				int nearMates = 0;
+				LsForTeammates(this, [&](CBasePlayer *pPlayer) {
+					if (pPlayer->IsAlive() && (pPlayer->pev->origin - pev->origin).IsLengthLessThan(700.0f))
+						nearMates++;
+				});
+				// (standing where it is, still on its way for the hostages - a hide would end in
+				// a fresh plan, and one in three went hunting instead; under the 5 s it takes to
+				// give up on an area. Anything happening ends the wait: the hold gives way)
+				if (nearMates < 2 && !LsPuppetActive())
+				{
+					float wait = Q_min(4.5f, (2.0f + 2.5f * (1.0f - LsAggro())) * (LsMatch() ? 1.3f : 1.0f));
+					m_lsPuppet.any = true;
+					m_lsPuppet.holdUntil = now + wait;
+					Q_strlcpy(m_lsPuppet.holdTag, "ls");
+					LsWhy("hostages: waiting for the team");
 				}
 			}
 		}

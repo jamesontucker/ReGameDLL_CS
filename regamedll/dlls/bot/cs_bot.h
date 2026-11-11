@@ -1486,6 +1486,7 @@ private:
 	enum { LSR_NONE, LSR_ENTRY, LSR_TRADE, LSR_FLANK, LSR_SNIPER };
 	int m_lsRole = LSR_NONE;						// its part in the push this round (picked from what the others are doing)
 	int m_lsRoleRound = -1;
+	int m_lsHostStageRound = -1;					// the round a CT waited for its team on the way in to the hostages
 	float m_lsRotateHitAt = -1.0f;					// the site hit (its time) it decided about
 	int m_lsCallRound = -1;							// the round it said yes to a person's "rush b" / "go b" (in the push, whatever its habits)
 	int m_lsCallSkipRound = -1;						// the round it heard that call and did its own thing instead
