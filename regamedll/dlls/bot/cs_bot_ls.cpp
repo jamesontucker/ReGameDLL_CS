@@ -2026,6 +2026,7 @@ static FILE *LsTraceFile()
 		fprintf(s_file, "#cols,time,id,team,state,task,enemy,leader,goal_x,goal_y,noise_x,noise_y,why,why_ago,speed,view_off,attacking,look,x,y,z,hp,weapon,crouched\n");
 		fprintf(s_file, "#cols_why,time,id,team,x,y,z,why\n");
 		fprintf(s_file, "#cols_attack,time,id,team,enemy,since_first_saw,range\n");
+		fprintf(s_file, "#cols_seen,time,id,team,enemy,range\n");
 	}
 	static char s_map[64] = "";
 	static float s_last = 0.0f;
@@ -5051,7 +5052,9 @@ bool CCSBot::LsMatchup(CBasePlayer *pEnemy, bool crouchAndHold)
 	// once per reload)
 	// one called hurt, in view: the ones who listen to callouts push it (it's one shot)
 	float hurtHp = 100.0f;
+	// (with health to spare: pushing a one-shot enemy on 10 hp is trading, not winning)
 	if (LsKnownHurt(pEnemy, m_iTeam, &hurtHp) && hurtHp < 40.0f && now > m_lsPushUntil && !IsUsingSniperRifle() && !LsSolo()
+		&& pev->health >= 40.0f
 		&& range < 1000.0f && RANDOM_FLOAT(0.0f, 1.0f) < 0.25f + 0.5f * skill * LsTeamwork() + 0.25f * LsAggro())
 	{
 		m_lsPushUntil = now + RANDOM_FLOAT(0.8f, 1.5f);
@@ -5395,8 +5398,31 @@ void CCSBot::LsFeed(CBasePlayer *pVictim, CBasePlayer *pKiller)
 	}
 }
 
+// Where each side's players died lately (the radar shows a teammate's death): the last few
+struct LsTeamDeath { Vector at; float when; int team; int map; };
+static LsTeamDeath s_teamDeaths[16];
+static int s_teamDeathNext = 0;
+
+bool LsRecentDeathNear(int team, const Vector &at, float range, float secs)
+{
+	float now = gpGlobals->time;
+	int map = LsMapSerial();
+	for (int i = 0; i < 16; i++)
+	{
+		const LsTeamDeath &d = s_teamDeaths[i];
+		if (d.map == map && d.team == team && d.when <= now && now - d.when < secs && (d.at - at).IsLengthLessThan(range))
+			return true;
+	}
+	return false;
+}
+
 void CCSBot::LsNoteDeath(CBasePlayer *pKiller)
 {
+	s_teamDeaths[s_teamDeathNext].at = pev->origin;
+	s_teamDeaths[s_teamDeathNext].when = gpGlobals->time;
+	s_teamDeaths[s_teamDeathNext].team = m_iTeam;
+	s_teamDeaths[s_teamDeathNext].map = LsMapSerial();
+	s_teamDeathNext = (s_teamDeathNext + 1) % 16;
 	m_lsDiedArea = m_lastKnownArea;
 	m_lsDiedMap = LsMapSerial();
 	m_lsDiedRound = LsRoundSerial();
@@ -5533,7 +5559,8 @@ bool LsKnownHurt(CBasePlayer *pEnemy, int team, float *hp, Vector *where, float 
 void CCSBot::LsHurtCallTick()
 {
 	float now = gpGlobals->time;
-	if (!LsFight() || LsSolo() || now - m_lsHurtPushAt < 6.0f || !LsFree() || IsHiding() || LsRushing() || TheCSBots()->IsBombPlanted())
+	if (!LsFight() || LsSolo() || now - m_lsHurtPushAt < 6.0f || !LsFree() || IsHiding() || LsRushing() || TheCSBots()->IsBombPlanted()
+		|| pev->health < 50.0f)
 		return;
 	m_lsHurtPushAt = now - 4.0f;	// (looked at once every two seconds or so)
 	for (int i = 1; i <= gpGlobals->maxClients; i++)
@@ -6028,4 +6055,42 @@ bool CCSBot::LsBehindMe(const Vector &at) const
 	if (len < 400.0f)
 		return false;
 	return float(DotProduct(to, way)) / len < -0.3f;
+}
+
+// The dropped bomb lies where a teammate just died: someone's holding that angle
+bool CCSBot::LsBombHot(const Vector &bomb)
+{
+	return LsRecentDeathNear(m_iTeam, bomb, 500.0f, 15.0f);
+}
+
+// The last T alive, with the bomb, two or more CTs left and the clock not yet pressing: with
+// something heard or seen close a moment ago, a person waits for a quiet moment to plant rather
+// than starting it (and starting it again) with them right there. At most about 25 s in all
+bool CCSBot::LsClutchWait()
+{
+	float now = gpGlobals->time;
+	if (!LsFight() || m_iTeam != TERRORIST || !IsCarryingBomb() || GetFriendsRemaining() > 0 || GetEnemiesRemaining() < 2
+		|| LsTimeLeft() < 30.0f || m_lsClutchWaitTotal > 25.0f || LsSkill() < 0.3f)
+		return false;
+	bool threat = (IsNoiseHeard() && now - m_noiseTimestamp < 5.0f && (m_noisePosition - pev->origin).IsLengthLessThan(1000.0f))
+		|| GetTimeSinceLastSawEnemy() < 5.0f || GetTimeSinceAttacked() < 5.0f || now - m_lsShotAtAt < 5.0f;
+	if (!threat)
+		return false;
+	if (m_lsClutchWaitAt > 0.0f && now - m_lsClutchWaitAt < 10.0f)
+		m_lsClutchWaitTotal += now - m_lsClutchWaitAt;
+	m_lsClutchWaitAt = now;
+	return true;
+}
+
+// bot_ls_trace: an enemy first in view (after not having been for a few seconds): with the
+// #attack line, the true time from seeing to the fight
+void CCSBot::LsTraceSeen(CBasePlayer *pEnemy)
+{
+	if (cv_bot_ls_trace.value <= 0.0f || !pEnemy)
+		return;
+	FILE *f = LsTraceFile();
+	if (!f)
+		return;
+	fprintf(f, "#seen,%.2f,%d,%d,%d,%.0f\n", gpGlobals->time, entindex(), m_iTeam, pEnemy->entindex(), float((pEnemy->pev->origin - pev->origin).Length()));
+	fflush(f);
 }

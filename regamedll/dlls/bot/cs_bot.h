@@ -1273,7 +1273,11 @@ public:
 	bool LsBehindMe(const Vector &at) const;
 	float m_lsCoverRunUntil = 0.0f;					// on a deliberate cover move (a matchup, a rush): aiming at it doesn't pull it back out
 	float m_lsMatchupUntil = 0.0f;					// the matchup with m_lsMatchupEnemy decided until (not re-weighed each new fight)
-	float m_lsHuntRetryAt = 0.0f;					// every hunting goal failed: a moment before trying again		// behind the way it's going (a new goal there is a U-turn)							// bot_ls_trace: a fight starting, and how long it took to react					// the round it picked its way into a retake
+	float m_lsHuntRetryAt = 0.0f;
+	bool LsClutchWait();								// the last T, the bomb, several CTs about and something heard or seen: not now
+	float m_lsClutchWaitTotal = 0.0f, m_lsClutchWaitAt = 0.0f;
+	bool LsBombHot(const Vector &bomb);				// a teammate died by the dropped bomb a moment ago (the radar shows it)
+	void LsTraceSeen(CBasePlayer *pEnemy);			// bot_ls_trace: an enemy first in view					// every hunting goal failed: a moment before trying again		// behind the way it's going (a new goal there is a U-turn)							// bot_ls_trace: a fight starting, and how long it took to react					// the round it picked its way into a retake
 	void LsRetakeApproach();				// mid jump-peek (in the air: still the jiggle)					// a smoke for the AWP lane it just got out of, thrown from cover then
 	Vector m_lsSmokeLaneSpot;
 	void LsSmokeLaneTick();
@@ -1680,7 +1684,8 @@ extern int g_lsNavLoads;					// navs loaded so far (a same-name reload is a new 
 const Vector *LsEnemySpawn(int team);	// the middle of the other team's spawn (null if none)
 float LsArrival(const CNavArea *area, int team);	// seconds that team needs, running from its spawn, to get there (-1 unknown)
 enum { LSG_NONE, LSG_PISTOL, LSG_DEAGLE, LSG_SMG, LSG_SHOTGUN, LSG_RIFLE, LSG_SNIPER, LSG_MG };
-int LsGunClass(CBasePlayer *pPlayer);	// what kind of gun someone has out
+int LsGunClass(CBasePlayer *pPlayer);
+bool LsRecentDeathNear(int team, const Vector &at, float range, float secs);	// a player of that side died near there lately	// what kind of gun someone has out
 void LsCallHurt(CBasePlayer *pEnemy, int team, float hp, const Vector &where);	// a team was told an enemy's hurt ("he's lit", "1 low"), and where
 bool LsKnownHurt(CBasePlayer *pEnemy, int team, float *hp = nullptr, Vector *where = nullptr, float *when = nullptr);	// ...and still knows it (no healing in CS)
 int LsAlive(int team);					// how many of a team are alive (the scoreboard shows it)

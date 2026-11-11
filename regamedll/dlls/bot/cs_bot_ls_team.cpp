@@ -134,7 +134,7 @@ void CCSBot::LsTeamTick()
 		&& GetTask() != PLANT_BOMB)
 	{
 		m_lsFetchCheckAt = now + 1.0f;
-		if (LsBombFetcher() == this)
+		if (LsFetchesBomb())
 		{
 			if (LsPuppetActive() && !LsOrderActive())
 				LsPuppetRelease();
@@ -751,7 +751,7 @@ void CCSBot::LsExecuteTick()
 	int round = LsRoundSerial();
 	float now = gpGlobals->time;
 	const CCSBotManager::Zone *site = LsTSite();
-	if (!site || LsLurksOtherSite())
+	if (!site || LsLurksOtherSite() || GetFriendsRemaining() == 0)
 		return;
 	LsExecuteRound(site);
 	// (its own marks count for this round's site only: a switch starts over)
@@ -1118,7 +1118,22 @@ bool CCSBot::LsFetchesBomb()
 {
 	if (!LsFight())
 		return true;
-	return LsBombFetcher() == this;
+	if (LsBombFetcher() != this)
+		return false;
+	// (where a teammate just died: not straight into that angle alone - with a teammate close,
+	// or once a few seconds have gone by, or when the clock says now)
+	CBaseEntity *pBomb = TheCSBots()->GetLooseBomb();
+	if (pBomb && LsBombHot(pBomb->pev->origin) && LsTimeLeft() > 30.0f && LsSkill() > 0.3f)
+	{
+		bool company = false;
+		LsForTeammates(this, [&](CBasePlayer *pPlayer) {
+			if ((pPlayer->pev->origin - pev->origin).IsLengthLessThan(600.0f))
+				company = true;
+		});
+		if (!company)
+			return false;
+	}
+	return true;
 }
 
 // The one T bot that goes for a dropped bomb: the nearest that's free (not in a fight, not

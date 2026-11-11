@@ -1284,6 +1284,9 @@ CBasePlayer *CCSBot::FindMostDangerousThreat()
 
 			// update watch timestamp
 			int idx = pPlayer->entindex() - 1;
+			// (Loner-Strike trace: first in view after a few seconds without them)
+			if (LsFight() && (m_watchInfo[idx].timestamp <= 0.0f || gpGlobals->time - m_watchInfo[idx].timestamp > 3.0f))
+				LsTraceSeen(pPlayer);
 			m_watchInfo[idx].timestamp = gpGlobals->time;
 			m_watchInfo[idx].isEnemy = true;
 

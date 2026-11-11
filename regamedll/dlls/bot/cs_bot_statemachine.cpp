@@ -474,6 +474,16 @@ void CCSBot::MoveTo(const Vector *pos, RouteType route)
 
 void CCSBot::PlantBomb()
 {
+	// (Loner-Strike: the last T with CTs right there: a quiet moment first, close by)
+	if (LsClutchWait())
+	{
+		if (!IsHiding())
+		{
+			Hide(GetLastKnownArea(), RANDOM_FLOAT(4.0f, 7.0f), 350.0f, true);
+			LsWhy("clutch: waiting to plant");
+		}
+		return;
+	}
 	SetState(&m_plantBombState);
 }
 
