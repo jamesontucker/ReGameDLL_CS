@@ -4334,6 +4334,46 @@ void EditNavAreas(NavEditCmdType cmd)
 		isCreatingNavArea = false;
 }
 
+// Loner-Strike: a breakable the trace landed on the top of that people stand on, not one they
+// shoot through: glass or wood (a glass arena's panes, a plank bridge; not a metal vent grate
+// or a see-through grille, whose drop-through route stays), its top facing up, wide both ways
+// (room to stand: a window's top edge is a few units deep) and thin (a crate is tall), the
+// trace on its top surface, and not built to give way under a player (a pressure plate, or a
+// pane that a walking player crashes through). It's a floor until it breaks; then it's gone
+// and the trace goes through. Windows, crates and vent grates stay walk-through as before.
+static bool IsBreakableFloor(const TraceResult &result)
+{
+	if (!result.pHit || result.vecPlaneNormal.z < 0.7f)
+		return false;
+
+	entvars_t *pev = VARS(result.pHit);
+	if (!FClassnameIs(pev, "func_breakable"))
+		return false;
+
+	const Vector size = pev->absmax - pev->absmin;
+	const float minWidth = 48.0f;	// (a player is 32 across)
+	const float maxThickness = 32.0f;
+	if (size.x < minWidth || size.y < minWidth || size.z > maxThickness)
+		return false;
+
+	if (result.vecEndPos.z < pev->absmax.z - 2.0f)
+		return false;
+
+	// (made to give way under a player: standing on it, or walking into it with next to no health)
+	if ((pev->spawnflags & SF_BREAK_PRESSURE) || ((pev->spawnflags & SF_BREAK_TOUCH) && pev->health < 3.0f))
+		return false;
+
+	// (a see-through grille, drawn alpha-tested, is a grate to drop through)
+	if (pev->rendermode == kRenderTransAlpha)
+		return false;
+
+	CBreakable *pBreak = static_cast<CBreakable *>(CBaseEntity::Instance(result.pHit));
+	if (!pBreak)
+		return false;
+
+	return pBreak->m_Material == matGlass || pBreak->m_Material == matWood || pBreak->m_Material == matUnbreakableGlass;
+}
+
 bool GetGroundHeight(const Vector *pos, float *height, Vector *normal)
 {
 	Vector to;
@@ -4368,8 +4408,9 @@ bool GetGroundHeight(const Vector *pos, float *height, Vector *normal)
 
 		if (result.flFraction != 1.0f && result.pHit)
 		{
-			// ignoring any entities that we can walk through
-			if (IsEntityWalkable(VARS(result.pHit), WALK_THRU_DOORS | WALK_THRU_BREAKABLES))
+			// ignoring any entities that we can walk through (Loner-Strike: except a breakable
+			// that's a floor: a glass arena's panes, a plank bridge)
+			if (IsEntityWalkable(VARS(result.pHit), WALK_THRU_DOORS | WALK_THRU_BREAKABLES) && !IsBreakableFloor(result))
 			{
 				ignore = result.pHit;
 				continue;
