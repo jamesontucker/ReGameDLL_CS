@@ -233,6 +233,8 @@ void GameDLL_EndRound_f()
 	CSGameRules()->OnRoundEnd_Intercept(WINSTATUS_DRAW, ROUND_END_DRAW, CSGameRules()->GetRoundRestartDelay());
 }
 
+void LsSurfCheck_f();
+
 void GameDLL_SwapTeams_f()
 {
 	CSGameRules()->SwapAllPlayers();
@@ -384,6 +386,7 @@ void EXT_FUNC GameDLLInit()
 	ADD_SERVER_COMMAND("game", GameDLL_Version_f);
 	ADD_SERVER_COMMAND("endround", GameDLL_EndRound_f);
 	ADD_SERVER_COMMAND("swapteams", GameDLL_SwapTeams_f);
+	ADD_SERVER_COMMAND("ls_surfcheck", LsSurfCheck_f);	// Loner-Strike: the surf movement check (bot/cs_bot_surf.cpp)
 
 	CVAR_REGISTER(&game_version);
 	CVAR_REGISTER(&maxmoney);
