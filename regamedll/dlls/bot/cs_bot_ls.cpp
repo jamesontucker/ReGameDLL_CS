@@ -1738,8 +1738,8 @@ CNavArea *CCSBot::LsPickHuntArea()
 			const Extent *ext = area->GetExtent();
 			if (ext->hi.x - ext->lo.x < 100.0f || ext->hi.y - ext->lo.y < 100.0f)
 				continue;
-			// (nor one no path reaches from here)
-			if (!LsSamePart(this, area))
+			// (nor one no path reaches from here, nor one over a floor that broke)
+			if (!LsSamePart(this, area) || LsOverBrokenFloor(area))
 				continue;
 
 			const Vector *c = area->GetCenter();
@@ -5407,6 +5407,94 @@ bool CCSBot::LsPreAim(const Vector &heard, float secs, CBasePlayer *who)
 
 // Glass, a vent cover, a board breaking close by, with none of its own team there: someone's
 // coming through. Newer players don't always register what it means
+// ---- floors that broke ------------------------------------------------------------------
+// A glass or wooden floor that broke (IsFloorBreakable: a glass arena's pane, a plank bridge):
+// its box until the round restarts. The nav keeps the areas over it (the floor comes back next
+// round); routes go round them (PathCost), and a bot already on its way across notices or not.
+static struct { int ent; Vector lo, hi; float at; } s_lsBroken[64];
+static int s_lsBrokenCount = 0;
+
+bool LsNoteBrokenFloor(CBaseEntity *pEntity)
+{
+	if (!pEntity || !IsFloorBreakable(pEntity))
+		return false;
+	int ent = ENTINDEX(pEntity->edict());
+	for (int i = 0; i < s_lsBrokenCount; i++)
+	{
+		if (s_lsBroken[i].ent == ent)
+			return true;		// (every bot hears it: noted once)
+	}
+	if (s_lsBrokenCount < (int)(sizeof(s_lsBroken) / sizeof(s_lsBroken[0])))
+	{
+		s_lsBroken[s_lsBrokenCount].ent = ent;
+		s_lsBroken[s_lsBrokenCount].lo = pEntity->pev->absmin;
+		s_lsBroken[s_lsBrokenCount].hi = pEntity->pev->absmax;
+		s_lsBroken[s_lsBrokenCount].at = gpGlobals->time;
+		s_lsBrokenCount++;
+	}
+	return true;
+}
+
+void LsClearBrokenFloors()
+{
+	s_lsBrokenCount = 0;
+}
+
+// Whether an area lies over a floor that broke: at its height, and mostly over the hole (an
+// area that's mostly solid floor beside it isn't blocked). One whole again (a plugin put it
+// back mid-round) doesn't count.
+bool LsOverBrokenFloor(const CNavArea *area)
+{
+	if (!s_lsBrokenCount || !area)
+		return false;
+	const Extent *e = area->GetExtent();
+	float areaSize = Q_max(1.0f, (e->hi.x - e->lo.x) * (e->hi.y - e->lo.y));
+	float z = area->GetCenter()->z;
+	for (int i = 0; i < s_lsBrokenCount; i++)
+	{
+		const Vector &lo = s_lsBroken[i].lo, &hi = s_lsBroken[i].hi;
+		if (Q_abs(z - hi.z) >= 24.0f)
+			continue;
+		float ox = Q_min(e->hi.x, hi.x) - Q_max(e->lo.x, lo.x);
+		float oy = Q_min(e->hi.y, hi.y) - Q_max(e->lo.y, lo.y);
+		if (ox <= 0.0f || oy <= 0.0f || ox * oy < 0.5f * areaSize)
+			continue;
+		// (the game says it broke a moment before it stops being solid: noted this moment, it's broken)
+		edict_t *pEdict = INDEXENT(s_lsBroken[i].ent);
+		if (s_lsBroken[i].at != gpGlobals->time && (!pEdict || pEdict->free || pEdict->v.solid != SOLID_NOT))
+			continue;
+		return true;
+	}
+	return false;
+}
+
+// A floor just broke: if the way it's going crosses it, a new route, if it noticed. Most do;
+// a newer player in a fight sometimes doesn't, and walks into the hole as people do.
+void CCSBot::LsHoleCheck()
+{
+	if (!HasPath())
+		return;
+	bool crosses = false;
+	for (int i = Q_max(0, m_pathIndex); i < m_pathLength && !crosses; i++)
+		crosses = LsOverBrokenFloor(m_path[i].area);
+	if (!crosses)
+		return;
+	float skill = LsSkill();
+	float notice = 0.55f + 0.45f * skill;
+	if (IsEnemyVisible() || IsAttacking())
+		notice *= 0.6f + 0.4f * skill;
+	if (RANDOM_FLOAT(0.0f, 1.0f) >= notice)
+	{
+		LsTraceNote("hole ahead: didn't notice");
+		return;
+	}
+	LsTraceNote("hole ahead: new route");
+	// (the same goal, a way round: a path cleared reads as "arrived" to the states)
+	Vector goal = m_path[m_pathLength - 1].pos;
+	if (!ComputePath(TheNavAreaGrid.GetNavArea(&goal), &goal, SAFEST_ROUTE))
+		DestroyPath();
+}
+
 void CCSBot::LsHeardBreak(CBaseEntity *pBreak)
 {
 	if (!LsFight() || !pBreak || IsBlind() || (CBaseEntity *)m_lsBreak == pBreak)
@@ -6723,7 +6811,7 @@ CNavArea *CCSBot::LsObjectiveHuntArea()
 	{
 		CNavArea *a = s_list[RANDOM_LONG(0, n - 1)];
 		const Extent *e = a->GetExtent();
-		if (e->hi.x - e->lo.x < 100.0f || e->hi.y - e->lo.y < 100.0f || !LsHeadroom(a) || !LsSamePart(this, a))
+		if (e->hi.x - e->lo.x < 100.0f || e->hi.y - e->lo.y < 100.0f || !LsHeadroom(a) || !LsSamePart(this, a) || LsOverBrokenFloor(a))
 			continue;
 		const Vector &c = *a->GetCenter();
 		float home = float((*own - c).Length2D());

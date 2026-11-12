@@ -4334,44 +4334,49 @@ void EditNavAreas(NavEditCmdType cmd)
 		isCreatingNavArea = false;
 }
 
-// Loner-Strike: a breakable the trace landed on the top of that people stand on, not one they
+// Loner-Strike: a breakable that people stand on, not one they
 // shoot through: glass or wood (a glass arena's panes, a plank bridge; not a metal vent grate
 // or a see-through grille, whose drop-through route stays), its top facing up, wide both ways
 // (room to stand: a window's top edge is a few units deep) and thin (a crate is tall), the
 // trace on its top surface, and not built to give way under a player (a pressure plate, or a
 // pane that a walking player crashes through). It's a floor until it breaks; then it's gone
 // and the trace goes through. Windows, crates and vent grates stay walk-through as before.
-static bool IsBreakableFloor(const TraceResult &result)
+bool IsFloorBreakable(CBaseEntity *pEntity)
 {
-	if (!result.pHit || result.vecPlaneNormal.z < 0.7f)
+	if (!pEntity || !FClassnameIs(pEntity->pev, "func_breakable"))
 		return false;
 
-	entvars_t *pev = VARS(result.pHit);
-	if (!FClassnameIs(pev, "func_breakable"))
-		return false;
-
+	entvars_t *pev = pEntity->pev;
 	const Vector size = pev->absmax - pev->absmin;
 	const float minWidth = 48.0f;	// (a player is 32 across)
 	const float maxThickness = 32.0f;
 	if (size.x < minWidth || size.y < minWidth || size.z > maxThickness)
 		return false;
 
-	if (result.vecEndPos.z < pev->absmax.z - 2.0f)
-		return false;
-
-	// (made to give way under a player: standing on it, or walking into it with next to no health)
-	if ((pev->spawnflags & SF_BREAK_PRESSURE) || ((pev->spawnflags & SF_BREAK_TOUCH) && pev->health < 3.0f))
+	// (made to give way under a player: standing on it, or walking into it with next to no health;
+	// the health it starts with, so the answer is the same when it has just broken)
+	CBreakable *pBreak = static_cast<CBreakable *>(pEntity);
+	if ((pev->spawnflags & SF_BREAK_PRESSURE) || ((pev->spawnflags & SF_BREAK_TOUCH) && pBreak->m_flHealth < 3.0f))
 		return false;
 
 	// (a see-through grille, drawn alpha-tested, is a grate to drop through)
 	if (pev->rendermode == kRenderTransAlpha)
 		return false;
 
-	CBreakable *pBreak = static_cast<CBreakable *>(CBaseEntity::Instance(result.pHit));
-	if (!pBreak)
+	return pBreak->m_Material == matGlass || pBreak->m_Material == matWood || pBreak->m_Material == matUnbreakableGlass;
+}
+
+static bool IsBreakableFloor(const TraceResult &result)
+{
+	if (!result.pHit || result.vecPlaneNormal.z < 0.7f)
 		return false;
 
-	return pBreak->m_Material == matGlass || pBreak->m_Material == matWood || pBreak->m_Material == matUnbreakableGlass;
+	CBaseEntity *pEntity = CBaseEntity::Instance(result.pHit);
+	if (!IsFloorBreakable(pEntity))
+		return false;
+
+	// (the trace met its top)
+	return result.vecEndPos.z >= pEntity->pev->absmax.z - 2.0f;
 }
 
 bool GetGroundHeight(const Vector *pos, float *height, Vector *normal)

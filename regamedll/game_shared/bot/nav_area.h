@@ -1156,6 +1156,7 @@ void ClassifySniperSpot(HidingSpot *spot);
 void DestroyHidingSpots();
 void EditNavAreas(NavEditCmdType cmd);
 bool GetGroundHeight(const Vector *pos, float *height, Vector *normal = nullptr);
+bool IsFloorBreakable(CBaseEntity *pEntity);	// Loner-Strike: glass or wood that is a floor (nav_area.cpp)
 bool GetSimpleGroundHeight(const Vector *pos, float *height, Vector *normal = nullptr);
 CNavArea *GetMarkedArea();
 void EditNavAreasReset();

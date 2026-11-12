@@ -117,6 +117,7 @@ void CCSBotManager::RestartRound()
 	CBotManager::RestartRound();
 
 	SetLooseBomb(nullptr);
+	LsClearBrokenFloors();	// (Loner-Strike: the breakables are whole again)
 	m_isBombPlanted = false;
 	m_earliestBombPlantTimestamp = gpGlobals->time + RANDOM_FLOAT(10.0f, 30.0f);
 	m_bombDefuser = nullptr;
@@ -1773,6 +1774,13 @@ void CCSBotManager::OnEvent(GameEventType event, CBaseEntity *pEntity, CBaseEnti
 	case EVENT_RADIO_ENEMY_SPOTTED:
 		m_lastSeenEnemyTimestamp = gpGlobals->time;
 		SetLastSeenEnemyTimestamp();
+		break;
+
+	// (Loner-Strike: a glass or wooden floor that broke: noted here once, whether any bot is
+	// alive to see it; each bot then checks its own way)
+	case EVENT_BREAK_GLASS:
+	case EVENT_BREAK_WOOD:
+		LsNoteBrokenFloor(pEntity);
 		break;
 
 	default:

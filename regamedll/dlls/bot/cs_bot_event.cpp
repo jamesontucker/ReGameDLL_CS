@@ -139,6 +139,9 @@ void CCSBot::OnEvent(GameEventType event, CBaseEntity *pEntity, CBaseEntity *pOt
 	if (event == EVENT_BREAK_GLASS || event == EVENT_BREAK_WOOD || event == EVENT_BREAK_METAL || event == EVENT_BREAK_CONCRETE)
 	{
 		LsHeardBreak(pEntity);
+		// (a floor that broke: a hole now, until the round restarts)
+		if ((event == EVENT_BREAK_GLASS || event == EVENT_BREAK_WOOD) && IsFloorBreakable(pEntity))
+			LsHoleCheck();
 		return;
 	}
 

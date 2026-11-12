@@ -1210,6 +1210,7 @@ public:
 	bool LsRadioOk(GameEventType event);			// whether this radio message is sent (bot_ls_fight)
 	void LsShotAt(CBasePlayer *pShooter, const Vector &impact);	// enemy bullets landing or passing close
 	void LsHeardBreak(CBaseEntity *pBreak);		// glass, a vent cover, a board breaking: someone's there
+	void LsHoleCheck();							// a floor broke: a route across it changed, if it noticed
 	void LsHurtBy(CBasePlayer *pAttacker);		// hit: through a wall? that spot's not safe
 	bool LsPreAim(const Vector &heard, float secs, CBasePlayer *who = nullptr);	// look where a sound will come out (the area's angles)
 	int m_lsCtPushRound = -1;						// a CT: the round it decided whether to push out (once a round)
@@ -2350,6 +2351,11 @@ public:
 };
 
 // Functor used with NavAreaBuildPath()
+// Loner-Strike: glass or wooden floors that broke this round (cs_bot_ls.cpp): routes go round them
+bool LsNoteBrokenFloor(CBaseEntity *pEntity);
+bool LsOverBrokenFloor(const CNavArea *area);
+void LsClearBrokenFloors();
+
 class PathCost
 {
 public:
@@ -2384,6 +2390,11 @@ public:
 		else if ((fromArea->GetAttributes() & NAV_JUMP) && (area->GetAttributes() & NAV_JUMP))
 		{
 			// cannot actually walk in jump areas - disallow moving from jump area to jump area
+			return -1.0f;
+		}
+		else if (LsOverBrokenFloor(area))
+		{
+			// (Loner-Strike: over a glass or wooden floor that broke this round: a hole)
 			return -1.0f;
 		}
 		else
