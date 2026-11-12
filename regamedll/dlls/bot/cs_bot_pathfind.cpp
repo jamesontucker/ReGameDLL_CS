@@ -1496,7 +1496,9 @@ CCSBot::PathResult CCSBot::UpdatePathMovement(bool allowSpeedChange)
 	// Feelers come from our ankles, just above StepHeight, so we avoid short walls, too
 	// Don't use feelers if very near the end of the path, or about to jump
 	// TODO: Consider having feelers at several heights to deal with overhangs, etc.
-	if (!nearEndOfPath && !IsNearJump() && !IsJumping())
+	// (Loner-Strike: not on a beam or a narrow ledge - a wall beside it would have it veer off
+	// toward the drop; the path's own line is right there)
+	if (!nearEndOfPath && !IsNearJump() && !IsJumping() && !(LsFight() && LsNarrowFooting()))
 	{
 		FeelerReflexAdjustment(&adjustedGoal);
 	}

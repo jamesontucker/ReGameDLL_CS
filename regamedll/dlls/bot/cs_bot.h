@@ -905,6 +905,7 @@ private:
 	float m_lsWallNext = 0.0f;			// not checked again before
 	float m_lsNarrowNext = 0.0f;		// narrow footing not checked again before
 	bool m_lsNarrow = false;			// on narrow footing, as last checked
+	bool m_lsBeamLock = false;			// the view held on its path this frame (walking a beam): the hand corrects small errors too
 	Vector m_lsGlanceCorner;				// the last corner it glanced at walking, and when
 	float m_lsGlanceCornerAt = 0.0f;
 	float m_lsCornerCheckAt = 0.0f;

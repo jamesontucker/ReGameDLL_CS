@@ -136,20 +136,22 @@ void CCSBot::UpdateLookAngles()
 
 	// Loner-Strike: walking a beam or a narrow ledge over a drop, eyes on where it's going. It
 	// moves by its view (MoveTowardsPosition: within ~14 degrees of the view it only walks
-	// forward, along the view): a glance aside on one has it drift off the edge. So the view
-	// stays a few degrees from the way its path goes. Not over a look that matters (shot at, a
+	// forward, along the view, and never corrects): even a few degrees aside on one has it drift
+	// steadily off the edge (cs_rats2's upper beam: 6 degrees, off the side 640 units on). So the
+	// view is held right on the way its path goes. Not over a look that matters (shot at, a
 	// flash, an urgent turn, falling back looking at the threat)
+	m_lsBeamLock = false;
 	if (LsFight() && !IsAttacking() && !IsEnemyVisible() && !IsUsingLadder() && !IsOnLadder() && pev->velocity.Length2D() > 30.0f
 		&& !IsLookingAtSpot(PRIORITY_HIGH) && gpGlobals->time >= m_lsRunnerUntil && !LsLookingBack() && LsNarrowFooting())
 	{
+		// (and the hand keeps it there: a person on a beam corrects the smallest drift at once,
+		// LsHandUpdate)
+		m_lsBeamLock = true;
 		Vector way = m_goalPosition - pev->origin;
-		float moveYaw = (HasPath() && way.Length2D() > 16.0f) ? UTIL_VecToYaw(way) : UTIL_VecToYaw(pev->velocity);
-		float off = NormalizeAngle(useYaw - moveYaw);
-		const float most = 6.0f;
-		if (off > most)
-			useYaw = moveYaw + most;
-		else if (off < -most)
-			useYaw = moveYaw - most;
+		// (exact: the engine's vectoyaw rounds to whole degrees)
+		if (!HasPath() || way.Length2D() <= 16.0f)
+			way = pev->velocity;
+		useYaw = float(atan2(way.y, way.x) * (180.0 / M_PI));
 	}
 
 	// Ladders require precise movement, therefore we need to look at the
