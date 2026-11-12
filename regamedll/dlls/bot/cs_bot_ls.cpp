@@ -1973,10 +1973,57 @@ bool CCSBot::LsNarrowFooting()
 		if ((one == 2 && other != 0) || (other == 2 && one != 0))
 		{
 			m_lsNarrow = true;
+			m_lsNarrowAlong = a - 90.0f;	// (across it is a)
 			break;
 		}
 	}
 	return m_lsNarrow;
+}
+
+// No sidestep on a beam or a narrow ledge, whatever asked for it (a reaction, a reload behind
+// cover, a dodge): a person walking one keeps their feet under them; one step sideways and they're
+// off (cs_rats2's upper beam: bots holding their view right down it still strafed off the side).
+// The move is kept along the beam only - whichever way it's looking (in a fight it walks the beam
+// by forward and strafe together), the part across it is dropped (CBot::ExecuteCommand)
+void LsNoSidestep(CBasePlayer *bot, float *forward, float *strafe, unsigned short *buttons)
+{
+	if (!LsFight() || !bot->IsBot() || !bot->IsAlive() || (*forward == 0.0f && *strafe == 0.0f))
+		return;
+	CCSBot *pBot = static_cast<CCSBot *>(bot);
+	if (!pBot->LsNarrowFooting())
+		return;
+	// the way along it: a narrow nav strip's long side, else the way along it found by the side
+	// checks
+	Vector2D along;
+	const CNavArea *area = TheNavAreaGrid.GetNavArea(&bot->pev->origin);
+	if (area && area->GetSizeX() >= 1.5f * area->GetSizeY())
+		along = Vector2D(1.0f, 0.0f);
+	else if (area && area->GetSizeY() >= 1.5f * area->GetSizeX())
+		along = Vector2D(0.0f, 1.0f);
+	else
+	{
+		float a = pBot->LsNarrowAlong() * float(M_PI / 180.0);
+		along = Vector2D(cosf(a), sinf(a));
+	}
+	// the move in the world (forward = (cos, sin), right = (sin, -cos) of the view's yaw), kept to
+	// the part along the beam, back into forward and strafe
+	float yaw = bot->pev->v_angle.y * float(M_PI / 180.0);
+	float c = cosf(yaw), s = sinf(yaw);
+	float wx = c * *forward + s * *strafe, wy = s * *forward - c * *strafe;
+	float k = wx * along.x + wy * along.y;
+	wx = along.x * k;
+	wy = along.y * k;
+	*forward = wx * c + wy * s;
+	*strafe = wx * s - wy * c;
+	*buttons &= ~(IN_FORWARD | IN_BACK | IN_MOVELEFT | IN_MOVERIGHT);
+	if (*forward > 1.0f)
+		*buttons |= IN_FORWARD;
+	else if (*forward < -1.0f)
+		*buttons |= IN_BACK;
+	if (*strafe > 1.0f)
+		*buttons |= IN_MOVERIGHT;
+	else if (*strafe < -1.0f)
+		*buttons |= IN_MOVELEFT;
 }
 
 // A spot on the wall a ladder's on (at the foot of one, the ladder in front of a bot looks just

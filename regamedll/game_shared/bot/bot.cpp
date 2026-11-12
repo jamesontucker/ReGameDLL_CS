@@ -254,6 +254,8 @@ bool CBot::IsUsingScope() const
 	return false;
 }
 
+void LsNoSidestep(CBasePlayer *bot, float *forward, float *strafe, unsigned short *buttons);
+
 void CBot::ExecuteCommand()
 {
 	byte adjustedMSec;
@@ -265,6 +267,9 @@ void CBot::ExecuteCommand()
 	{
 		m_buttonFlags |= IN_DUCK;
 	}
+
+	// Loner-Strike: no sidestepping on a beam or a narrow ledge (bot/cs_bot_ls.cpp)
+	LsNoSidestep(this, &m_forwardSpeed, &m_strafeSpeed, &m_buttonFlags);
 
 #ifdef REGAMEDLL_FIXES
 	// don't move if frozen state present
