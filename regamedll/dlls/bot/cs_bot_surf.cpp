@@ -573,7 +573,7 @@ static double s_driveMs = 0.0;			// spent steering bots this frame (taken off th
 // ---- a bot's surfing
 
 
-struct BotState
+struct SurfBot
 {
 	std::vector<Sample> path;		// a chunk apart
 	int idx = 0;
@@ -585,7 +585,7 @@ struct BotState
 	Vector lastPos;
 	bool driven = false;		// steered last command (let go: the leftover move is cleared)
 };
-static BotState s_bots[33];
+static SurfBot s_bots[33];
 
 static long long Key(const Vector &o)
 {
@@ -725,7 +725,7 @@ static void Reset()
 	s_rootsDone = 0; s_iters = 0;
 	s_roll.active = false; s_roll.rolloutsLeft = 0;
 	for (int i = 0; i < 33; i++)
-		s_bots[i] = BotState();
+		s_bots[i] = SurfBot();
 	Q_strncpy(s_map, STRING(gpGlobals->mapname), sizeof(s_map) - 1);
 	s_map[sizeof(s_map) - 1] = '\0';
 	LoadTriggers();
@@ -998,7 +998,7 @@ static int PickTarget(int from, const Vector *enemy)
 }
 
 // The path from node 'from' to node 'to' (a descendant): the samples its moves were flown from
-static void BuildPath(BotState &b, int from, int to)
+static void BuildPath(SurfBot &b, int from, int to)
 {
 	std::vector<int> chain;
 	for (int n = to; n != from && n >= 0; n = s_nodes[n].parent)
@@ -1023,7 +1023,7 @@ static void BuildPath(BotState &b, int from, int to)
 
 // A short hop back onto the line: a small beam search from where it really is to the line's point
 // a little ahead (position, and velocity a bit). Nothing found: the best part-way one
-static void Replan(BotState &b, const Player &me, const Sample &target)
+static void Replan(SurfBot &b, const Player &me, const Sample &target)
 {
 	static const int RAMP_MOVES[5] = { 1, 3, 5, 7, 9 }, AIR_MOVES[4] = { 11, 13, 15, MOVE_FREE };
 	struct Beam { Player p; float yaw; unsigned char moves[4]; int n; float score; };
@@ -1066,7 +1066,7 @@ static void Replan(BotState &b, const Player &me, const Sample &target)
 
 // Where on its path the bot is: the stretch between samples it's nearest (a sample a chunk apart
 // is 100+ units at speed), and how far off it
-static void Locate(BotState &b, const Vector &o, float *off)
+static void Locate(SurfBot &b, const Vector &o, float *off)
 {
 	int lo = Q_max(0, b.idx - 2), hi = Q_min((int)b.path.size() - 2, b.idx + 8);
 	*off = 1e9f;
@@ -1130,7 +1130,7 @@ void LsSurfStep()
 }
 
 // A surf bot's move this command, if it steers it (LsSurfDrive)
-static bool LsSurfSteer(CBasePlayer *bot, LsSurf::BotState &b, float msec, float *forward, float *strafe, unsigned short *buttons)
+static bool LsSurfSteer(CBasePlayer *bot, LsSurf::SurfBot &b, float msec, float *forward, float *strafe, unsigned short *buttons)
 {
 	using namespace LsSurf;
 	float now = gpGlobals->time;
@@ -1300,10 +1300,10 @@ bool LsSurfDrive(CBasePlayer *bot, float msec, float *forward, float *strafe, un
 	int idx = bot->entindex();
 	if (idx < 1 || idx > 32)
 		return false;
-	BotState &b = s_bots[idx];
+	SurfBot &b = s_bots[idx];
 	if (!bot->IsAlive() || Q_strcmp(s_map, STRING(gpGlobals->mapname)) != 0)
 	{
-		b = BotState();
+		b = SurfBot();
 		return false;
 	}
 	// (the command's real time, for the exploring: a bot thinks on a server frame, so 25-30 a second)
