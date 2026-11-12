@@ -85,7 +85,7 @@ inline CNavNode *LadderEndSearch(CBaseEntity *pEntity, const Vector *pos, NavDir
 // harmless drop below, not a pit far down or a crate or wall top) and a clear line
 // to it from the spawn (not the room through the wall) is the seed. A seeded spawn has its node
 // next time, so each spawn seeds at most once and the search still ends.
-inline CNavNode *SpawnSeedSearch()
+inline CNavNode *SpawnSeedSearchPass(bool report)
 {
 	static const char *const spawnClasses[] = { "info_player_start", "info_player_deathmatch", "info_vip_start", "info_spawn_point" };
 	for (auto cls : spawnClasses)
@@ -99,19 +99,27 @@ inline CNavNode *SpawnSeedSearch()
 
 			Vector seed, seedNormal;
 			bool reached = false, found = false;
+			char why[4][48];
 			for (int k = 0; k < 4 && !reached; k++)
 			{
 				Vector pos(cx + (k & 1) * GenerationStepSize, cy + (k >> 1) * GenerationStepSize, origin.z);
+				Q_snprintf(why[k], sizeof(why[k]), "ok");
 
 				Vector normal;
 				if (!GetGroundHeight(&pos, &pos.z, &normal))
+				{
+					Q_snprintf(why[k], sizeof(why[k]), "no floor");
 					continue;
+				}
 
 				// the spawn's own floor: below its origin by no more than a fall a player takes without
 				// harm (mappers often float spawns 50-100 units up; a pit is far deeper)
 				float drop = origin.z - pos.z;
 				if (drop < 0.0f || drop > 200.0f)
+				{
+					Q_snprintf(why[k], sizeof(why[k]), "floor %.0f below", drop);
 					continue;
+				}
 
 				if (CNavNode::GetNode(&pos))
 				{
@@ -120,11 +128,15 @@ inline CNavNode *SpawnSeedSearch()
 				}
 
 				// in the spawn's own room: nothing between the spawn and the point
-				TraceResult result;
 				// (to a step above the floor: a crouched spawn in a vent has its ceiling at head height)
+				TraceResult result;
 				UTIL_TraceLine(origin, pos + Vector(0, 0, StepHeight), ignore_monsters, dont_ignore_glass, nullptr, &result);
 				if (result.flFraction != 1.0f || result.fStartSolid)
+				{
+					Q_snprintf(why[k], sizeof(why[k]), "%s (%s)", result.fStartSolid ? "spawn in solid" : "blocked",
+						result.pHit ? STRING(result.pHit->v.classname) : "world");
 					continue;
+				}
 
 				if (!found)
 				{
@@ -134,12 +146,24 @@ inline CNavNode *SpawnSeedSearch()
 				}
 			}
 
-			if (!reached && found)
+			if (!reached && found && !report)
 				return new CNavNode(&seed, &seedNormal, nullptr);
+
+			// (the last pass, nothing left to seed: why a spawn still has no nav, for the log)
+			if (report && !reached && !found)
+				CONSOLE_ECHO("Loner-Strike: no nav at %s %.0f %.0f %.0f: %s / %s / %s / %s\n", cls, origin.x, origin.y, origin.z, why[0], why[1], why[2], why[3]);
 		}
 	}
 
 	return nullptr;
+}
+
+inline CNavNode *SpawnSeedSearch()
+{
+	CNavNode *node = SpawnSeedSearchPass(false);
+	if (!node)
+		SpawnSeedSearchPass(true);
+	return node;
 }
 
 CNavNode *CCSBot::AddNode(const Vector *destPos, const Vector *normal, NavDirType dir, CNavNode *source)
