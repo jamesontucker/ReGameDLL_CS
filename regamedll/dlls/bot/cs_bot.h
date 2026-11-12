@@ -903,6 +903,8 @@ private:
 	float m_lsBumpCheckAt = 0.0f;
 	float m_lsWallSince = 0.0f;			// facing a wall up close since
 	float m_lsWallNext = 0.0f;			// not checked again before
+	float m_lsNarrowNext = 0.0f;		// narrow footing not checked again before
+	bool m_lsNarrow = false;			// on narrow footing, as last checked
 	Vector m_lsGlanceCorner;				// the last corner it glanced at walking, and when
 	float m_lsGlanceCornerAt = 0.0f;
 	float m_lsCornerCheckAt = 0.0f;
@@ -1350,6 +1352,8 @@ public:
 	float LsDodgeDuration(bool steady);
 	bool LsPickSteady();
 	bool LsMayBackOff(const Vector &toEnemy);
+	bool LsNarrowFooting();				// Loner-Strike: on a beam or ledge about a stride wide with a drop beside it that would hurt
+	bool LsLadderAt(const Vector &spot) const;	// Loner-Strike: a spot on the wall a ladder's on
 	bool LsHoldFireToStop(float range);
 	void LsTraceNote(const char *note);				// a line in the trace (a #why) without changing what it's doing
 	void LsThreatNote();							// backed off from someone: remembered (cs_bot_ls_team.cpp)

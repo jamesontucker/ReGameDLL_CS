@@ -152,7 +152,8 @@ bool CCSBot::LsCornerMoves(Vector *goal)
 	// a jiggle under way: out, back (and maybe once more)
 	if (now < m_lsJiggleUntil)
 	{
-		if (now >= m_lsJiggleJumpUntil && !LsCornerFree(this))
+		// (stepped onto a beam or a narrow ledge: no strafing out and back on that)
+		if ((now >= m_lsJiggleJumpUntil && !LsCornerFree(this)) || LsNarrowFooting())
 		{
 			m_lsJiggleUntil = 0.0f;
 			return false;
@@ -291,7 +292,7 @@ bool CCSBot::LsCornerMoves(Vector *goal)
 
 	if (m_lsCornerPlan == LS_CORNER_JIGGLE)
 	{
-		if (dist > 80.0f || now < m_lsNextJiggle)
+		if (dist > 80.0f || now < m_lsNextJiggle || LsNarrowFooting())
 			return false;
 		m_lsCornerPlan = LS_CORNER_DONE;
 		m_lsNextJiggle = now + RANDOM_FLOAT(3.0f, 8.0f);
@@ -318,7 +319,8 @@ bool CCSBot::LsCornerMoves(Vector *goal)
 	}
 
 	// a wide swing starts further out, at a run; the outside line just keeps off the edge
-	if (dist < 30.0f || (m_lsCornerPlan == LS_CORNER_WIDE && dist > 260.0f))
+	// (no swinging wide on a beam or a narrow ledge: the line across could cut over the gap)
+	if (dist < 30.0f || (m_lsCornerPlan == LS_CORNER_WIDE && dist > 260.0f) || LsNarrowFooting())
 		return false;
 	Vector shifted = *goal + Vector(m_lsCornerShift.x, m_lsCornerShift.y, 0.0f);
 	UTIL_TraceHull(pev->origin, Vector(shifted.x, shifted.y, pev->origin.z), ignore_monsters, human_hull, ENT(pev), &tr);

@@ -134,6 +134,24 @@ void CCSBot::UpdateLookAngles()
 			useYaw = moveYaw - most;
 	}
 
+	// Loner-Strike: walking a beam or a narrow ledge over a drop, eyes on where it's going. It
+	// moves by its view (MoveTowardsPosition: within ~14 degrees of the view it only walks
+	// forward, along the view): a glance aside on one has it drift off the edge. So the view
+	// stays a few degrees from the way its path goes. Not over a look that matters (shot at, a
+	// flash, an urgent turn, falling back looking at the threat)
+	if (LsFight() && !IsAttacking() && !IsEnemyVisible() && !IsUsingLadder() && !IsOnLadder() && pev->velocity.Length2D() > 30.0f
+		&& !IsLookingAtSpot(PRIORITY_HIGH) && gpGlobals->time >= m_lsRunnerUntil && !LsLookingBack() && LsNarrowFooting())
+	{
+		Vector way = m_goalPosition - pev->origin;
+		float moveYaw = (HasPath() && way.Length2D() > 16.0f) ? UTIL_VecToYaw(way) : UTIL_VecToYaw(pev->velocity);
+		float off = NormalizeAngle(useYaw - moveYaw);
+		const float most = 6.0f;
+		if (off > most)
+			useYaw = moveYaw + most;
+		else if (off < -most)
+			useYaw = moveYaw - most;
+	}
+
 	// Ladders require precise movement, therefore we need to look at the
 	// ladder as we approach and ascend/descend it.
 	// If we are on a ladder, we need to look up or down to traverse it - override pitch in this case.
@@ -2028,13 +2046,22 @@ void CCSBot::LsWallSanity()
 {
 	if (!LsFight() || !IsAlive())
 		return;
+	// (on a ladder, a look of its own from before it got on lets go: the view decides the way it
+	// climbs - one turned aside has it slide off the side; a ladder is right in front of it at
+	// the bottom, which looks just like a wall)
+	// (its own ladder looks - the top it's climbing to - stay)
+	if (IsOnLadder() && m_lookAtDesc && !Q_strncmp(m_lookAtDesc, "Loner-Strike", 12) && Q_strncmp(m_lookAtDesc, "Loner-Strike: ladder", 20)
+		&& m_lookAtSpotPriority < PRIORITY_HIGH)
+		ClearLookAt();
 	float now = gpGlobals->time;
 	if (now < m_lsWallNext)
 		return;
 	m_lsWallNext = now + 0.15f;
 	if (CSGameRules()->IsFreezePeriod() || IsAttacking() || IsEnemyVisible() || GetTimeSinceLastSawEnemy() < 2.5f || IsBlind()
 		|| IsUsingLadder() || IsOnLadder() || IsLookingAtSpot(PRIORITY_MEDIUM) || LsPuppetLooking() || LsPuppetActive() || LsOrderActive()
-		|| m_state == &m_plantBombState || m_state == &m_defuseBombState)
+		|| m_state == &m_plantBombState || m_state == &m_defuseBombState
+		// (walking a beam or a narrow ledge: eyes on where it's going - UpdateLookAngles)
+		|| (pev->velocity.Length2D() > 30.0f && LsNarrowFooting()))
 	{
 		m_lsWallSince = 0.0f;
 		return;
@@ -2049,6 +2076,9 @@ void CCSBot::LsWallSanity()
 	bool seeThrough = pHit && (FClassnameIs(pHit->pev, "func_door") || FClassnameIs(pHit->pev, "func_door_rotating") || FClassnameIs(pHit->pev, "func_breakable"));
 	// (a surface a few steps away, more or less square on: not a doorway's edge it's checking)
 	bool wall = tr.flFraction < 0.8f && !tr.fStartSolid && !seeThrough && DotProduct(tr.vecPlaneNormal, -fwd) > 0.55f;
+	// (a ladder it's about to climb isn't a wall to look away from)
+	if (wall && LsLadderAt(tr.vecEndPos))
+		wall = false;
 	if (!wall)
 	{
 		m_lsWallSince = 0.0f;

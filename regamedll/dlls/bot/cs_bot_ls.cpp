@@ -1924,6 +1924,77 @@ bool CCSBot::LsMayBackOff(const Vector &toEnemy)
 	return false;
 }
 
+// What's beside a bot 40 units one way: 0 floor (or a small step down), 1 a wall (a low wall or
+// a railing's bottom bar too: checked at the knees as well as the waist), 2 a drop that would hurt
+static int LsBeside(CCSBot *me, float yaw, float feet)
+{
+	Vector dir(BotCOS(yaw), BotSIN(yaw), 0.0f);
+	Vector low(me->pev->origin.x, me->pev->origin.y, feet + 8.0f);
+	Vector high(me->pev->origin.x, me->pev->origin.y, feet + 36.0f);
+	TraceResult tr;
+	UTIL_TraceLine(low, low + dir * 40.0f, ignore_monsters, ENT(me->pev), &tr);
+	if (tr.flFraction < 1.0f || tr.fStartSolid)
+		return 1;
+	UTIL_TraceLine(high, high + dir * 40.0f, ignore_monsters, ENT(me->pev), &tr);
+	if (tr.flFraction < 1.0f || tr.fStartSolid)
+		return 1;
+	Vector out = low + dir * 40.0f;
+	UTIL_TraceLine(out, out - Vector(0, 0, 1000.0f), ignore_monsters, ENT(me->pev), &tr);
+	if (tr.flFraction >= 1.0f || me->GetApproximateFallDamage(feet - tr.vecEndPos.z) >= 10.0f)
+		return 2;
+	return 0;
+}
+
+// On a beam or a ledge about a stride wide (a nav area that narrow, or none under it at all):
+// a drop that would hurt on one side, and a drop or a wall on the other - not the edge of a wide
+// walkway. A person walks one of those looking where they're going: no looking about, no peeks,
+// no hops (cs_rats2's CT spawn beams: bots glancing at angles drifted off the side and fell)
+bool CCSBot::LsNarrowFooting()
+{
+	float now = gpGlobals->time;
+	// (checked a few times a second; a clock that went back - a new map - checks again)
+	if (now < m_lsNarrowNext && now > m_lsNarrowNext - 1.0f)
+		return m_lsNarrow;
+	m_lsNarrowNext = now + 0.2f;
+	m_lsNarrow = false;
+	if (!LsFight() || !IsAlive() || IsOnLadder() || !(pev->flags & FL_ONGROUND))
+		return false;
+	const CNavArea *area = TheNavAreaGrid.GetNavArea(&pev->origin);
+	if (area && Q_min(area->GetSizeX(), area->GetSizeY()) > 40.0f)
+		return false;
+	// across the way it's going (standing still: across the way it faces, and along it too)
+	float moving = pev->velocity.Length2D();
+	float yaw = moving > 30.0f ? UTIL_VecToYaw(pev->velocity) : pev->v_angle.y;
+	float feet = pev->origin.z - ((pev->flags & FL_DUCKING) ? 18.0f : HalfHumanHeight);
+	for (int pair = 0; pair < (moving > 30.0f ? 1 : 2); pair++)
+	{
+		float a = yaw + 90.0f * float(1 - pair);
+		int one = LsBeside(this, a, feet), other = LsBeside(this, a + 180.0f, feet);
+		if ((one == 2 && other != 0) || (other == 2 && one != 0))
+		{
+			m_lsNarrow = true;
+			break;
+		}
+	}
+	return m_lsNarrow;
+}
+
+// A spot on the wall a ladder's on (at the foot of one, the ladder in front of a bot looks just
+// like a wall: the wall behind it - a ladder itself isn't solid)
+bool CCSBot::LsLadderAt(const Vector &spot) const
+{
+	for (const CNavLadder *ladder : TheNavLadderList)
+	{
+		if (spot.z < ladder->m_bottom.z - 24.0f || spot.z > ladder->m_top.z + 24.0f)
+			continue;
+		float dx = spot.x - (ladder->m_top.x + ladder->m_bottom.x) * 0.5f;
+		float dy = spot.y - (ladder->m_top.y + ladder->m_bottom.y) * 0.5f;
+		if (dx * dx + dy * dy < 48.0f * 48.0f)
+			return true;
+	}
+	return false;
+}
+
 // Holds fire while moving fast with a rifle at range, to stop and then shoot: what good
 // players do. Newer ones (skill under a half) run and gun like pub players did
 bool CCSBot::LsHoldFireToStop(float range)
@@ -2229,7 +2300,7 @@ void CCSBot::LsFightHabits(float range, bool crouchAndHold)
 	else if (GetTimeSinceLastSawEnemy() < 3.0f && !IsNotMoving() && (pev->flags & FL_ONGROUND))
 	{
 		// a jump to look round the corner they went behind
-		if (LsTrait(18) > 0.45f && RANDOM_FLOAT(0.0f, 1.0f) < 0.4f)
+		if (LsTrait(18) > 0.45f && RANDOM_FLOAT(0.0f, 1.0f) < 0.4f && !LsNarrowFooting())
 			Jump(MUST_JUMP);
 	}
 }
