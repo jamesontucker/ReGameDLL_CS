@@ -882,7 +882,7 @@ void CCSBot::UpdateLookAround(bool updateNow)
 	// timer returns early most frames): where
 	// a near surface (a box, a doorway's side, a tunnel's bend) gives way to open space beyond,
 	// someone could be just past the edge. A flat wall has no edge and is never looked at
-	if (LsFight() && !IsNotMoving() && !IsSafe() && !IsLookingAtSpot(PRIORITY_LOW) && gpGlobals->time >= m_lsCornerCheckAt)
+	if (LsFight() && !IsNotMoving() && !IsSafe() && !IsOnLadder() && !IsLookingAtSpot(PRIORITY_LOW) && gpGlobals->time >= m_lsCornerCheckAt)
 	{
 		// how often: the careful and campers check more, rushers less, newer players less
 		float skill = LsSkill(), aggro = LsAggro();
@@ -2033,7 +2033,7 @@ void CCSBot::LsWallSanity()
 		return;
 	m_lsWallNext = now + 0.15f;
 	if (CSGameRules()->IsFreezePeriod() || IsAttacking() || IsEnemyVisible() || GetTimeSinceLastSawEnemy() < 2.5f || IsBlind()
-		|| IsUsingLadder() || IsLookingAtSpot(PRIORITY_MEDIUM) || LsPuppetLooking() || LsPuppetActive() || LsOrderActive()
+		|| IsUsingLadder() || IsOnLadder() || IsLookingAtSpot(PRIORITY_MEDIUM) || LsPuppetLooking() || LsPuppetActive() || LsOrderActive()
 		|| m_state == &m_plantBombState || m_state == &m_defuseBombState)
 	{
 		m_lsWallSince = 0.0f;

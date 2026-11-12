@@ -2253,7 +2253,7 @@ bool CCSBot::LsShirksObjective()
 // players walk straight in looking ahead; nearly everyone else peeks, a few only now and then
 bool CCSBot::LsCornerPeek()
 {
-	if (!LsFight() || IsSafe() || IsUsingLadder() || IsAttacking())
+	if (!LsFight() || IsSafe() || IsUsingLadder() || IsOnLadder() || IsAttacking())
 		return false;
 
 	// (decided once for each corner, not every frame near it)
@@ -4569,7 +4569,9 @@ const Vector *LsEnemySpawn(int team)
 // Everyone for themselves in deathmatch: every way counts the same. True if it looked.
 bool CCSBot::LsScanAngles(bool holding)
 {
-	if (!LsFight() || !m_lastKnownArea)
+	// (not on a ladder: there the view decides the way it climbs - a glance aside mid-climb has
+	// it go up and down at the top and step off the side)
+	if (!LsFight() || !m_lastKnownArea || IsOnLadder())
 		return false;
 	float now = gpGlobals->time;
 	// (the stock hide state's approach-point look has no end: it doesn't keep the angles from

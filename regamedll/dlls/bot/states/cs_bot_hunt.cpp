@@ -183,8 +183,9 @@ void HuntState::OnUpdate(CCSBot *me)
 
 	// if we have reached our destination area, pick a new one
 	// if our path fails, pick a new one
-	// (Loner-Strike: or, every bot for itself, it finds itself walking with a teammate)
-	if ((me->GetLastKnownArea() == m_huntArea || me->UpdatePathMovement() != CCSBot::PROGRESSING || (me->LsLoner() && me->LsShouldSpread()))
+	// (Loner-Strike: or, every bot for itself, it finds itself walking with a teammate - not
+	// mid-climb: a new path there loses the ladder and the bot jumps off it)
+	if ((me->GetLastKnownArea() == m_huntArea || me->UpdatePathMovement() != CCSBot::PROGRESSING || (me->LsLoner() && !me->IsOnLadder() && me->LsShouldSpread()))
 		&& !(LsFight() && gpGlobals->time < me->m_lsHuntRetryAt))
 	{
 		// Loner-Strike: every bot for itself: somewhere its teammates aren't (and on a hostage
