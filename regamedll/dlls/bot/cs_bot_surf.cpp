@@ -580,6 +580,8 @@ static Consts s_consts;
 static float s_constsAt = 0.0f;
 static int s_replansLeft = 0, s_buildsLeft = 0, s_picksLeft = 0;
 static double s_driveMs = 0.0;			// spent steering bots this frame (taken off the exploring)
+// (how line picking goes, for bot_ls_surf 2: since the last report)
+static int s_nPick = 0, s_nNoNear = 0, s_nNoTarget = 0, s_nBuilt = 0, s_nEnded = 0, s_nLost = 0, s_nReplan = 0;
 
 // ---- a bot's surfing
 
@@ -1135,8 +1137,11 @@ void LsSurfStep()
 			if (s_bots[i].driven)
 				alive++;
 		}
-		Say("LSSURF %s: floor %.0f, command %.3f s; %d starts, %d places, %d lines kept, %d tries; steering %d, %d following a line\n",
-			s_map, s_floorZ, s_cmdDt, (int)s_roots.size(), (int)s_cells.size(), (int)s_nodes.size(), s_iters, alive, following);
+		Say("LSSURF %s: floor %.0f, command %.3f s; %d starts, %d places, %d lines kept, %d tries; steering %d, %d following a line; "
+			"picks %d (none near %d, nothing ahead %d, built %d), lines ended %d, lost %d, hops %d\n",
+			s_map, s_floorZ, s_cmdDt, (int)s_roots.size(), (int)s_cells.size(), (int)s_nodes.size(), s_iters, alive, following,
+			s_nPick, s_nNoNear, s_nNoTarget, s_nBuilt, s_nEnded, s_nLost, s_nReplan);
+		s_nPick = s_nNoNear = s_nNoTarget = s_nBuilt = s_nEnded = s_nLost = s_nReplan = 0;
 	}
 }
 
@@ -1214,6 +1219,9 @@ static bool LsSurfSteer(CBasePlayer *bot, LsSurf::SurfBot &b, float msec, float 
 		s_picksLeft--;
 		b.nextPick = now + 1.0f;
 		int from = NearestNode(me.o, me.v);
+		s_nPick++;
+		if (from < 0)
+			s_nNoNear++;
 		if (from >= 0)
 		{
 			// chasing, half the time: the nearest enemy alive within reach
@@ -1238,7 +1246,10 @@ static bool LsSurfSteer(CBasePlayer *bot, LsSurf::SurfBot &b, float msec, float 
 			{
 				s_buildsLeft--;
 				BuildPath(b, from, to);
+				s_nBuilt++;
 			}
+			else
+				s_nNoTarget++;
 		}
 	}
 
@@ -1249,6 +1260,10 @@ static bool LsSurfSteer(CBasePlayer *bot, LsSurf::SurfBot &b, float msec, float 
 		if (b.idx >= (int)b.path.size() - 2 || off > 300.0f)
 		{
 			// the end of it, or lost it: ride on, and pick again in a moment
+			if (off > 300.0f)
+				s_nLost++;
+			else
+				s_nEnded++;
 			b.path.clear();
 			b.plan.clear();
 			b.nextPick = now + (off > 300.0f ? 1.0f : 0.2f);
@@ -1260,6 +1275,7 @@ static bool LsSurfSteer(CBasePlayer *bot, LsSurf::SurfBot &b, float msec, float 
 			if (b.plan.empty() && off > 40.0f && s_replansLeft > 0 && now >= b.nextReplan && s_driveMs < 1.5)
 			{
 				s_replansLeft--;
+				s_nReplan++;
 				b.nextReplan = now + 0.5f;
 				Replan(b, me, b.path[Q_min((int)b.path.size() - 1, b.idx + 4)]);
 			}
