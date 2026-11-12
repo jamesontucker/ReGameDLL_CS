@@ -78,6 +78,69 @@ inline CNavNode *LadderEndSearch(CBaseEntity *pEntity, const Vector *pos, NavDir
 	return nullptr;
 }
 
+// Loner-Strike: a spawn point the search never reached (a wall, cage or barrier between it
+// and the rest, as on Base Builder's zombie side or a Deathrun booth) becomes a seed of its own,
+// so every spawn gets a nav. Of the four grid points round the spawn, one already on the nav
+// means the spawn is reached; otherwise the first with the spawn's own floor under it (a
+// standing player's height below, not a pit far down or a crate or wall top) and a clear line
+// to it from the spawn (not the room through the wall) is the seed. A seeded spawn has its node
+// next time, so each spawn seeds at most once and the search still ends.
+inline CNavNode *SpawnSeedSearch()
+{
+	static const char *const spawnClasses[] = { "info_player_start", "info_player_deathmatch", "info_vip_start", "info_spawn_point" };
+	for (auto cls : spawnClasses)
+	{
+		CBaseEntity *spot = nullptr;
+		while ((spot = UTIL_FindEntityByClassname(spot, cls)) != nullptr)
+		{
+			const Vector origin = spot->pev->origin;
+			const float cx = floorf(origin.x / GenerationStepSize) * GenerationStepSize;
+			const float cy = floorf(origin.y / GenerationStepSize) * GenerationStepSize;
+
+			Vector seed, seedNormal;
+			bool reached = false, found = false;
+			for (int k = 0; k < 4 && !reached; k++)
+			{
+				Vector pos(cx + (k & 1) * GenerationStepSize, cy + (k >> 1) * GenerationStepSize, origin.z);
+
+				Vector normal;
+				if (!GetGroundHeight(&pos, &pos.z, &normal))
+					continue;
+
+				// the spawn's own floor: about a standing player's height below its origin
+				float drop = origin.z - pos.z;
+				if (drop < 0.0f || drop > HalfHumanHeight + StepHeight + 8.0f)
+					continue;
+
+				if (CNavNode::GetNode(&pos))
+				{
+					reached = true;
+					break;
+				}
+
+				// in the spawn's own room: nothing between the spawn and the point
+				TraceResult result;
+				// (to a step above the floor: a crouched spawn in a vent has its ceiling at head height)
+				UTIL_TraceLine(origin, pos + Vector(0, 0, StepHeight), ignore_monsters, dont_ignore_glass, nullptr, &result);
+				if (result.flFraction != 1.0f || result.fStartSolid)
+					continue;
+
+				if (!found)
+				{
+					seed = pos;
+					seedNormal = normal;
+					found = true;
+				}
+			}
+
+			if (!reached && found)
+				return new CNavNode(&seed, &seedNormal, nullptr);
+		}
+	}
+
+	return nullptr;
+}
+
 CNavNode *CCSBot::AddNode(const Vector *destPos, const Vector *normal, NavDirType dir, CNavNode *source)
 {
 	// check if a node exists at this location
@@ -213,6 +276,10 @@ bool CCSBot::LearnStep()
 				if ((m_currentNode = LadderEndSearch(ladder->m_entity, &ladder->m_top, ladder->m_dir)) != 0)
 					break;
 			}
+
+			// then from spawn points nothing reached (Loner-Strike)
+			if (!m_currentNode)
+				m_currentNode = SpawnSeedSearch();
 
 			if (!m_currentNode)
 			{

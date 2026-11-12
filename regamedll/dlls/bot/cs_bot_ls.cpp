@@ -1556,6 +1556,90 @@ bool LsClanMates(CBasePlayer *a, CBasePlayer *b)
 // ---- every bot for itself (deathmatch-type modes) -----------------------------------------
 
 
+// Which connected part of the nav an area is in (links either way, ladders included), worked
+// out once per nav: a nav learned with spawn seeds can have parts no path joins (Base Builder's
+// two sides, a Deathrun booth), and a hunt goal in another part is a walk to nowhere. -1 unknown.
+static int LsNavPart(const CNavArea *area)
+{
+	static std::vector<int> s_part;
+	static std::vector<const CNavArea *> s_areas;
+	static int s_for = -1;
+	static const CNavArea *s_front = nullptr;
+	if (!area || TheNavAreaList.empty())
+		return -1;
+	// (every nav load counts, learning's included; the first area too, cheaply: a list's size
+	// is a walk of the whole list on the Linux build)
+	if (s_for != g_lsNavLoads || s_front != TheNavAreaList.front())
+	{
+		s_for = g_lsNavLoads;
+		s_front = TheNavAreaList.front();
+		s_areas.assign(TheNavAreaList.begin(), TheNavAreaList.end());
+		std::sort(s_areas.begin(), s_areas.end());
+		s_part.assign(s_areas.size(), -1);
+		auto indexOf = [](const CNavArea *a) -> int {
+			auto it = std::lower_bound(s_areas.begin(), s_areas.end(), a);
+			return (it != s_areas.end() && *it == a) ? int(it - s_areas.begin()) : -1;
+		};
+		// links one way count both ways (a drop is still the same part)
+		std::vector<std::vector<int>> links(s_areas.size());
+		auto join = [&](int i, const CNavArea *b) {
+			int j = indexOf(b);
+			if (j >= 0 && j != i)
+			{
+				links[i].push_back(j);
+				links[j].push_back(i);
+			}
+		};
+		for (int i = 0; i < (int)s_areas.size(); i++)
+		{
+			const CNavArea *a = s_areas[i];
+			for (int d = 0; d < NUM_DIRECTIONS; d++)
+				for (int k = 0; k < a->GetAdjacentCount((NavDirType)d); k++)
+					join(i, a->GetAdjacentArea((NavDirType)d, k));
+			for (int l = 0; l < NUM_LADDER_DIRECTIONS; l++)
+				for (auto ladder : *a->GetLadderList((LadderDirectionType)l))
+				{
+					join(i, ladder->m_topForwardArea);
+					join(i, ladder->m_topLeftArea);
+					join(i, ladder->m_topRightArea);
+					join(i, ladder->m_topBehindArea);
+					join(i, ladder->m_bottomArea);
+				}
+		}
+		int part = 0;
+		std::vector<int> stack;
+		for (int s0 = 0; s0 < (int)s_areas.size(); s0++)
+		{
+			if (s_part[s0] >= 0)
+				continue;
+			s_part[s0] = part;
+			stack.assign(1, s0);
+			while (!stack.empty())
+			{
+				int u = stack.back();
+				stack.pop_back();
+				for (int v : links[u])
+					if (s_part[v] < 0)
+					{
+						s_part[v] = part;
+						stack.push_back(v);
+					}
+			}
+			part++;
+		}
+	}
+	auto it = std::lower_bound(s_areas.begin(), s_areas.end(), area);
+	return (it != s_areas.end() && *it == area) ? s_part[it - s_areas.begin()] : -1;
+}
+
+// Whether a goal area is in the same part of the nav as the bot (unknown counts as yes).
+static bool LsSamePart(const CCSBot *me, const CNavArea *goal)
+{
+	int mine = LsNavPart(me->GetLastKnownArea());
+	int theirs = LsNavPart(goal);
+	return mine < 0 || theirs < 0 || mine == theirs;
+}
+
 // Where to hunt: of a handful of random parts of the map, the one furthest from where its
 // teammates are and where they're heading (with some chance in it, and not right here)
 CNavArea *CCSBot::LsPickHuntArea()
@@ -1653,6 +1737,9 @@ CNavArea *CCSBot::LsPickHuntArea()
 			// (not the small ones: corners of rooms, vents, ledges)
 			const Extent *ext = area->GetExtent();
 			if (ext->hi.x - ext->lo.x < 100.0f || ext->hi.y - ext->lo.y < 100.0f)
+				continue;
+			// (nor one no path reaches from here)
+			if (!LsSamePart(this, area))
 				continue;
 
 			const Vector *c = area->GetCenter();
@@ -6636,7 +6723,7 @@ CNavArea *CCSBot::LsObjectiveHuntArea()
 	{
 		CNavArea *a = s_list[RANDOM_LONG(0, n - 1)];
 		const Extent *e = a->GetExtent();
-		if (e->hi.x - e->lo.x < 100.0f || e->hi.y - e->lo.y < 100.0f || !LsHeadroom(a))
+		if (e->hi.x - e->lo.x < 100.0f || e->hi.y - e->lo.y < 100.0f || !LsHeadroom(a) || !LsSamePart(this, a))
 			continue;
 		const Vector &c = *a->GetCenter();
 		float home = float((*own - c).Length2D());
