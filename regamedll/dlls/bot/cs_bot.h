@@ -905,6 +905,7 @@ private:
 	float m_lsWallNext = 0.0f;			// not checked again before
 	float m_lsNarrowNext = 0.0f;		// narrow footing not checked again before
 	bool m_lsNarrow = false;			// on narrow footing, as last checked
+	float m_lsNarrowAlong = 0.0f;		// the way along it (yaw)
 	bool m_lsBeamLock = false;			// the view held on its path this frame (walking a beam): the hand corrects small errors too
 	Vector m_lsGlanceCorner;				// the last corner it glanced at walking, and when
 	float m_lsGlanceCornerAt = 0.0f;
@@ -1354,6 +1355,7 @@ public:
 	bool LsPickSteady();
 	bool LsMayBackOff(const Vector &toEnemy);
 	bool LsNarrowFooting();				// Loner-Strike: on a beam or ledge about a stride wide with a drop beside it that would hurt
+	float LsNarrowAlong() const { return m_lsNarrowAlong; }	// ...the way along it (yaw), as it found it
 	bool LsLadderAt(const Vector &spot) const;	// Loner-Strike: a spot on the wall a ladder's on
 	bool LsHoldFireToStop(float range);
 	void LsTraceNote(const char *note);				// a line in the trace (a #why) without changing what it's doing
