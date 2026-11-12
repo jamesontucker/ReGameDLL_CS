@@ -314,8 +314,9 @@ void CCSBot::BotTouch(CBaseEntity *pOther)
 			return;
 #endif
 
-		// (Loner-Strike: not the one it's standing on: a glass floor is a floor, not in the way)
-		if (pOther->pev->absmax.z <= GetFeetZ() + 2.0f)
+		// (Loner-Strike: not a glass or wooden floor it's standing on: that's a floor, not in the
+		// way. A vent grate under it on the way down is still shot out, as before)
+		if (pOther->pev->absmax.z <= GetFeetZ() + 2.0f && IsFloorBreakable(pOther))
 			return;
 
 		Vector center = (pOther->pev->absmax + pOther->pev->absmin) / 2.0f;
