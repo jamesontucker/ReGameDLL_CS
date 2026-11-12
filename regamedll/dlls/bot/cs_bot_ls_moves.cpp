@@ -1268,7 +1268,7 @@ void CCSBot::LsHandUpdate(float goalYaw, float goalPitch, float dt)
 			off = sqrtf(offY * offY + 1.56f * offP * offP);
 			// (still off the target: a correction, slower and smaller, at most two, after the
 			// moment it takes to see the miss)
-			if (off > Q_max(fight ? 0.25f : 0.5f, 0.35f * width) && h.corrections < 2 && (fight || !calm || off > 2.5f))
+			if (off > Q_max(fight ? 0.25f : 0.5f, 0.35f * width) && h.corrections < 2 && (fight || !calm || off > 2.5f || m_lsBeamLock))
 			{
 				h.corrections++;
 				h.restUntil = now + RANDOM_FLOAT(0.01f, 0.03f);
@@ -1287,13 +1287,21 @@ void CCSBot::LsHandUpdate(float goalYaw, float goalPitch, float dt)
 	{
 		// when to move: a big change at once; a small one only past the dead zone, after a rest
 		float deadZone = fight ? Q_max(0.2f, 0.5f * width) * (1.6f - 0.8f * skill) : standing ? 6.0f + 5.0f * LsTrait(91) : calm ? 4.0f + 4.0f * LsTrait(91) : 3.5f + 2.0f * LsTrait(91);
+		// (walking a beam: the smallest drift is put right at once - a few degrees off would walk
+		// it off the side; UpdateLookAngles)
+		bool rested = now >= h.restUntil;
+		if (m_lsBeamLock)
+		{
+			deadZone = 0.5f;
+			rested = true;
+		}
 		// (a new thing to look at, calmly: a reaction first, mostly quick, now and then slow: a
 		// log-normal delay, shorter for the skilled. In a fight the stock reaction already applies)
 		float jump = sqrtf(NormalizeAngle(goalYaw - h.lastY) * NormalizeAngle(goalYaw - h.lastY) + NormalizeAngle(goalPitch - h.lastP) * NormalizeAngle(goalPitch - h.lastP));
 		// (back round to face the way it's running, after a look elsewhere: nothing to react
 		// to - people turn back to where they're going at once, and briskly)
 		bool backAhead = !fight && pev->velocity.Length2D() > 150.0f && Q_abs(NormalizeAngle(goalYaw - UTIL_VecToYaw(pev->velocity))) < 30.0f;
-		if (backAhead)
+		if (backAhead || m_lsBeamLock)
 			h.reactUntil = now;
 		else if (!fight && jump > 20.0f)
 		{
@@ -1303,7 +1311,7 @@ void CCSBot::LsHandUpdate(float goalYaw, float goalPitch, float dt)
 			h.reactUntil = now + base + expf(mu + sigma * z);
 		}
 		bool start = now >= h.reactUntil
-			&& ((off > 25.0f) || (off > deadZone && now >= h.restUntil) || (h.corrections > 0 && off > 0.3f && now >= h.restUntil));
+			&& ((off > 25.0f) || (off > deadZone && rested) || (h.corrections > 0 && off > 0.3f && rested));
 		if (start)
 		{
 			// how long (Fitts): a + b log2(1 + D/W), quicker for the skilled and in a fight
