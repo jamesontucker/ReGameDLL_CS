@@ -23,7 +23,7 @@ namespace LsSurf
 {
 
 const float DT = 0.01f;				// a frame (the sim's 100 a second)
-const float STOP_EPSILON = 0.1f;
+const float SURF_STOP_EPSILON = 0.1f;	// (pm_shared.h has STOP_EPSILON as a macro)
 
 struct Trigger
 {
@@ -136,7 +136,7 @@ struct Player
 		Vector out = v - n * back;
 		for (int i = 0; i < 3; i++)
 		{
-			if (out[i] > -STOP_EPSILON && out[i] < STOP_EPSILON)
+			if (out[i] > -SURF_STOP_EPSILON && out[i] < SURF_STOP_EPSILON)
 				out[i] = 0.0f;
 		}
 		return out;
