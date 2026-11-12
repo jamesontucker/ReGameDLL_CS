@@ -112,10 +112,11 @@ inline CNavNode *SpawnSeedSearchPass(bool report)
 					continue;
 				}
 
-				// the spawn's own floor: below its origin by no more than a fall a player takes without
-				// harm (mappers often float spawns 50-100 units up; a pit is far deeper)
+				// the spawn's own floor: below its origin by no more than a fall a player survives with
+				// little or no harm (mappers float spawns 50-100 units up, and Deathrun maps stack them
+				// 240-340 up so a crowd drops in; a pit is far deeper)
 				float drop = origin.z - pos.z;
-				if (drop < 0.0f || drop > 200.0f)
+				if (drop < 0.0f || drop > 400.0f)
 				{
 					Q_snprintf(why[k], sizeof(why[k]), "floor %.0f below", drop);
 					continue;
