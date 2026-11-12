@@ -254,6 +254,8 @@ bool CBot::IsUsingScope() const
 	return false;
 }
 
+bool LsSurfDrive(CBasePlayer *bot, float msec, float *forward, float *strafe, unsigned short *buttons);
+
 void CBot::ExecuteCommand()
 {
 	byte adjustedMSec;
@@ -265,6 +267,9 @@ void CBot::ExecuteCommand()
 	{
 		m_buttonFlags |= IN_DUCK;
 	}
+
+	// Loner-Strike: a surf bot's movement, when the brain steers surf (bot_ls_surf, bot/cs_bot_surf.cpp)
+	LsSurfDrive(this, float(adjustedMSec), &m_forwardSpeed, &m_strafeSpeed, &m_buttonFlags);
 
 #ifdef REGAMEDLL_FIXES
 	// don't move if frozen state present

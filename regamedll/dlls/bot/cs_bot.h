@@ -1760,6 +1760,7 @@ struct LsAreaKnow
 };
 #pragma pack(pop)
 void LsSightStep();
+void LsSurfStep();				// bot/cs_bot_surf.cpp: surf maps explored a little each frame (bot_ls_surf)
 bool LsSightReady();
 bool LsSees(const CNavArea *a, const CNavArea *b);	// someone in one area could see into the other
 int LsSightQuality(const CNavArea *a, const CNavArea *b);	// 0-255, how much
