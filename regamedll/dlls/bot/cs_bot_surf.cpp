@@ -1074,8 +1074,8 @@ static void Locate(SurfBot &b, const Vector &o, float *off)
 	for (int i = lo; i <= hi; i++)
 	{
 		Vector a = b.path[i].o, seg = b.path[i + 1].o - a;
-		float len2 = DotProduct(seg, seg);
-		float k = len2 > 0.01f ? Q_max(0.0f, Q_min(1.0f, DotProduct(o - a, seg) / len2)) : 0.0f;
+		float len2 = float(DotProduct(seg, seg));
+		float k = len2 > 0.01f ? Q_max(0.0f, Q_min(1.0f, float(DotProduct(o - a, seg)) / len2)) : 0.0f;
 		float d = (a + seg * k - o).Length();
 		if (d < *off)
 		{
