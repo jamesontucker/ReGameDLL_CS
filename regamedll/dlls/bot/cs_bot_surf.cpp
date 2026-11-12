@@ -550,6 +550,7 @@ struct Node
 	int parent;				// the place it was flown from (-1: a start)
 	int firstAct, numActs;	// its moves from there, in s_acts
 	float t;				// seconds from its start
+	float reach;			// the latest time any line on from here gets to (how far it leads)
 	Player st;				// where it was, how fast
 	bool landed;			// came to rest there (a place to stop)
 };
@@ -713,12 +714,15 @@ static bool RootState(Vector at, Player *out)
 static int AddNode(int parent, int firstAct, int numActs, float t, const Player &st, bool landed)
 {
 	Node n;
-	n.parent = parent; n.firstAct = firstAct; n.numActs = numActs; n.t = t; n.st = st; n.landed = landed;
+	n.parent = parent; n.firstAct = firstAct; n.numActs = numActs; n.t = t; n.reach = t; n.st = st; n.landed = landed;
 	s_nodes.push_back(n);
 	s_children.push_back(std::vector<int>());
 	int id = int(s_nodes.size()) - 1;
 	if (parent >= 0)
 		s_children[parent].push_back(id);
+	// (every place it came by now leads at least this far)
+	for (int p = parent; p >= 0 && s_nodes[p].reach < t; p = s_nodes[p].parent)
+		s_nodes[p].reach = t;
 	return id;
 }
 
@@ -957,38 +961,46 @@ static void Explore(double budgetMs)
 
 // ---- following ------------------------------------------------------------------------------
 
-// The archive node nearest this state and going its way, with places on from it
+// The archive place to start a line from: near this state, going its way, and leading somewhere
+// (a place whose lines go on further is worth a little more distance)
 static int NearestNode(const Vector &o, const Vector &v)
 {
 	int best = -1;
-	float bestD = 160.0f;
+	float bestScore = 1e9f;
 	float sp = v.Length2D();
 	for (int i = 0; i < (int)s_nodes.size(); i++)
 	{
-		if (s_children[i].empty())
+		const Node &nd = s_nodes[i];
+		float ahead = nd.reach - nd.t;
+		if (ahead < 1.5f)
 			continue;
-		const Player &st = s_nodes[i].st;
-		float d = (st.o - o).Length();
-		if (d >= bestD)
+		float d = (nd.st.o - o).Length();
+		if (d >= 250.0f)
 			continue;
 		// (the same way: a line the other way along a ramp is no use)
-		float sp2 = st.v.Length2D();
-		if (sp > 100.0f && sp2 > 100.0f && (st.v.x * v.x + st.v.y * v.y) / (sp * sp2) < 0.7f)
+		float sp2 = nd.st.v.Length2D();
+		if (sp > 100.0f && sp2 > 100.0f && (nd.st.v.x * v.x + nd.st.v.y * v.y) / (sp * sp2) < 0.5f)
 			continue;
-		best = i;
-		bestD = d;
+		float score = d - 40.0f * Q_min(ahead, 10.0f);
+		if (score < bestScore)
+		{
+			bestScore = score;
+			best = i;
+		}
 	}
 	return best;
 }
 
 // A place further on from 'from' to head for: nearest the enemy it's after, else somewhere new to
-// it - three to fifteen seconds on (breadth first: every way on from here gets a look)
+// it - a few to fifteen seconds on (breadth first: every way on from here gets a look)
 static int PickTarget(int from, const Vector *enemy)
 {
 	std::vector<int> queue(1, from);
 	int best = -1;
 	float bestScore = -1e9f;
 	float t0 = s_nodes[from].t;
+	// (at least most of the way it leads - one to three seconds on)
+	float minAhead = Q_max(1.0f, Q_min(3.0f, 0.6f * (s_nodes[from].reach - t0)));
 	for (size_t q = 0; q < queue.size() && q < 3000; q++)
 	{
 		int n = queue[q];
@@ -998,7 +1010,7 @@ static int PickTarget(int from, const Vector *enemy)
 			for (int c : s_children[n])
 				queue.push_back(c);
 		}
-		if (dt < 3.0f)
+		if (dt < minAhead)
 			continue;
 		float score = enemy ? -(s_nodes[n].st.o - *enemy).Length() : dt + RANDOM_FLOAT(0.0f, 8.0f) + (s_nodes[n].landed ? 3.0f : 0.0f);
 		if (score > bestScore)
