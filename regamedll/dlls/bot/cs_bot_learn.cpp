@@ -82,7 +82,7 @@ inline CNavNode *LadderEndSearch(CBaseEntity *pEntity, const Vector *pos, NavDir
 // and the rest, as on Base Builder's zombie side or a Deathrun booth) becomes a seed of its own,
 // so every spawn gets a nav. Of the four grid points round the spawn, one already on the nav
 // means the spawn is reached; otherwise the first with the spawn's own floor under it (a
-// standing player's height below, not a pit far down or a crate or wall top) and a clear line
+// harmless drop below, not a pit far down or a crate or wall top) and a clear line
 // to it from the spawn (not the room through the wall) is the seed. A seeded spawn has its node
 // next time, so each spawn seeds at most once and the search still ends.
 inline CNavNode *SpawnSeedSearch()
@@ -107,9 +107,10 @@ inline CNavNode *SpawnSeedSearch()
 				if (!GetGroundHeight(&pos, &pos.z, &normal))
 					continue;
 
-				// the spawn's own floor: about a standing player's height below its origin
+				// the spawn's own floor: below its origin by no more than a fall a player takes without
+				// harm (mappers often float spawns 50-100 units up; a pit is far deeper)
 				float drop = origin.z - pos.z;
-				if (drop < 0.0f || drop > HalfHumanHeight + StepHeight + 8.0f)
+				if (drop < 0.0f || drop > 200.0f)
 					continue;
 
 				if (CNavNode::GetNode(&pos))
