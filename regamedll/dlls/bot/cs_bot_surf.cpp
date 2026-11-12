@@ -61,7 +61,7 @@ static void Box(CBaseEntity *pEnt, Trigger *t)
 
 struct Consts
 {
-	float gravity, accel, airaccel, friction, stopspeed, maxvel, maxspeed;
+	float gravity, accel, airaccel, friction, stopspeed, maxvel, maxspeed, edgefriction;
 };
 
 static Consts ReadConsts()
@@ -73,7 +73,9 @@ static Consts ReadConsts()
 	c.friction = CVAR_GET_FLOAT("sv_friction");
 	c.stopspeed = CVAR_GET_FLOAT("sv_stopspeed");
 	c.maxvel = CVAR_GET_FLOAT("sv_maxvelocity");
-	c.maxspeed = 250.0f;
+	c.edgefriction = CVAR_GET_FLOAT("sv_edgefriction");
+	// (a knife's top speed, under the server's cap)
+	c.maxspeed = Q_min(250.0f, CVAR_GET_FLOAT("sv_maxspeed"));
 	return c;
 }
 
@@ -311,7 +313,15 @@ struct Player
 			float sp = v.Length2D();
 			if (sp > 0.1f)
 			{
-				float drop = Q_max(sp, c.stopspeed) * c.friction * dt;
+				// (at an edge - nothing under a step ahead - friction's doubled: sv_edgefriction,
+				// pm_shared's PM_Friction)
+				float friction = c.friction;
+				Vector ahead(o.x + v.x / sp * 16.0f, o.y + v.y / sp * 16.0f, o.z - 36.0f);
+				TraceResult tr;
+				Trace(ahead, ahead - Vector(0, 0, 34.0f), &tr);
+				if (tr.flFraction == 1.0f)
+					friction *= c.edgefriction;
+				float drop = Q_max(sp, c.stopspeed) * friction * dt;
 				float ns = Q_max(0.0f, sp - drop) / sp;
 				v.x *= ns;
 				v.y *= ns;
@@ -582,7 +592,7 @@ static float s_constsAt = 0.0f;
 static int s_replansLeft = 0, s_buildsLeft = 0, s_picksLeft = 0;
 static double s_driveMs = 0.0;			// spent steering bots this frame (taken off the exploring)
 // (how line picking goes, for bot_ls_surf 2: since the last report)
-static int s_nPick = 0, s_nNoNear = 0, s_nNoTarget = 0, s_nBuilt = 0, s_nEnded = 0, s_nLost = 0, s_nReplan = 0;
+static int s_nPick = 0, s_nNoNear = 0, s_nNoTarget = 0, s_nBuilt = 0, s_nEnded = 0, s_nLost = 0, s_nReplan = 0, s_nLand = 0;
 
 // ---- a bot's surfing
 
@@ -594,7 +604,8 @@ struct SurfBot
 	std::vector<unsigned char> plan;	// a hop back onto the line: moves a chunk each
 	int planStep = 0;
 	float lastYaw = 0.0f;
-	float nextPick = 0.0f, nextReplan = 0.0f;
+	float nextPick = 0.0f, nextReplan = 0.0f, nextLand = 0.0f;
+	bool landPlan = false;		// the plan is air control for a landing: dropped on touching down
 	float groundSince = 0.0f, exitYaw = 0.0f, exitUntil = 0.0f, exitNext = 0.0f;
 	Vector lastPos;
 	bool driven = false;		// steered last command (let go: the leftover move is cleared)
@@ -839,7 +850,7 @@ static void StartRollout()
 		r.tw[k] = 0.0f;
 		// (a little slower or faster - the gun in hand sets the top speed - and the command rate a
 		// touch off)
-		r.twins[k].c.maxspeed = RANDOM_FLOAT(200.0f, 260.0f);
+		r.twins[k].c.maxspeed = Q_min(RANDOM_FLOAT(200.0f, 260.0f), CVAR_GET_FLOAT("sv_maxspeed"));
 
 		// (a few units off - not inside the ramp it's pressed against: a copy stuck in it would
 		// never die and pass anything)
@@ -1089,6 +1100,105 @@ static void Replan(SurfBot &b, const Player &me, const Sample &target)
 	}
 }
 
+// In the air, where the line next comes down on a ramp: the first sample on from 'from' that rides
+// one after air (-1: none within reach)
+static int LandingAhead(const SurfBot &b, int from, int most)
+{
+	bool air = false;
+	for (int i = from; i < (int)b.path.size() && i <= from + most; i++)
+	{
+		if (b.path[i].move >= 10)
+			air = true;
+		else if (air)
+			return i;
+	}
+	return -1;
+}
+
+// Where it'll come down flying the line's air moves from where it really is (or where it is at
+// the end of 'chunks')
+static Vector PredictLanding(const SurfBot &b, const Player &me, int from, int chunks)
+{
+	Player q = me;
+	float yaw = b.lastYaw;
+	for (int k = 0; k < chunks; k++)
+	{
+		int i = Q_min((int)b.path.size() - 1, from + k);
+		if (!StepChunk(q, b.path[i].move, &yaw, 0.0f))
+			break;
+		Vector n;
+		if (q.Ramp(&n))
+			break;
+	}
+	return q.o;
+}
+
+// Air control to come down where the line does: a small beam search over air moves, each line
+// judged where it first touches a ramp - how far from the line's landing, and how its speed
+// matches there (landing on the right ramp, going the right way, is what keeps a run going)
+static void LandPlan(SurfBot &b, const Player &me, const Sample &land, int depth)
+{
+	static const int MOVES[6] = { 10, 11, 13, 15, 16, MOVE_FREE };
+	struct Beam { Player p; float yaw; unsigned char moves[10]; int n; float score; bool down; };
+	depth = Q_max(1, Q_min(depth, 10));
+	std::vector<Beam> beams(1);
+	beams[0].p = me; beams[0].yaw = b.lastYaw; beams[0].n = 0; beams[0].score = 1e9f; beams[0].down = false;
+	std::vector<Beam> done;
+	const int width = 2;
+	for (int d = 0; d < depth && !beams.empty(); d++)
+	{
+		std::vector<Beam> next;
+		for (const Beam &bm : beams)
+		{
+			for (int k = 0; k < 6; k++)
+			{
+				Beam x = bm;
+				if (!StepChunk(x.p, MOVES[k], &x.yaw, 0.0f))
+					continue;
+				x.moves[d] = (unsigned char)MOVES[k];
+				x.n = d + 1;
+				x.score = (x.p.o - land.o).Length() + 0.3f * (x.p.v - land.v).Length();
+				Vector n;
+				if (x.p.Ramp(&n))
+				{
+					x.down = true;
+					done.push_back(x);
+				}
+				else
+					next.push_back(x);
+			}
+		}
+		std::sort(next.begin(), next.end(), [](const Beam &a, const Beam &c) { return a.score < c.score; });
+		if ((int)next.size() > width)
+			next.resize(width);
+		beams = next;
+	}
+	// the best that came down; else the best still flying
+	for (const Beam &x : beams)
+		done.push_back(x);
+	if (done.empty())
+		return;
+	// (by how close it comes, a line still flying at the end counting as further: one that turned
+	// straight back into the ramp it left is far from the landing and loses anyway)
+	const Beam *best = nullptr;
+	float bestScore = 1e9f;
+	for (const Beam &x : done)
+	{
+		float score = x.score + (x.down ? 0.0f : 200.0f);
+		if (score < bestScore)
+		{
+			bestScore = score;
+			best = &x;
+		}
+	}
+	if (best && best->n > 0)
+	{
+		b.plan.assign(best->moves, best->moves + best->n);
+		b.planStep = 0;
+		b.landPlan = true;
+	}
+}
+
 // Where on its path the bot is: the stretch between samples it's nearest (a sample a chunk apart
 // is 100+ units at speed), and how far off it
 static void Locate(SurfBot &b, const Vector &o, float *off)
@@ -1126,7 +1236,8 @@ void LsSurfStep()
 	{
 		s_constsAt = gpGlobals->time;
 		Consts c = ReadConsts();
-		if (c.gravity != s_consts.gravity || c.airaccel != s_consts.airaccel || c.accel != s_consts.accel || c.friction != s_consts.friction)
+		if (c.gravity != s_consts.gravity || c.airaccel != s_consts.airaccel || c.accel != s_consts.accel || c.friction != s_consts.friction
+			|| c.stopspeed != s_consts.stopspeed || c.maxvel != s_consts.maxvel || c.maxspeed != s_consts.maxspeed || c.edgefriction != s_consts.edgefriction)
 			Reset();
 	}
 	static double s_lastFrame = 0.0;
@@ -1150,10 +1261,10 @@ void LsSurfStep()
 				alive++;
 		}
 		Say("LSSURF %s: floor %.0f, command %.3f s; %d starts, %d places, %d lines kept, %d tries; steering %d, %d following a line; "
-			"picks %d (none near %d, nothing ahead %d, built %d), lines ended %d, lost %d, hops %d\n",
+			"picks %d (none near %d, nothing ahead %d, built %d), lines ended %d, lost %d, hops %d, landings steered %d\n",
 			s_map, s_floorZ, s_cmdDt, (int)s_roots.size(), (int)s_cells.size(), (int)s_nodes.size(), s_iters, alive, following,
-			s_nPick, s_nNoNear, s_nNoTarget, s_nBuilt, s_nEnded, s_nLost, s_nReplan);
-		s_nPick = s_nNoNear = s_nNoTarget = s_nBuilt = s_nEnded = s_nLost = s_nReplan = 0;
+			s_nPick, s_nNoNear, s_nNoTarget, s_nBuilt, s_nEnded, s_nLost, s_nReplan, s_nLand);
+		s_nPick = s_nNoNear = s_nNoTarget = s_nBuilt = s_nEnded = s_nLost = s_nReplan = s_nLand = 0;
 	}
 }
 
@@ -1164,7 +1275,7 @@ static bool LsSurfSteer(CBasePlayer *bot, LsSurf::SurfBot &b, float msec, float 
 	float now = gpGlobals->time;
 	Player me;
 	me.c = s_consts;
-	me.c.maxspeed = bot->pev->maxspeed > 0.0f ? bot->pev->maxspeed : 250.0f;
+	me.c.maxspeed = Q_min(bot->pev->maxspeed > 0.0f ? bot->pev->maxspeed : 250.0f, CVAR_GET_FLOAT("sv_maxspeed"));
 	me.dt = msec > 0.0f ? msec / 1000.0f : s_cmdDt;
 	me.o = bot->pev->origin;
 	me.v = bot->pev->velocity;
@@ -1282,14 +1393,36 @@ static bool LsSurfSteer(CBasePlayer *bot, LsSurf::SurfBot &b, float msec, float 
 		}
 		else
 		{
-			if (b.planStep >= (int)b.plan.size() * CHUNK)
+			// (a landing's air control ends on touching down, early or not)
+			if (b.planStep >= (int)b.plan.size() * CHUNK || (b.landPlan && (ramp || me.onground)))
+			{
 				b.plan.clear();
+				b.landPlan = false;
+			}
+			// in the air: will it come down where the line does? If not, steer for that landing
+			// (only while the line's in the air there too)
+			if (b.plan.empty() && !ramp && !me.onground && b.path[b.idx].move >= 10 && s_replansLeft > 0 && now >= b.nextLand && s_driveMs < 1.5)
+			{
+				b.nextLand = now + 0.3f;
+				int land = LandingAhead(b, b.idx, 12);
+				if (land > b.idx)
+				{
+					Vector at = PredictLanding(b, me, b.idx, land - b.idx + 2);
+					if ((at - b.path[land].o).Length() > 48.0f)
+					{
+						s_replansLeft--;
+						s_nLand++;
+						LandPlan(b, me, b.path[land], land - b.idx + 2);
+					}
+				}
+			}
 			if (b.plan.empty() && off > 40.0f && s_replansLeft > 0 && now >= b.nextReplan && s_driveMs < 1.5)
 			{
 				s_replansLeft--;
 				s_nReplan++;
 				b.nextReplan = now + 0.5f;
 				Replan(b, me, b.path[Q_min((int)b.path.size() - 1, b.idx + 4)]);
+				b.landPlan = false;
 			}
 			move = !b.plan.empty() ? b.plan[b.planStep++ / CHUNK] : b.path[b.idx].move;
 		}
