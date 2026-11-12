@@ -15,7 +15,12 @@
 #include <cmath>
 #include <map>
 #include <algorithm>
+// (steady_clock on Windows only: on Linux it needs a newer libstdc++ than the server build allows)
+#ifdef _WIN32
 #include <chrono>
+#else
+#include <sys/time.h>
+#endif
 
 // (triggers.cpp keeps this to itself)
 #ifndef SF_TELEPORT_KEEP_VELOCITY
@@ -489,7 +494,13 @@ cvar_t cv_bot_ls_surf = { "bot_ls_surf", "0", FCVAR_SERVER, 0.0f, nullptr };
 
 static double NowMs()
 {
+#ifdef _WIN32
 	return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now().time_since_epoch()).count();
+#else
+	timeval tv;
+	gettimeofday(&tv, nullptr);
+	return tv.tv_sec * 1000.0 + tv.tv_usec / 1000.0;
+#endif
 }
 
 namespace LsSurf
