@@ -130,8 +130,20 @@ inline CNavNode *SpawnSeedSearchPass(bool report)
 
 				// in the spawn's own room: nothing between the spawn and the point
 				// (to a step above the floor: a crouched spawn in a vent has its ceiling at head height)
+				// (doors and breakables don't count, as for the ground below: a Deathrun crowd waits on a
+				// trapdoor that opens at round start)
 				TraceResult result;
-				UTIL_TraceLine(origin, pos + Vector(0, 0, StepHeight), ignore_monsters, dont_ignore_glass, nullptr, &result);
+				Vector from = origin;
+				edict_t *skip = nullptr;
+				for (int tries = 0; tries < 4; tries++)
+				{
+					UTIL_TraceLine(from, pos + Vector(0, 0, StepHeight), ignore_monsters, dont_ignore_glass, skip, &result);
+					if (result.flFraction == 1.0f || result.fStartSolid || !result.pHit
+						|| !IsEntityWalkable(VARS(result.pHit), WALK_THRU_DOORS | WALK_THRU_BREAKABLES))
+						break;
+					skip = result.pHit;
+					from = result.vecEndPos;
+				}
 				if (result.flFraction != 1.0f || result.fStartSolid)
 				{
 					Q_snprintf(why[k], sizeof(why[k]), "%s (%s)", result.fStartSolid ? "spawn in solid" : "blocked",
