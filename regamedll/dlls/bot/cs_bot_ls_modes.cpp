@@ -119,9 +119,33 @@ static float LsModeUntil(float secs)
 	return secs > 0.0f ? gpGlobals->time + secs : 0.0f;
 }
 
+// A number from the command; nan, inf or something off any map marks the command bad (it's
+// dropped: see LsModeBadArgs)
+static bool s_lsArgBad = false;
 static float LsModeArg(int i, float fallback = 0.0f)
 {
-	return (CMD_ARGC() > i) ? Q_atof(CMD_ARGV(i)) : fallback;
+	if (CMD_ARGC() <= i)
+		return fallback;
+	float v = Q_atof(CMD_ARGV(i));
+	if (v != v || v > 1.0e6f || v < -1.0e6f)
+	{
+		s_lsArgBad = true;
+		return fallback;
+	}
+	return v;
+}
+
+static bool LsModeBadArgs()
+{
+	if (s_lsArgBad)
+		CONSOLE_ECHO("ls_mode %s: a number that isn't one (nan, inf or too big): ignored\n", CMD_ARGV(1));
+	return s_lsArgBad;
+}
+
+// A radius kept sane: at least lo, at most a map's width
+static float LsModeRadius(float r, float lo)
+{
+	return Q_max(lo, Q_min(r, 16384.0f));
 }
 
 static float LsModeDist2D(const Vector &a, const Vector &b)
@@ -191,6 +215,11 @@ static int LsModeWho(const char *who, int *out, bool botsOnly)
 		return 0;
 	bool all = FStrEq(who, "all"), t = FStrEq(who, "t"), ct = FStrEq(who, "ct");
 	const char *role = who[0] == '@' ? who + 1 : nullptr;
+	if (role && !*role)
+	{
+		CONSOLE_ECHO("ls_mode: '@' needs a role name (@zombie)\n");
+		return 0;
+	}
 	int only = (all || t || ct || role) ? 0 : Q_atoi(who);
 	if (!all && !t && !ct && !role && (only < 1 || only > gpGlobals->maxClients))
 		return 0;
@@ -1020,6 +1049,7 @@ void Bot_LsModeCommand()
 {
 	const char *what = CMD_ARGV(1);
 	int who[MAX_CLIENTS], who2[MAX_CLIENTS];
+	s_lsArgBad = false;
 
 	if (FStrEq(what, "reset"))
 	{
@@ -1046,12 +1076,16 @@ void Bot_LsModeCommand()
 		int kind = LsModeGoalKind(CMD_ARGV(3));
 		if (kind == LS_GOAL_NONE || CMD_ARGC() < 7)
 		{
-			CONSOLE_ECHO("ls_mode goal <who> <kind> <x> <y> <z> [ent] [prio] [until] [radius]\n");
+			CONSOLE_ECHO("ls_mode goal <who> <kind> <x> <y> <z> [ent] [prio] [until] [radius]\n"
+				"  kinds: go_hold defend capture extract loot use ride investigate flee meeting\n");
 			return;
 		}
 		Vector at(LsModeArg(4), LsModeArg(5), LsModeArg(6));
 		int ent = int(LsModeArg(7)), prio = int(LsModeArg(8, 50.0f));
 		float secs = LsModeArg(9), radius = LsModeArg(10);
+		if (LsModeBadArgs())
+			return;
+		radius = radius > 0.0f ? LsModeRadius(radius, 16.0f) : 0.0f;
 		int n = LsModeWho(CMD_ARGV(2), who, true);
 		for (int i = 0; i < n; i++)
 			static_cast<CCSBot *>(UTIL_PlayerByIndex(who[i]))->LsModeSetGoal(kind, at, radius, ent, prio, secs);
@@ -1079,14 +1113,19 @@ void Bot_LsModeCommand()
 			CONSOLE_ECHO("ls_mode %s <tag> <x> <y> <z> <r> <%s> [until]%s\n", what, avoid ? "cost" : "weight", avoid ? "" : " [team]");
 			return;
 		}
+		Vector at(LsModeArg(3), LsModeArg(4), LsModeArg(5));
+		float r = LsModeRadius(LsModeArg(6), 16.0f), value = LsModeArg(7), secs = LsModeArg(8);
+		int team = avoid ? 0 : int(LsModeArg(9));
+		if (LsModeBadArgs())
+			return;
 		LsModeZone *z = LsModeFindTag(avoid ? s_lsAvoid : s_lsAttract, CMD_ARGV(2), true);
 		if (!z)
 			return;
-		z->at = Vector(LsModeArg(3), LsModeArg(4), LsModeArg(5));
-		z->r = Q_max(LsModeArg(6), 16.0f);
-		z->value = LsModeArg(7);
-		z->until = LsModeUntil(LsModeArg(8));
-		z->team = avoid ? 0 : int(LsModeArg(9));
+		z->at = at;
+		z->r = r;
+		z->value = value;
+		z->until = LsModeUntil(secs);
+		z->team = team;
 		s_lsModeOn = true;
 		return;
 	}
@@ -1106,6 +1145,8 @@ void Bot_LsModeCommand()
 		char tag[24];
 		Q_snprintf(tag, sizeof(tag), "block%d", ent);
 		float secs = LsModeArg(3);
+		if (LsModeBadArgs())
+			return;
 		edict_t *pEdict = ent > 0 ? INDEXENT(ent) : nullptr;
 		if (secs <= 0.0f || !pEdict || pEdict->free)
 		{
@@ -1133,17 +1174,21 @@ void Bot_LsModeCommand()
 			CONSOLE_ECHO("ls_mode zone <cx> <cy> <cz> <r> [<ncx> <ncy> <ncz> <nr> <shrink_at>]\n");
 			return;
 		}
-		s_lsRing = LsModeRing();
-		s_lsRing.on = true;
-		s_lsRing.at = Vector(LsModeArg(2), LsModeArg(3), LsModeArg(4));
-		s_lsRing.r = Q_max(LsModeArg(5), 64.0f);
-		if (CMD_ARGC() >= 10)
+		LsModeRing ring;
+		ring.on = true;
+		ring.at = Vector(LsModeArg(2), LsModeArg(3), LsModeArg(4));
+		ring.r = LsModeRadius(LsModeArg(5), 64.0f);
+		// (the next ring needs all five: its centre, radius and when it shrinks)
+		if (CMD_ARGC() >= 11)
 		{
-			s_lsRing.next = true;
-			s_lsRing.nextAt = Vector(LsModeArg(6), LsModeArg(7), LsModeArg(8));
-			s_lsRing.nextR = Q_max(LsModeArg(9), 64.0f);
-			s_lsRing.shrinkAt = LsModeUntil(LsModeArg(10));
+			ring.next = true;
+			ring.nextAt = Vector(LsModeArg(6), LsModeArg(7), LsModeArg(8));
+			ring.nextR = LsModeRadius(LsModeArg(9), 64.0f);
+			ring.shrinkAt = LsModeUntil(LsModeArg(10));
 		}
+		if (LsModeBadArgs())
+			return;
+		s_lsRing = ring;
 		s_lsModeOn = true;
 		return;
 	}
@@ -1165,6 +1210,8 @@ void Bot_LsModeCommand()
 	if (FStrEq(what, "friend") || FStrEq(what, "foe"))
 	{
 		bool on = LsModeArg(4, 1.0f) != 0.0f;
+		if (LsModeBadArgs())
+			return;
 		unsigned int *ties = FStrEq(what, "friend") ? s_lsFriend : s_lsFoe;
 		unsigned int *other = FStrEq(what, "friend") ? s_lsFoe : s_lsFriend;
 		int n = LsModeWho(CMD_ARGV(2), who, false);
@@ -1195,6 +1242,8 @@ void Bot_LsModeCommand()
 	{
 		const char *name = CMD_ARGV(2);
 		float threat = LsModeArg(3, 1.0f);
+		if (LsModeBadArgs())
+			return;
 		if (!name[0])
 			return;
 		int c = 0;
