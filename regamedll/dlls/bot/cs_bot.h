@@ -1748,6 +1748,7 @@ private:
 	bool LsModeRoamTick();							// a creature mode's free players: roam like a person
 	bool LsModeHome(Vector *home);					// where its side is based (teammates' held spots)
 	float m_lsModeRoamAt = 0.0f;					// next roam decision
+	int m_lsModePressed = 0;						// buttons the mode pressed this think (1 fire, 2 use, 4 reload)
 	float m_lsModeHideState = -1.0f;				// the station's hide began then (its state time)
 	Vector m_lsModeSpot;							// ...at this spot
 	bool m_lsModeSpotOn = false;
