@@ -363,12 +363,52 @@ static void LsModeRefreshTargets()
 		CBaseEntity *pEntity = nullptr;
 		while (s_lsTargetCount < LS_MODE_TARGETS && (pEntity = UTIL_FindEntityByClassname(pEntity, s_lsClass[c].name)))
 		{
-			if (!LsModeTargetOk(pEntity))
+			// (never a player: "enemyclass player" mustn't turn bots on everyone, or themselves)
+			if (pEntity->IsPlayer() || !LsModeTargetOk(pEntity))
 				continue;
 			s_lsTargetThreat[s_lsTargetCount] = s_lsClass[c].threat;
 			s_lsTarget[s_lsTargetCount++] = pEntity;
 		}
 	}
+}
+
+// A mode enemy in sight: a point on it seen from the eyes (a monster's middle and its upper
+// body; a brush creature's nearest side and its middle - a line to the middle of a brush
+// stops on its own surface, which counts). *at gets the point seen; *traces counts the lines
+bool CCSBot::LsModeSees(CBaseEntity *pEntity, bool testFOV, Vector *at, int *traces)
+{
+	const Vector eye = GetEyePosition();
+	const Vector lo = pEntity->pev->absmin, hi = pEntity->pev->absmax;
+	Vector points[2];
+	if (pEntity->pev->solid == SOLID_BSP)
+	{
+		// (the box's nearest point to the eyes, an inch inside it)
+		points[0] = Vector(Q_max(lo.x + 1.0f, Q_min(eye.x, hi.x - 1.0f)), Q_max(lo.y + 1.0f, Q_min(eye.y, hi.y - 1.0f)),
+			Q_max(lo.z + 1.0f, Q_min(eye.z, hi.z - 1.0f)));
+		points[1] = (lo + hi) * 0.5f;
+	}
+	else
+	{
+		points[0] = (lo + hi) * 0.5f;
+		points[1] = Vector(points[0].x, points[0].y, Q_max(points[0].z, hi.z - 12.0f));
+	}
+	for (int i = 0; i < 2; i++)
+	{
+		const Vector &pos = points[i];
+		if (testFOV && !FInViewCone(&pos))
+			continue;
+		if (TheCSBots()->IsLineBlockedBySmoke(&eye, &pos))
+			continue;
+		TraceResult result;
+		UTIL_TraceLine(eye, pos, ignore_monsters, ignore_glass, ENT(pev), &result);
+		(*traces)++;
+		if (result.flFraction == 1.0f || result.pHit == pEntity->edict())
+		{
+			*at = pos;
+			return true;
+		}
+	}
+	return false;
 }
 
 // No player enemy in sight, but a creature (an entity of a class the mode named) is: it gets
@@ -389,21 +429,40 @@ bool CCSBot::LsModeShootTick()
 	if (now >= m_lsModeScanAt || !LsModeTargetOk(pTarget))
 	{
 		m_lsModeScanAt = now + 0.3f;
-		CBaseEntity *pBest = nullptr;
-		float bestScore = 0.0f;
+		// the ones in range, nearest first; the lines of sight checked for the nearest few only
+		int order[LS_MODE_TARGETS];
+		float ranges[LS_MODE_TARGETS];
+		int count = 0;
 		for (int k = 0; k < s_lsTargetCount; k++)
 		{
 			CBaseEntity *pEntity = s_lsTarget[k];
 			if (!LsModeTargetOk(pEntity))
 				continue;
-			Vector pos = pEntity->Center();
-			float range = (pos - eye).Length();
+			float range = (pEntity->Center() - eye).Length();
 			if (range > 2500.0f)
 				continue;
+			int at = count++;
+			while (at > 0 && ranges[at - 1] > range)
+			{
+				ranges[at] = ranges[at - 1];
+				order[at] = order[at - 1];
+				at--;
+			}
+			ranges[at] = range;
+			order[at] = k;
+		}
+		CBaseEntity *pBest = nullptr;
+		float bestScore = 0.0f;
+		int traces = 0;
+		for (int n = 0; n < count && traces < 8; n++)
+		{
+			int k = order[n];
+			CBaseEntity *pEntity = s_lsTarget[k];
+			Vector seen;
 			// (one it's already shooting doesn't have to be in front of it to stay its target)
-			if (!IsVisible(&pos, pEntity != pTarget))
+			if (!LsModeSees(pEntity, pEntity != pTarget, &seen, &traces))
 				continue;
-			float score = s_lsTargetThreat[k] / Q_max(range, 100.0f);
+			float score = s_lsTargetThreat[k] / Q_max(ranges[n], 100.0f);
 			if (score > bestScore)
 			{
 				bestScore = score;
@@ -418,8 +477,9 @@ bool CCSBot::LsModeShootTick()
 	if (!pTarget)
 		return false;
 
-	Vector pos = pTarget->Center();
-	if (!IsVisible(&pos, false))
+	Vector pos;
+	int traces = 0;
+	if (!LsModeSees(pTarget, false, &pos, &traces))
 	{
 		m_lsModeTarget = nullptr;
 		return false;
@@ -444,12 +504,12 @@ bool CCSBot::LsModeShootTick()
 
 	if (IsUsingKnife())
 	{
-		if (range < 70.0f)
+		if (range < 70.0f && !IsFriendInLineOfFire())
 			PrimaryAttack();
 	}
 	else if (IsActiveWeaponClipEmpty())
 		ReloadCheck();
-	else if (!IsActiveWeaponReloading() && (!IsUsingPistol() || LsTriggerTap()))
+	else if (!IsActiveWeaponReloading() && !IsFriendInLineOfFire() && (!IsUsingPistol() || LsTriggerTap()))
 		PrimaryAttack();
 	return true;
 }

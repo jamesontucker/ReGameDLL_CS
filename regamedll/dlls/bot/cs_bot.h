@@ -1735,6 +1735,7 @@ private:
 	void LsModeGoalTick(LsModeGoal &g);
 	bool LsModeAttractTick();						// hunting: off to somewhere a mode says is worth going (true: sent)
 	float m_lsModeAttractAt = 0.0f;					// next roll for that
+	bool LsModeSees(CBaseEntity *pEntity, bool testFOV, Vector *at, int *traces);	// a point on a mode enemy in sight
 	bool LsModeShootTick();							// a mode enemy (a creature) in sight: shoot it (true: it is)
 	float LsModeGreed();							// 0-1: how much loot and pickups pull it
 	bool LsModeCares(int kind, int prio);			// a goal's taken up or not (once, by its persona)
