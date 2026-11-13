@@ -79,6 +79,9 @@ static bool LsFloorTop(const TraceResult &result)
 	Vector size = pevHit->absmax - pevHit->absmin;
 	if (size.x < 40.0f || size.y < 40.0f)
 		return false;
+	// (a turning door's box is the whole sphere it can turn through: any top-facing face of it is its floor)
+	if (FClassnameIs(pevHit, "func_door_rotating"))
+		return true;
 	return result.vecEndPos.z >= pevHit->absmax.z - 4.0f;
 }
 
