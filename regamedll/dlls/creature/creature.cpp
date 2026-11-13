@@ -2767,6 +2767,14 @@ void CLsCreature::StartAttack()
 	const LsCreatureType *t = GetType();
 	m_attackStart = gpGlobals->time;
 	m_attackLanded = false;
+
+	// (planted for the swing from its first frame, not sliding into it)
+	if (t->moves)
+	{
+		m_improv->Stop();
+		pev->velocity.x = pev->velocity.y = 0.0f;
+	}
+
 	SetAnim(LSAN_ATTACK, true);
 
 	// (the swing fits the attack rate: a long HL swing plays faster, never slower than made)
