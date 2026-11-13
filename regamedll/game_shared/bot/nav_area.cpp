@@ -4565,6 +4565,12 @@ void CNavArea::ComputeApproachAreas()
 	enum { MAX_PATH_LENGTH = 256 };
 	CNavArea *path[MAX_PATH_LENGTH];
 
+	// Loner-Strike: a time budget per area. On big deathrun navs (deathrun_dojo, ~20000 learn nodes) one
+	// area's search over every far area took minutes and the learn never finished; the approach areas
+	// found so far are kept.
+	const float budgetStart = g_engfuncs.pfnTime();
+	const float budget = 0.5f;
+
 	enum SearchType
 	{
 		FROM_EYE,		///< start search from our eyepoint outward to farArea
@@ -4582,6 +4588,14 @@ void CNavArea::ComputeApproachAreas()
 		// and keep the union of the approach area sets
 		for (auto farArea : goodSizedAreaList)
 		{
+			if (g_engfuncs.pfnTime() - budgetStart > budget)
+			{
+				static int cutShort = 0;
+				if (++cutShort <= 5 || cutShort % 100 == 0)
+					CONSOLE_ECHO("Approach areas cut short after %.1f s: area #%d (%d found, %d areas so far).\n", budget, m_id, m_approachCount, cutShort);
+				return;
+			}
+
 			BlockedIDCount = 0;
 
 			// if we can see 'farArea', try again - the whole point is to go "around the bend", so to speak
