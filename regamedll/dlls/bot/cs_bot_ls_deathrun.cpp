@@ -248,7 +248,9 @@ static bool GapJumpVec(const Vector &p, Vector2D d, bool runup, Vector *land, Ve
 		if (dz < -180.0f)
 			continue;
 		// where a full running jump really comes down at that height (it doesn't stop at the near
-		// edge: a jump onto a small block overshoots it) - floor there too, at about that height
+		// edge: a jump onto a small block overshoots it) - floor there too: about that height, or a
+		// little lower (it lands on a lip or a step and drops onto the floor behind: dojo's walkways
+		// have a raised edge), or a wall it's stopped by (it comes down at the wall's foot) - not a hole
 		{
 			float disc = vz * vz - 2.0f * g * (dz - (duck ? 18.0f : 0.0f));
 			float tDown = disc > 0.0f ? (vz + sqrtf(disc)) / g : t;
@@ -259,7 +261,9 @@ static bool GapJumpVec(const Vector &p, Vector2D d, bool runup, Vector *land, Ve
 				float rz;
 				Vector rn;
 				Vector rc(p.x + d.x * (reach + off), p.y + d.y * (reach + off), gz + 40.0f);
-				if (!GroundBelow(rc, 60.0f, &rz, &rn) || Q_fabs(rz - gz) > 20.0f || DeadlyAt(s_learnHurts, Vector(rc.x, rc.y, rz)))
+				if (UTIL_PointContents(rc) == CONTENTS_SOLID)
+					continue;	// (a wall there: it's stopped short of it)
+				if (!GroundBelow(rc, 40.0f + 120.0f, &rz, &rn) || rz > gz + 20.0f || rz < gz - 120.0f || DeadlyAt(s_learnHurts, Vector(rc.x, rc.y, rz)))
 					solid = false;
 			}
 			if (!solid && s_jumpRelaxed)
