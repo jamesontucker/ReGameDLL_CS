@@ -267,6 +267,25 @@ int LsModeTie(const CBasePlayer *me, const CBasePlayer *them)
 	return -1;
 }
 
+// A player left: their slot's role and ties go, and every tie to them (a new player in the
+// slot starts with none)
+void LsModePlayerGone(int index)
+{
+	if (index < 1 || index > MAX_CLIENTS)
+		return;
+	s_lsRole[index][0] = '\0';
+	s_lsFriend[index] = s_lsFoe[index] = 0;
+	unsigned int bit = 1u << (index - 1);
+	g_lsModeTies = false;
+	for (int i = 1; i <= MAX_CLIENTS; i++)
+	{
+		s_lsFriend[i] &= ~bit;
+		s_lsFoe[i] &= ~bit;
+		if (s_lsFriend[i] || s_lsFoe[i])
+			g_lsModeTies = true;
+	}
+}
+
 // ---- path costs (PathCost, cs_bot.h) --------------------------------------------------------
 
 // Anything that changes paths: an avoid, a blocked door or the safe zone (checked once a frame)

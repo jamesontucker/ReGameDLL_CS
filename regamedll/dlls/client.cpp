@@ -317,6 +317,9 @@ void EXT_FUNC ClientDisconnect(edict_t *pEntity)
 {
 	CBasePlayer *pPlayer = CBasePlayer::Instance(pEntity);
 
+	// Loner-Strike: a game mode's role and ties for this slot (bot/cs_bot_ls_modes.cpp)
+	LsModePlayerGone(ENTINDEX(pEntity));
+
 	if (!g_pGameRules->IsGameOver())
 	{
 		UTIL_ClientPrintAll(HUD_PRINTNOTIFY, "#Game_disconnected", STRING(pEntity->v.netname));

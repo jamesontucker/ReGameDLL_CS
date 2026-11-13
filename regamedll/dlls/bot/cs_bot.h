@@ -1860,6 +1860,7 @@ void LsTraceMark();						// ls_mark [note]: a moment flagged in lstrace.csv
 void Bot_LsServerCommand();
 void Bot_LsModeCommand();				// ls_mode (cs_bot_ls_modes.cpp)
 void LsModeMapStart();					// a new map: every mode fact forgotten
+void LsModePlayerGone(int index);		// a player left: their role and ties forgotten (client.cpp)
 bool LsModeCosts();						// any avoid, block or zone set (path costs to add)
 float LsModeAreaCost(const CNavArea *area, unsigned int insideMask);	// 1 plain, more inside an avoid or outside the zone, -1 never
 
