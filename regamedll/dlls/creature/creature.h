@@ -107,7 +107,7 @@ enum LsCreatureSound
 	LSS_COUNT
 };
 
-const int LS_CREATURE_MAX_TYPES = 32;
+const int LS_CREATURE_MAX_TYPES = 48;
 const int LS_CREATURE_MAX_SOUNDS = 6;		// per kind
 const int LS_CREATURE_MAX_LIST = 128;		// registered creatures (alive or dead), all providers
 
@@ -141,6 +141,9 @@ struct LsCreatureType
 	float respawn;			// seconds after death it comes back at home (0 = never)
 	float corpseTime;		// seconds the body stays
 	bool moves;				// false: a turret
+	int shotFx;				// ranged shot drawn as: 0 a tracer, 1 an electric zap (vortigaunt), 2 nothing
+	float hops;				// chance a second of a sideways hop while chasing (assassin; 0 = never)
+	bool flank;				// comes at its target from the side, not straight on
 	bool canClimb;			// may path up and down ladders (no built-in type does)
 	int frags;				// score for the killer
 	int money;				// money for the killer
@@ -159,6 +162,7 @@ struct LsCreatureType
 
 	char anim[LSAN_COUNT][32];			// sequence names ("" = by activity)
 	char sound[LSS_COUNT][160];			// space separated lists, files that exist are kept
+	char say[LSS_COUNT][24];			// a sentence group instead (sentences.txt: HG_IDLE...): no precache slots
 
 	// filled in at precache
 	bool precached;
@@ -490,6 +494,42 @@ private:
 	float m_aggression;
 	float m_detect;
 	int m_hates;
+};
+
+// A barnacle: a ceiling hazard a mapper places ("ls_barnacle", Half-Life's barnacle.mdl). Its tongue
+// hangs to the floor; a player who walks into it is hauled up and chewed until the barnacle is shot
+// dead or they are. Keys: health (25), damage (10 a bite), length (longest tongue, 512), speed (haul,
+// 80 u/s), hates (all | t | ct). Comes back every round.
+class CLsBarnacle: public CBaseMonster
+{
+public:
+	virtual void Spawn();
+	virtual void Precache();
+	virtual void KeyValue(KeyValueData *pkvd);
+	virtual int ObjectCaps() { return (CBaseMonster::ObjectCaps() & ~FCAP_ACROSS_TRANSITION) | FCAP_MUST_RESET; }
+	virtual void Restart();
+	virtual int Classify() { return CLASS_ALIEN_MONSTER; }
+	virtual BOOL TakeDamage(entvars_t *pevInflictor, entvars_t *pevAttacker, float flDamage, int bitsDamageType);
+	virtual void Killed(entvars_t *pevAttacker, int iGib);
+	virtual int BloodColor() { return BLOOD_COLOR_RED; }
+
+	void EXPORT BarnacleThink();
+
+private:
+	void Setup();
+	void Release();
+	void SetTongue(float length);
+	bool Wants(CBasePlayer *pPlayer) const;
+
+	float m_maxHealth;
+	float m_bite;
+	float m_maxLength;
+	float m_haul;
+	int m_hates;
+	float m_tongue;				// how far it hangs now
+	EHANDLE m_victim;
+	float m_nextBite;
+	bool m_ready;				// its model and sounds got precache slots
 };
 
 // The registry and what the rest of the game DLL calls
