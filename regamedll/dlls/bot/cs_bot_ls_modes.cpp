@@ -419,6 +419,16 @@ static bool LsModeSeeThrough(CBaseEntity *pThing)
 		|| (pThing->pev->effects & EF_NODRAW) || (pThing->pev->rendermode != kRenderNormal && pThing->pev->renderamt < 200.0f);
 }
 
+// A mode enemy it could touch: a body-sized line from it to them meets nothing else (a barricade
+// stops this even where bullets and sight go through its gaps) - what a knife needs, and what
+// it takes for one to be a threat close up
+static bool LsModeReachable(CBaseEntity *pFrom, CBaseEntity *pTo)
+{
+	TraceResult tr;
+	UTIL_TraceHull(pFrom->pev->origin, pTo->Center(), dont_ignore_monsters, head_hull, pFrom->edict(), &tr);
+	return tr.flFraction == 1.0f || tr.pHit == pTo->edict();
+}
+
 // One of the mode enemies alive now
 static bool LsModeIsTarget(CBaseEntity *pThing)
 {
@@ -562,18 +572,21 @@ bool CCSBot::LsModeShootTick()
 	// close in); one right up close, a step or two back (the bolder hold their ground); hurt, from
 	// one shooting at range, to cover (running from a biter only gets it bitten); a knife closes in
 	float gap = (pTarget->pev->origin - pev->origin).Make2D().Length();
+	// (close: whether it can get at the bot at all - behind a gate it's no threat up close, and
+	// no knife reaches it)
+	bool reachable = gap < 250.0f && LsModeReachable(this, pTarget);
 	if (LsHealth() < 35.0f && gap > 350.0f && gap < 900.0f && now >= m_lsModeCoverAt)
 	{
 		m_lsModeCoverAt = now + 4.0f;
 		if (LsTakeCoverFrom(pTarget->pev->origin, 300.0f, true))
 			LsWhy("mode enemy: hurt, to cover");
 	}
-	else if (!IsUsingKnife() && gap < 220.0f && LsAggro() < 0.75f)
+	else if (!IsUsingKnife() && gap < 220.0f && reachable && LsAggro() < 0.75f)
 	{
 		m_lsModeBackFrom = pTarget->pev->origin;
 		m_lsModeBackUntil = now + 0.35f;
 	}
-	else if (IsUsingKnife() && gap > 60.0f)
+	else if (IsUsingKnife() && LsKnifeOnly() && gap > 60.0f && (gap >= 250.0f || reachable))
 	{
 		m_lsModeStepTo = pTarget->pev->origin;
 		m_lsModeStepUntil = now + 0.35f;
@@ -638,7 +651,9 @@ bool CCSBot::LsModeShootTick()
 
 	if (IsUsingKnife())
 	{
-		if (range < 70.0f && !IsFriendInLineOfFire())
+		// (the knife only when it's all it has - with a gun the switch is on its way - and only at
+		// one it can reach: not a swing into a barricade)
+		if (LsKnifeOnly() && range < 70.0f && reachable && !IsFriendInLineOfFire())
 		{
 			PrimaryAttack();
 			m_lsModePressed |= 1;
