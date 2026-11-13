@@ -371,18 +371,32 @@ void LsCourseLinkAreas()
 	using namespace LsDr;
 	if (!LsNavCourse())
 		return;
-	int made = 0;
+	int made = 0, noArea = 0, same = 0, already = 0;
 	for (const Link &l : s_learnLinks)
 	{
 		Vector a = l.from + Vector(0, 0, 8.0f), b = l.to + Vector(0, 0, 8.0f);
 		CNavArea *from = TheNavAreaGrid.GetNavArea(&a);
 		CNavArea *to = TheNavAreaGrid.GetNavArea(&b);
-		if (!from || !to || from == to || from->IsConnected(to, NUM_DIRECTIONS))
+		if (!from || !to)
+		{
+			noArea++;
 			continue;
+		}
+		if (from == to)
+		{
+			same++;
+			continue;
+		}
+		if (from->IsConnected(to, NUM_DIRECTIONS))
+		{
+			already++;
+			continue;
+		}
 		from->ConnectTo(to, (NavDirType)l.dir);
 		made++;
 	}
-	CONSOLE_ECHO("Loner-Strike: course learning: %d places past gaps, %d teleport destinations, %d gap links\n", s_gapSeeds, s_teleSeeds, made);
+	CONSOLE_ECHO("Loner-Strike: course learning: %d places past gaps, %d teleport destinations, %d gaps found, %d linked (%d no area, %d same area, %d already linked); %d nodes looked across\n",
+		s_gapSeeds, s_teleSeeds, int(s_learnLinks.size()), made, noArea, same, already, int(std::count_if(s_scanned.begin(), s_scanned.end(), [](unsigned char c) { return c != 0; })));
 	s_learnLinks.clear();
 	s_scanned.clear();
 }
