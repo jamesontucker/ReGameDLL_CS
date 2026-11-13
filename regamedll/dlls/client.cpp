@@ -3816,6 +3816,7 @@ void EXT_FUNC ServerDeactivate()
 
 void EXT_FUNC ServerActivate(edict_t *pEdictList, int edictCount, int clientMax)
 {
+	LsMark("server activate");	// Loner-Strike: the watchdog's marks
 	g_pEdicts = pEdictList;
 
 #ifdef REGAMEDLL_ADD
@@ -3886,6 +3887,7 @@ void EXT_FUNC ServerActivate(edict_t *pEdictList, int edictCount, int clientMax)
 
 	// Loner-Strike: creatures can be spawned by command from now on
 	LsCreaturesServerActivate();
+	LsMark("server activate end");
 
 #ifdef REGAMEDLL_ADD
 	CSGameRules()->ServerActivate();
@@ -3932,8 +3934,11 @@ void EXT_FUNC ParmsChangeLevel()
 
 void EXT_FUNC StartFrame()
 {
+	LsWatchdogFrame();	// Loner-Strike: a frame came (the watchdog, creature/creature.cpp)
+
 	if (g_pGameRules)
 	{
+		LsMark("rules think");
 		g_pGameRules->Think();
 		if (g_pGameRules->IsGameOver())
 			return;
@@ -3945,6 +3950,7 @@ void EXT_FUNC StartFrame()
 	g_iSkillLevel = g_pskill ? (int)g_pskill->value : 0;
 
 	if (TheBots) {
+		LsMark("bots frame");
 		TheBots->StartFrame();
 	}
 
@@ -3953,6 +3959,7 @@ void EXT_FUNC StartFrame()
 	}
 
 	EndFrame();
+	LsMark("frame end");
 }
 
 void EndFrame()

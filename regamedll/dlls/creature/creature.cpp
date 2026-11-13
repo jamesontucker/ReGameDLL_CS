@@ -41,8 +41,142 @@ cvar_t ls_creature_alive     = { "ls_creature_alive", "0", 0, 0.0f, nullptr };		
 cvar_t ls_creature_ver       = { "ls_creature_ver", "1", 0, 1.0f, nullptr };
 cvar_t ls_creature_frags     = { "ls_creature_frags", "0", 0, 0.0f, nullptr };		// 1 = kills add the type's frags to the score (counts toward mp_fraglimit)
 
+cvar_t ls_watchdog           = { "ls_watchdog", "10", 0, 10.0f, nullptr };		// seconds without a frame before the marks are written (0 = off)
+
+// ---------------------------------------------------------------------------------------------
+// Watchdog (see creature.h)
+
+struct LsWatchMark
+{
+	const char *where;
+	int ent;
+	float time;
+};
+
+static const unsigned LS_WATCH_MARKS = 64;
+static LsWatchMark s_watchMarks[LS_WATCH_MARKS];
+static volatile unsigned s_watchNext = 0;
+static volatile unsigned s_watchFrames = 0;
+static char s_watchPath[260] = "";
+
+void LsMark(const char *where, int ent)
+{
+	unsigned i = s_watchNext % LS_WATCH_MARKS;
+	s_watchMarks[i].where = where;
+	s_watchMarks[i].ent = ent;
+	s_watchMarks[i].time = gpGlobals ? gpGlobals->time : 0.0f;
+	s_watchNext = s_watchNext + 1;
+}
+
+void LsWatchdogFrame()
+{
+	s_watchFrames = s_watchFrames + 1;
+	LsMark("frame");
+}
+
+static void LsWatchdogWrite(unsigned frames, int secs, bool resumed)
+{
+	FILE *f = fopen(s_watchPath, "a");
+	if (!f)
+		return;
+
+	if (resumed)
+	{
+		fprintf(f, "frames came again after %d s\n\n", secs);
+		fclose(f);
+		return;
+	}
+
+	time_t now = time(nullptr);
+	fprintf(f, "%sno server frame for %d s (frame %u); the last marks, oldest first (game time, where, entity):\n", ctime(&now), secs, frames);
+	unsigned next = s_watchNext;
+	unsigned count = (next < LS_WATCH_MARKS) ? next : LS_WATCH_MARKS;
+	for (unsigned k = next - count; k != next; k++)
+	{
+		const LsWatchMark &m = s_watchMarks[k % LS_WATCH_MARKS];
+		fprintf(f, "  %10.2f  %-28s %d\n", m.time, m.where ? m.where : "?", m.ent);
+	}
+	fprintf(f, "\n");
+	fclose(f);
+}
+
+// The second thread: once a second, did a frame come? (only reads; writes nothing the game uses)
+static void LsWatchdogLoop()
+{
+	unsigned seen = s_watchFrames;
+	int still = 0;
+	bool told = false;
+	for (;;)
+	{
+#ifdef _WIN32
+		Sleep(1000);
+#else
+		sleep(1);
+#endif
+		unsigned frames = s_watchFrames;
+		int limit = int(ls_watchdog.value);
+		if (frames != seen || !g_bServerActive || limit <= 0)
+		{
+			if (told && frames != seen)
+				LsWatchdogWrite(frames, still, true);
+			seen = frames;
+			still = 0;
+			told = false;
+			continue;
+		}
+
+		if (++still >= limit && !told)
+		{
+			told = true;
+			LsWatchdogWrite(frames, still, false);
+		}
+	}
+}
+
+#ifdef _WIN32
+static DWORD WINAPI LsWatchdogThread(LPVOID)
+{
+	LsWatchdogLoop();
+	return 0;
+}
+#else
+static void *LsWatchdogThread(void *)
+{
+	LsWatchdogLoop();
+	return nullptr;
+}
+#endif
+
+void LsWatchdogStart()
+{
+	static bool started = false;
+	if (started)
+		return;
+
+	started = true;
+	char dir[200];
+	GET_GAME_DIR(dir);
+	Q_snprintf(s_watchPath, sizeof(s_watchPath), "%s/ls_watchdog.log", dir);
+
+#ifdef _WIN32
+	HANDLE h = CreateThread(nullptr, 64 * 1024, LsWatchdogThread, nullptr, 0, nullptr);
+	if (h)
+		CloseHandle(h);
+#else
+	pthread_t thread;
+	pthread_attr_t attr;
+	pthread_attr_init(&attr);
+	pthread_attr_setstacksize(&attr, 64 * 1024);
+	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+	pthread_create(&thread, &attr, LsWatchdogThread, nullptr);
+	pthread_attr_destroy(&attr);
+#endif
+}
+
 void LsCreatures_RegisterCVars()
 {
+	CVAR_REGISTER(&ls_watchdog);
+	LsWatchdogStart();
 	CVAR_REGISTER(&ls_creature_file);
 	CVAR_REGISTER(&ls_creature_precache);
 	CVAR_REGISTER(&ls_creature_max);
@@ -3084,6 +3218,13 @@ void CLsCreature::UpdateFlee()
 
 void CLsCreature::CreatureThink()
 {
+	LsMark("creature think", entindex());
+	CreatureThinkBody();
+	LsMark("creature think end", entindex());
+}
+
+void CLsCreature::CreatureThinkBody()
+{
 	const float upkeepRate = 1.0f / 30.0f;
 	float now = gpGlobals->time;
 
@@ -3228,6 +3369,7 @@ static int LsForEachMatching(const char *arg, Functor func)
 
 void LsCreature_f()
 {
+	LsMark("ls_creature command");
 	const char *cmd = CMD_ARGV(1);
 
 	if (!Q_stricmp(cmd, "spawn"))

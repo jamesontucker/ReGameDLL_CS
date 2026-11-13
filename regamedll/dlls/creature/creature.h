@@ -362,6 +362,7 @@ public:
 
 public:
 	void EXPORT CreatureThink();
+	void CreatureThinkBody();
 
 	// what the framework asks of it (LsNativeCreature forwards here)
 	const LsCreatureType *GetType() const;
@@ -507,3 +508,12 @@ bool LsCreaturesExist();										// cheap: anything registered at all
 int LsCreatureShouldCollide(edict_t *pentTouched, edict_t *pentOther);	// NEW_DLL_FUNCTIONS: creatures pass through each other
 
 extern cvar_t ls_creature_debug;
+
+// Loner-Strike watchdog: where the game DLL was when a server frame stops coming (a hang). The main
+// thread leaves cheap marks (a string and an entity index) in a ring; a second thread notices
+// when frames stop for ls_watchdog seconds and writes the last marks to ls_watchdog.log in the
+// game folder. A last mark that's an "end" means the time went outside the game DLL (the engine
+// or a plugin).
+void LsMark(const char *where, int ent = 0);
+void LsWatchdogFrame();						// StartFrame: a frame came
+void LsWatchdogStart();						// GameDLLInit

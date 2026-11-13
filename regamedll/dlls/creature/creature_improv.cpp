@@ -582,7 +582,10 @@ void CCreatureImprov::UpdatePosition(float deltaT)
 			else
 			{
 				HostagePathCost pathCost;
-				if (m_path.Compute(&GetFeet(), &m_moveGoal, pathCost))
+				LsMark("creature path", m_creature->entindex());
+				bool found = m_path.Compute(&GetFeet(), &m_moveGoal, pathCost);
+				LsMark("creature path end", m_creature->entindex());
+				if (found)
 				{
 					m_repathFails = 0;
 					m_follower.SetPath(&m_path);
