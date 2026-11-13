@@ -141,6 +141,9 @@ struct LsCreatureType
 	float respawn;			// seconds after death it comes back at home (0 = never)
 	float corpseTime;		// seconds the body stays
 	bool moves;				// false: a turret
+	int shotFx;				// ranged shot drawn as: 0 a tracer, 1 an electric zap (vortigaunt), 2 nothing
+	float hops;				// chance a second of a sideways hop while chasing (assassin; 0 = never)
+	bool flank;				// comes at its target from the side, not straight on
 	bool canClimb;			// may path up and down ladders (no built-in type does)
 	int frags;				// score for the killer
 	int money;				// money for the killer

@@ -313,6 +313,7 @@ static int s_typeCount = 0;
 static bool s_typesLoaded = false;
 static int s_precachedModels = 0;
 static int s_precachedSounds = 0;
+static int s_zapSprite = 0;			// sprites/lgtning.spr, precached with the first type that zaps
 
 // A load builds the types here first, then merges them into s_types by name: a type keeps its
 // slot for the whole server run (live creatures hold its index), new names are appended, and a
@@ -680,6 +681,163 @@ static void LsBuiltinTypes()
 	t->sound[LSS_MISS][0] = '\0';
 	Q_strlcpy(t->sound[LSS_PAIN], "headcrab/hc_pain1.wav headcrab/hc_pain2.wav headcrab/hc_pain3.wav | player/pl_pain2.wav");
 	Q_strlcpy(t->sound[LSS_DIE], "headcrab/hc_die1.wav headcrab/hc_die2.wav | player/die1.wav");
+
+	// Half-Life's other monsters (valve/models, the depot every CS install shares)
+	t = LsAddType("vortigaunt");
+	Q_strlcpy(t->display, "Vortigaunt");
+	t->category = LSC_ALIEN;
+	t->health = 70.0f;
+	t->speed = 190.0f;
+	t->walkSpeed = 60.0f;
+	t->attack = LSA_RANGED;			// the electric zap: "zapattack1" by its range-attack activity
+	t->shotFx = 1;
+	t->damage = 12.0f;
+	t->attackRange = 750.0f;
+	t->attackRate = 0.6f;
+	t->attackDelay = 0.8f;				// (the charge-up is part of the swing: it can be shot before it lets go)
+	t->spread = 2.0f;
+	t->bloodColor = BLOOD_COLOR_YELLOW;
+	Q_strlcpy(t->models, "models/islave.mdl models/hostage.mdl");
+	t->fallbackGlowColor = Vector(60, 200, 60);
+	Q_strlcpy(t->sound[LSS_IDLE], "aslave/slv_word1.wav aslave/slv_word2.wav aslave/slv_word3.wav aslave/slv_word4.wav");
+	Q_strlcpy(t->sound[LSS_ALERT], "aslave/slv_alert1.wav aslave/slv_alert3.wav aslave/slv_alert4.wav");
+	Q_strlcpy(t->sound[LSS_ATTACK], "weapons/electro4.wav weapons/electro5.wav weapons/electro6.wav");
+	Q_strlcpy(t->sound[LSS_HIT], "");
+	t->sound[LSS_MISS][0] = '\0';
+	Q_strlcpy(t->sound[LSS_PAIN], "aslave/slv_pain1.wav aslave/slv_pain2.wav | player/pl_pain2.wav");
+	Q_strlcpy(t->sound[LSS_DIE], "aslave/slv_die1.wav aslave/slv_die2.wav | player/die1.wav");
+
+	// (Half-Life's own baby gargantua model isn't in the shared depot: the gargantua, smaller)
+	t = LsAddType("babygarg");
+	Q_strlcpy(t->display, "Baby gargantua");
+	t->category = LSC_BOSS;
+	t->health = 900.0f;
+	t->speed = 210.0f;
+	t->walkSpeed = 80.0f;
+	t->damage = 35.0f;
+	t->attackRange = 72.0f;
+	t->attackRate = 0.8f;
+	t->attackDelay = 0.5f;
+	t->detectRadius = 1600.0f;
+	t->behaviour = LSB_CHASE;
+	t->scale = 0.45f;
+	t->frags = 5;
+	t->bloodColor = BLOOD_COLOR_YELLOW;
+	Q_strlcpy(t->models, "models/babygarg.mdl models/garg.mdl models/hostage.mdl");
+	t->fallbackGlowColor = Vector(160, 0, 160);
+	Q_strlcpy(t->sound[LSS_IDLE], "garg/gar_idle1.wav garg/gar_idle2.wav garg/gar_breathe1.wav");
+	Q_strlcpy(t->sound[LSS_ALERT], "garg/gar_alert1.wav garg/gar_alert2.wav");
+	Q_strlcpy(t->sound[LSS_ATTACK], "garg/gar_attack1.wav garg/gar_attack2.wav");
+	Q_strlcpy(t->sound[LSS_HIT], "garg/gar_stomp1.wav | weapons/knife_hit1.wav");
+	Q_strlcpy(t->sound[LSS_PAIN], "garg/gar_pain1.wav garg/gar_pain2.wav | player/pl_pain2.wav");
+	Q_strlcpy(t->sound[LSS_DIE], "garg/gar_die1.wav | player/die1.wav");
+
+	t = LsAddType("snark");
+	Q_strlcpy(t->display, "Snark");
+	t->health = 6.0f;
+	t->speed = 320.0f;
+	t->walkSpeed = 160.0f;
+	t->damage = 4.0f;
+	t->attackRange = 48.0f;
+	t->attackRate = 2.5f;
+	t->attackDelay = 0.1f;
+	t->detectRadius = 1000.0f;
+	t->detectFov = 360.0f;
+	t->behaviour = LSB_CHASE;
+	t->corpseTime = 0.5f;
+	t->frags = 0;
+	t->bloodColor = BLOOD_COLOR_YELLOW;
+	Q_strlcpy(t->models, "models/w_squeak.mdl models/headcrab.mdl");
+	Q_strlcpy(t->anim[LSAN_IDLE], "idle");			// (w_squeak.mdl has no activities)
+	Q_strlcpy(t->anim[LSAN_WALK], "run");
+	Q_strlcpy(t->anim[LSAN_RUN], "run");
+	Q_strlcpy(t->anim[LSAN_ATTACK], "jump");
+	t->hullMin = Vector(-8, -8, 0);
+	t->hullMax = Vector(8, 8, 30);
+	t->fallbackGlowColor = Vector(200, 60, 60);
+	for (int s = 0; s < LSS_COUNT; s++)
+		t->sound[s][0] = '\0';
+	Q_strlcpy(t->sound[LSS_IDLE], "squeek/sqk_hunt1.wav squeek/sqk_hunt2.wav squeek/sqk_hunt3.wav");
+	Q_strlcpy(t->sound[LSS_ALERT], "squeek/sqk_deploy1.wav");
+	Q_strlcpy(t->sound[LSS_ATTACK], "squeek/sqk_hunt2.wav");
+	Q_strlcpy(t->sound[LSS_DIE], "squeek/sqk_blast1.wav squeek/sqk_die1.wav");
+
+	t = LsAddType("assassin");
+	Q_strlcpy(t->display, "Assassin");
+	t->category = LSC_SPECIAL;
+	t->health = 60.0f;
+	t->speed = 320.0f;
+	t->walkSpeed = 90.0f;
+	t->attack = LSA_RANGED;			// a silenced pistol ("shoot")
+	t->damage = 8.0f;
+	t->attackRange = 650.0f;
+	t->attackRate = 2.0f;
+	t->attackDelay = 0.15f;
+	t->spread = 4.0f;
+	t->hops = 0.35f;
+	t->flank = true;
+	t->fleeHealth = 0.3f;
+	t->detectFov = 200.0f;
+	Q_strlcpy(t->models, "models/hassassin.mdl models/hostage.mdl");
+	t->fallbackGlowColor = Vector(20, 20, 20);
+	for (int s = 0; s < LSS_COUNT; s++)
+		t->sound[s][0] = '\0';
+	Q_strlcpy(t->sound[LSS_ATTACK], "weapons/pl_gun1.wav weapons/pl_gun2.wav | weapons/usp1.wav");
+	Q_strlcpy(t->sound[LSS_PAIN], "player/pl_pain2.wav player/pl_pain4.wav");
+	Q_strlcpy(t->sound[LSS_DIE], "player/die1.wav player/die3.wav");
+
+	t = LsAddType("soldier");
+	Q_strlcpy(t->display, "Soldier");
+	t->category = LSC_SPECIAL;
+	t->health = 110.0f;
+	t->speed = 250.0f;
+	t->walkSpeed = 70.0f;
+	t->attack = LSA_RANGED;			// MP5 bursts
+	t->damage = 6.0f;
+	t->attackRange = 1200.0f;
+	t->attackRate = 4.0f;
+	t->attackDelay = 0.1f;
+	t->spread = 5.0f;
+	t->flank = true;
+	t->fleeHealth = 0.25f;
+	t->bloodColor = BLOOD_COLOR_RED;
+	Q_strlcpy(t->models, "models/hgrunt.mdl models/player/gign/gign.mdl");
+	Q_strlcpy(t->anim[LSAN_ATTACK], "standing_mp5");
+	t->fallbackGlowColor = Vector(0, 0, 0);
+	t->fallbackGlow = false;
+	for (int s = 0; s < LSS_COUNT; s++)
+		t->sound[s][0] = '\0';
+	Q_strlcpy(t->sound[LSS_IDLE], "hgrunt/gr_idle1.wav hgrunt/gr_idle2.wav hgrunt/gr_idle3.wav");
+	Q_strlcpy(t->sound[LSS_ALERT], "hgrunt/gr_alert1.wav");
+	Q_strlcpy(t->sound[LSS_ATTACK], "hgrunt/gr_mgun1.wav hgrunt/gr_mgun2.wav hgrunt/gr_mgun3.wav | weapons/mp5-1.wav");
+	Q_strlcpy(t->sound[LSS_PAIN], "hgrunt/gr_pain1.wav hgrunt/gr_pain2.wav hgrunt/gr_pain3.wav | player/pl_pain2.wav");
+	Q_strlcpy(t->sound[LSS_DIE], "hgrunt/gr_die1.wav hgrunt/gr_die2.wav hgrunt/gr_die3.wav | player/die1.wav");
+
+	t = LsAddType("gonarch");
+	Q_strlcpy(t->display, "Gonarch");
+	t->category = LSC_BOSS;
+	t->health = 3500.0f;
+	t->speed = 190.0f;
+	t->walkSpeed = 90.0f;
+	t->damage = 50.0f;
+	t->attackRange = 96.0f;
+	t->attackRate = 0.7f;
+	t->attackDelay = 0.6f;
+	t->detectRadius = 2000.0f;
+	t->behaviour = LSB_CHASE;
+	t->scale = 0.55f;					// (she fills a room at 1; the hull stays player-sized)
+	t->frags = 10;
+	t->bloodColor = BLOOD_COLOR_YELLOW;
+	Q_strlcpy(t->models, "models/big_mom.mdl models/hostage.mdl");
+	t->fallbackGlowColor = Vector(200, 160, 40);
+	for (int s = 0; s < LSS_COUNT; s++)
+		t->sound[s][0] = '\0';
+	Q_strlcpy(t->sound[LSS_IDLE], "gonarch/gon_sack1.wav gonarch/gon_sack2.wav gonarch/gon_sack3.wav");
+	Q_strlcpy(t->sound[LSS_ALERT], "gonarch/gon_alert1.wav gonarch/gon_alert2.wav gonarch/gon_alert3.wav");
+	Q_strlcpy(t->sound[LSS_ATTACK], "gonarch/gon_attack1.wav gonarch/gon_attack2.wav gonarch/gon_attack3.wav");
+	Q_strlcpy(t->sound[LSS_HIT], "gonarch/gon_step1.wav | weapons/knife_hit1.wav");
+	Q_strlcpy(t->sound[LSS_PAIN], "gonarch/gon_pain2.wav gonarch/gon_pain4.wav gonarch/gon_pain5.wav | player/pl_pain2.wav");
+	Q_strlcpy(t->sound[LSS_DIE], "gonarch/gon_die1.wav | player/die1.wav");
 }
 
 // Picks the first group of a "a b | c d" list that has a file present (sounds), keeps up to max
@@ -769,6 +927,9 @@ static void LsSetTypeKey(LsCreatureType *t, const char *key, const char *value)
 	else if (!Q_stricmp(key, "corpse_time")) t->corpseTime = LsNum(value, 0.0f, 120.0f, t->corpseTime);
 	else if (!Q_stricmp(key, "moves")) t->moves = Q_atoi(value) != 0;
 	else if (!Q_stricmp(key, "can_climb")) t->canClimb = Q_atoi(value) != 0;
+	else if (!Q_stricmp(key, "shot_fx")) t->shotFx = !Q_stricmp(value, "zap") ? 1 : !Q_stricmp(value, "none") ? 2 : 0;
+	else if (!Q_stricmp(key, "hops")) t->hops = LsNum(value, 0.0f, 1.0f, t->hops);
+	else if (!Q_stricmp(key, "flank")) t->flank = Q_atoi(value) != 0;
 	else if (!Q_stricmp(key, "frags")) t->frags = clamp(Q_atoi(value), -100, 100);
 	else if (!Q_stricmp(key, "money")) t->money = clamp(Q_atoi(value), -16000, 16000);
 	else if (!Q_stricmp(key, "model") || !Q_stricmp(key, "models")) Q_strlcpy(t->models, value);
@@ -1049,6 +1210,13 @@ static const LsKnownModel s_knownModels[] =
 	{ "models/sentry.mdl", 17744, 0x0027092du, 6 },
 	{ "models/barney.mdl", 574100, 0x08b4d0d6u, 71 },
 	{ "models/gman.mdl", 227952, 0x6ac90dbcu, 14 },
+	{ "models/islave.mdl", 145312, 0x1b228735u, 30 },
+	{ "models/hassassin.mdl", 257380, 0xf9f7b995u, 17 },
+	{ "models/hgrunt.mdl", 608952, 0x7d6126f6u, 86 },			// (HL25: 82 -> 86 sequences)
+	{ "models/big_mom.mdl", 111544, 0xddd12460u, 20 },
+	{ "models/w_squeak.mdl", 12360, 0x1437f971u, 4 },
+	{ "models/controller.mdl", 187652, 0xff9d759cu, 19 },
+	{ "models/barnacle.mdl", 41752, 0x94c9ecf3u, 7 },
 };
 
 // A loud word when the server's copy of a Half-Life model isn't Steam's current one: players
@@ -1149,6 +1317,13 @@ bool LsCreaturePrecacheType(int index)
 	t->iszName = ALLOC_STRING(t->name);
 	t->precached = true;
 
+	// (the zap's beam: one sprite for every type that uses it)
+	if (t->shotFx == 1 && !s_zapSprite)
+	{
+		s_zapSprite = PRECACHE_MODEL("sprites/lgtning.spr");
+		s_precachedModels++;
+	}
+
 	if (ls_creature_debug.value > 0.0f)
 		CONSOLE_ECHO("ls_creature: precached '%s' (%s%s)\n", t->name, t->model, t->usingFallback ? ", stand-in" : "");
 
@@ -1165,6 +1340,7 @@ bool LsCreaturePrecacheType(int index)
 void LsCreaturesPrecache()
 {
 	s_mapRunning = false;
+	s_zapSprite = 0;
 	s_precachedModels = 0;
 	s_precachedSounds = 0;
 
@@ -3146,11 +3322,32 @@ void CLsCreature::UpdateChase()
 
 	m_improv->Run();
 	m_improv->LookAt(m_targetLastSeen);
-	if (now >= m_nextRepath || (m_targetLastSeen - m_lastMoveTo).IsLengthGreaterThan(96.0f))
+
+	// an assassin's hop: now and then a jump to one side while it closes in
+	if (t->hops > 0.0f && dist > 150.0f && (pev->flags & FL_ONGROUND) && RANDOM_FLOAT(0.0f, 1.0f) < t->hops * 0.1f && m_improv->Jump())
+	{
+		float side = RANDOM_LONG(0, 1) ? 90.0f : -90.0f;
+		float yaw = UTIL_VecToYaw(m_targetLastSeen - pev->origin) + side;
+		m_improv->ApplyForce(Vector(BotCOS(yaw), BotSIN(yaw), 0.0f) * 220.0f);
+	}
+
+	// a flanker heads for a spot beside the target (its own side, kept) until it's close
+	Vector goal = m_targetLastSeen;
+	if (t->flank && dist > 350.0f)
+	{
+		float yaw = UTIL_VecToYaw(m_targetLastSeen - pev->origin) + ((entindex() & 1) ? 70.0f : -70.0f);
+		Vector beside = m_targetLastSeen + Vector(BotCOS(yaw), BotSIN(yaw), 0.0f) * Q_min(dist * 0.5f, 300.0f);
+		TraceResult tr;
+		UTIL_TraceLine(m_targetLastSeen + Vector(0, 0, 36), beside + Vector(0, 0, 36), ignore_monsters, ENT(pev), &tr);
+		if (tr.flFraction > 0.8f)
+			goal = beside;
+	}
+
+	if (now >= m_nextRepath || (goal - m_lastMoveTo).IsLengthGreaterThan(96.0f))
 	{
 		m_nextRepath = now + RANDOM_FLOAT(0.4f, 0.7f);
-		m_lastMoveTo = m_targetLastSeen;
-		m_improv->MoveTo(m_targetLastSeen);
+		m_lastMoveTo = goal;
+		m_improv->MoveTo(goal);
 	}
 }
 
@@ -3232,15 +3429,42 @@ void CLsCreature::LandAttack()
 			PlaySound(LSS_HIT);
 		}
 
-		MESSAGE_BEGIN(MSG_PAS, SVC_TEMPENTITY, eyes);
-			WRITE_BYTE(TE_TRACER);
-			WRITE_COORD(eyes.x);
-			WRITE_COORD(eyes.y);
-			WRITE_COORD(eyes.z);
-			WRITE_COORD(tr.vecEndPos.x);
-			WRITE_COORD(tr.vecEndPos.y);
-			WRITE_COORD(tr.vecEndPos.z);
-		MESSAGE_END();
+		if (t->shotFx == 1 && s_zapSprite)
+		{
+			// an electric arc, the vortigaunt's
+			MESSAGE_BEGIN(MSG_PAS, SVC_TEMPENTITY, eyes);
+				WRITE_BYTE(TE_BEAMPOINTS);
+				WRITE_COORD(eyes.x);
+				WRITE_COORD(eyes.y);
+				WRITE_COORD(eyes.z);
+				WRITE_COORD(tr.vecEndPos.x);
+				WRITE_COORD(tr.vecEndPos.y);
+				WRITE_COORD(tr.vecEndPos.z);
+				WRITE_SHORT(s_zapSprite);
+				WRITE_BYTE(0);		// start frame
+				WRITE_BYTE(10);		// frame rate
+				WRITE_BYTE(2);		// life (0.2 s)
+				WRITE_BYTE(40);		// width
+				WRITE_BYTE(60);		// noise
+				WRITE_BYTE(96);		// r g b: the vortigaunt's green
+				WRITE_BYTE(255);
+				WRITE_BYTE(128);
+				WRITE_BYTE(200);	// brightness
+				WRITE_BYTE(30);		// scroll
+			MESSAGE_END();
+		}
+		else if (t->shotFx == 0)
+		{
+			MESSAGE_BEGIN(MSG_PAS, SVC_TEMPENTITY, eyes);
+				WRITE_BYTE(TE_TRACER);
+				WRITE_COORD(eyes.x);
+				WRITE_COORD(eyes.y);
+				WRITE_COORD(eyes.z);
+				WRITE_COORD(tr.vecEndPos.x);
+				WRITE_COORD(tr.vecEndPos.y);
+				WRITE_COORD(tr.vecEndPos.z);
+			MESSAGE_END();
+		}
 	}
 }
 
