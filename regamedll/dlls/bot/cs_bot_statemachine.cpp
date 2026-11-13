@@ -310,6 +310,10 @@ void CCSBot::Attack(CBasePlayer *victim)
 	if (!victim)
 		return;
 
+	// Loner-Strike: a mode's peace (a loot-up): no fights, whatever started one
+	if (LsModePeace())
+		return;
+
 	// zombies never attack
 	if (cv_bot_zombie.value != 0.0f)
 		return;

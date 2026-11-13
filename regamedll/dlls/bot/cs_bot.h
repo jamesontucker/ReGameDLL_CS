@@ -147,6 +147,7 @@ private:
 	int m_retries;
 	bool m_doneBuying;
 	bool m_lsEquippedDone = false;				// Loner-Strike: the gun out once in freeze time
+	float m_lsPastFreezeAt = -1.0f;				// Loner-Strike: first think in the buy state past the freeze time
 	bool m_buyDefuseKit;
 	bool m_buyGrenade;
 	bool m_buyShield;
@@ -1719,6 +1720,7 @@ public:
 	void LsModeTick();								// each think after a person's order (cs_bot_update.cpp)
 	void LsModeInside(unsigned int *avoidMask) const;	// the avoid zones it's standing in (paths may leave them)
 	void LsModePostUpdate();						// after the state machine: a stand-still or step a goal asked for
+	bool LsModePeace();								// a mode's peace (a loot-up), or the moment after it: no player enemies
 	const Vector *LsModeSpot() const;				// the spot it holds for a station (teammates pick others)
 	int LsModeGoalNow() const { return m_lsModeGoalOn >= 0 ? m_lsModeGoal[m_lsModeGoalOn].kind : 0; }	// what it's on (trace)
 	const LsModeGoal &LsModeGoalAt(int i) const { return m_lsModeGoal[i]; }
@@ -1752,6 +1754,8 @@ private:
 	bool m_lsModeStrafeLeft = false;
 	float m_lsModeBlockedSince = -1.0f;				// its mode enemy's been behind something bullets stop since
 	float m_lsModeAngleAt = 0.0f;					// next move for another angle
+	void LsModePeaceTick();
+	float m_lsModePeaceMoveAt = 0.0f;				// next "giving them room" check
 	int m_lsModePressed = 0;						// buttons the mode pressed this think (1 fire, 2 use, 4 reload)
 	float m_lsModeHideState = -1.0f;				// the station's hide began then (its state time)
 	Vector m_lsModeSpot;							// ...at this spot
@@ -1917,6 +1921,7 @@ void Bot_LsModeCommand();				// ls_mode (cs_bot_ls_modes.cpp)
 void LsModeMapStart();					// a new map: every mode fact forgotten
 void LsModePlayerGone(int index);		// a player left: their role and ties forgotten (client.cpp)
 bool LsModeCosts();						// any avoid, block or zone set (path costs to add)
+bool LsModeNoBuy();						// a mode said there's nothing to buy (ls_mode nobuy 1)
 float LsModeAreaCost(const CNavArea *area, unsigned int insideMask);	// 1 plain, more inside an avoid or outside the zone, -1 never
 
 // Inlines

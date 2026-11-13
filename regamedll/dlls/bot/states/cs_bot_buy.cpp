@@ -52,6 +52,7 @@ void BuyState::OnEnter(CCSBot *me)
 	m_prefIndex = 0;
 
 	m_doneBuying = false;
+	m_lsPastFreezeAt = -1.0f;
 	m_lsEquippedDone = false;
 	m_isInitialDelay = true;
 
@@ -241,6 +242,25 @@ inline WeaponType GetWeaponType(const char *alias)
 
 void BuyState::OnUpdate(CCSBot *me)
 {
+	// Loner-Strike: no waiting in the shop when there's nothing to be had: a mode said so
+	// (ls_mode nobuy 1: Battle Royale's knife start), or it's still here 8 s past the freeze time
+	// - a bot that can buy is done a few seconds after it; one that isn't never would be
+	if (LsModeNoBuy())
+	{
+		me->Idle();
+		return;
+	}
+	if (!(CSGameRules()->IsMultiplayer() && CSGameRules()->IsFreezePeriod()))
+	{
+		if (m_lsPastFreezeAt < 0.0f)
+			m_lsPastFreezeAt = gpGlobals->time;
+		else if (gpGlobals->time - m_lsPastFreezeAt > 8.0f)
+		{
+			me->Idle();
+			return;
+		}
+	}
+
 	// wait for a Navigation Mesh
 	if (!TheNavAreaList.size())
 		return;
