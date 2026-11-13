@@ -275,7 +275,16 @@ static void LsBuiltinTypes()
 	t->attackRate = 1.6f;
 	t->attackDelay = 0.25f;
 	t->behaviour = LSB_CHASE;
+	t->bloodColor = BLOOD_COLOR_YELLOW;
+	Q_strlcpy(t->models, "models/houndeye.mdl models/hostage.mdl");	// (has a real run; the HL zombie only walks)
+	t->hullMin = Vector(-16, -16, 0);
+	t->hullMax = Vector(16, 16, 36);
 	t->fallbackGlowColor = Vector(160, 160, 20);
+	Q_strlcpy(t->sound[LSS_IDLE], "houndeye/he_idle1.wav houndeye/he_idle2.wav houndeye/he_idle3.wav");
+	Q_strlcpy(t->sound[LSS_ALERT], "houndeye/he_alert1.wav houndeye/he_alert2.wav houndeye/he_alert3.wav");
+	Q_strlcpy(t->sound[LSS_ATTACK], "houndeye/he_attack1.wav houndeye/he_attack3.wav");
+	Q_strlcpy(t->sound[LSS_PAIN], "houndeye/he_pain1.wav houndeye/he_pain3.wav | player/pl_pain2.wav");
+	Q_strlcpy(t->sound[LSS_DIE], "houndeye/he_die1.wav houndeye/he_die2.wav | player/die1.wav");
 
 	t = LsAddType("brute");
 	Q_strlcpy(t->display, "Brute");
@@ -286,10 +295,16 @@ static void LsBuiltinTypes()
 	t->attackRange = 72.0f;
 	t->attackRate = 0.7f;
 	t->attackDelay = 0.6f;
-	t->scale = 1.25f;
+	t->category = LSC_ALIEN;
 	t->frags = 3;
-	t->glow = true;
-	t->glowColor = Vector(120, 20, 20);
+	t->bloodColor = BLOOD_COLOR_YELLOW;
+	Q_strlcpy(t->models, "models/agrunt.mdl models/hostage.mdl");	// the alien grunt: walk, run, two swings
+	t->fallbackGlowColor = Vector(120, 20, 20);
+	Q_strlcpy(t->sound[LSS_IDLE], "agrunt/ag_idle1.wav agrunt/ag_idle2.wav agrunt/ag_idle3.wav agrunt/ag_idle4.wav");
+	Q_strlcpy(t->sound[LSS_ALERT], "agrunt/ag_alert1.wav agrunt/ag_alert3.wav agrunt/ag_alert4.wav");
+	Q_strlcpy(t->sound[LSS_ATTACK], "agrunt/ag_attack1.wav agrunt/ag_attack2.wav agrunt/ag_attack3.wav");
+	Q_strlcpy(t->sound[LSS_PAIN], "agrunt/ag_pain1.wav agrunt/ag_pain2.wav agrunt/ag_pain3.wav | player/pl_pain2.wav");
+	Q_strlcpy(t->sound[LSS_DIE], "agrunt/ag_die1.wav agrunt/ag_die4.wav | player/die1.wav");
 
 	t = LsAddType("spitter");
 	Q_strlcpy(t->display, "Spitter");
@@ -380,10 +395,40 @@ static void LsBuiltinTypes()
 	t->attackDelay = 0.7f;
 	t->detectRadius = 2000.0f;
 	t->behaviour = LSB_CHASE;
-	t->scale = 1.6f;
+	t->scale = 0.7f;					// (the gargantua is twice a player's height at 1; the hull stays player-sized)
 	t->frags = 10;
-	t->glow = true;
-	t->glowColor = Vector(160, 0, 160);
+	t->bloodColor = BLOOD_COLOR_YELLOW;
+	Q_strlcpy(t->models, "models/garg.mdl models/hostage.mdl");
+	t->fallbackGlowColor = Vector(160, 0, 160);
+	Q_strlcpy(t->sound[LSS_IDLE], "garg/gar_idle1.wav garg/gar_idle2.wav garg/gar_idle3.wav garg/gar_breathe1.wav");
+	Q_strlcpy(t->sound[LSS_ALERT], "garg/gar_alert1.wav garg/gar_alert2.wav garg/gar_alert3.wav");
+	Q_strlcpy(t->sound[LSS_ATTACK], "garg/gar_attack1.wav garg/gar_attack2.wav garg/gar_attack3.wav");
+	Q_strlcpy(t->sound[LSS_HIT], "garg/gar_stomp1.wav | weapons/knife_hit1.wav");
+	Q_strlcpy(t->sound[LSS_PAIN], "garg/gar_pain1.wav garg/gar_pain2.wav garg/gar_pain3.wav | player/pl_pain2.wav");
+	Q_strlcpy(t->sound[LSS_DIE], "garg/gar_die1.wav garg/gar_die2.wav | player/die1.wav");
+
+	t = LsAddType("headcrab");
+	Q_strlcpy(t->display, "Headcrab");
+	t->health = 25.0f;
+	t->speed = 200.0f;
+	t->walkSpeed = 60.0f;
+	t->damage = 8.0f;
+	t->attackRange = 72.0f;
+	t->attackDelay = 0.3f;
+	t->detectRadius = 800.0f;
+	t->bloodColor = BLOOD_COLOR_YELLOW;
+	Q_strlcpy(t->models, "models/headcrab.mdl models/hostage.mdl");
+	Q_strlcpy(t->anim[LSAN_ATTACK], "jump");	// (its leap is a range attack in the model; MELEE_ATTACK2 is a looping turn)
+	t->hullMin = Vector(-16, -16, 0);
+	t->hullMax = Vector(16, 16, 36);
+	t->fallbackGlowColor = Vector(200, 200, 120);
+	Q_strlcpy(t->sound[LSS_IDLE], "headcrab/hc_idle1.wav headcrab/hc_idle2.wav headcrab/hc_idle3.wav headcrab/hc_idle4.wav headcrab/hc_idle5.wav");
+	Q_strlcpy(t->sound[LSS_ALERT], "headcrab/hc_alert1.wav headcrab/hc_alert2.wav");
+	Q_strlcpy(t->sound[LSS_ATTACK], "headcrab/hc_attack1.wav headcrab/hc_attack2.wav headcrab/hc_attack3.wav");
+	Q_strlcpy(t->sound[LSS_HIT], "headcrab/hc_headbite.wav | weapons/knife_hit1.wav");
+	t->sound[LSS_MISS][0] = '\0';
+	Q_strlcpy(t->sound[LSS_PAIN], "headcrab/hc_pain1.wav headcrab/hc_pain2.wav headcrab/hc_pain3.wav | player/pl_pain2.wav");
+	Q_strlcpy(t->sound[LSS_DIE], "headcrab/hc_die1.wav headcrab/hc_die2.wav | player/die1.wav");
 }
 
 // Picks the first group of a "a b | c d" list that has a file present (sounds), keeps up to max
@@ -728,6 +773,73 @@ LsCreatureType *LsCreatureTypeAt(int index)
 	return (index >= 0 && index < s_typeCount) ? &s_types[index] : nullptr;
 }
 
+// Half-Life's models as current Steam has them (after the 25th anniversary update). The
+// server picks a sequence by its number in its own copy, and each player's game draws that
+// number from its copy: zombie.mdl gained a sequence near the start in that update, so an older
+// server copy (HLDS from SteamCMD still has it) made "walk" the game's "attack2" and "attack1" its
+// "falling". Size, CRC32 and sequence count of each file (Steam, 2026-11).
+struct LsKnownModel
+{
+	const char *path;
+	int size;
+	unsigned int crc;
+	int sequences;
+};
+
+static const LsKnownModel s_knownModels[] =
+{
+	{ "models/zombie.mdl", 647420, 0x1fb1b858u, 49 },
+	{ "models/bullsquid.mdl", 333568, 0x72f5f488u, 24 },
+	{ "models/houndeye.mdl", 116196, 0xca66883fu, 31 },
+	{ "models/agrunt.mdl", 152320, 0x51974987u, 32 },
+	{ "models/garg.mdl", 182172, 0x8eae0dc0u, 22 },
+	{ "models/headcrab.mdl", 70024, 0xa226e829u, 21 },
+	{ "models/sentry.mdl", 17744, 0x0027092du, 6 },
+	{ "models/barney.mdl", 574100, 0x08b4d0d6u, 71 },
+	{ "models/gman.mdl", 227952, 0x6ac90dbcu, 14 },
+};
+
+// A loud word when the server's copy of a Half-Life model isn't Steam's current one: players
+// would see the wrong animations (the sequences are numbered differently)
+static void LsCheckModelVersion(const char *model)
+{
+	const LsKnownModel *known = nullptr;
+	for (size_t i = 0; i < ARRAYSIZE(s_knownModels); i++)
+	{
+		if (!Q_stricmp(model, s_knownModels[i].path))
+			known = &s_knownModels[i];
+	}
+
+	if (!known)
+		return;
+
+	int length = 0;
+	byte *data = LOAD_FILE_FOR_ME((char *)model, &length);
+	if (!data)
+		return;
+
+	int sequences = (length >= int(sizeof(studiohdr_t))) ? ((studiohdr_t *)data)->numseq : -1;
+	CRC32_t crc;
+	CRC32_INIT(&crc);
+	CRC32_PROCESS_BUFFER(&crc, data, length);
+	crc = CRC32_FINAL(crc);
+	FREE_FILE(data);
+
+	if (length == known->size && sequences == known->sequences && crc == known->crc)
+		return;
+
+	if (length != known->size || sequences != known->sequences)
+	{
+		CONSOLE_ECHO("ls_creature: WARNING: this server's %s isn't the one current Half-Life games have (%d sequences, %d bytes; Steam's has %d, %d).\n"
+			"ls_creature: WARNING: players will see the wrong animations. Copy valve/%s from an up-to-date Half-Life (the Loner-Strike app does it at each start).\n",
+			model, sequences, length, known->sequences, known->size, model);
+	}
+	else if (ls_creature_debug.value > 0.0f)
+	{
+		CONSOLE_ECHO("ls_creature: %s differs from Steam's copy (CRC) but has the same layout\n", model);
+	}
+}
+
 // Precache one type's model and sounds: only while the map loads (the engine refuses later)
 bool LsCreaturePrecacheType(int index)
 {
@@ -763,6 +875,8 @@ bool LsCreaturePrecacheType(int index)
 		CONSOLE_ECHO("ls_creature: no model found for '%s' (%s)\n", t->name, t->models);
 		return false;
 	}
+
+	LsCheckModelVersion(t->model);
 
 	// (the engine keeps the pointer it's given: an engine string, never our arrays a reload rewrites)
 	t->iszModel = ALLOC_STRING(t->model);
