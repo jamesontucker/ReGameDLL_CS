@@ -382,10 +382,12 @@ bool CCSBot::LsModeLetsBe(CBasePlayer *pPlayer)
 		bool closing = DotProduct(pPlayer->pev->velocity, dir) > 100.0f;
 		threat = facing && (d < 100.0f || closing);
 	}
+	// (that one is a fight - the rest are still left be: ending the gearing up here turned it on
+	// whoever was nearest, and set off a chain)
 	if (threat)
 	{
-		m_lsModeGearDone = true;
-		LsWhy("mode gearing up: someone came at it");
+		if (m_lsWhy == nullptr || Q_strcmp(m_lsWhy, "mode gearing up: someone came at it"))
+			LsWhy("mode gearing up: someone came at it");
 		return false;
 	}
 	return true;
