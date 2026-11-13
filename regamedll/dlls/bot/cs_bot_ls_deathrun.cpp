@@ -733,6 +733,65 @@ static void Build()
 	}
 
 	DeadlyHurts(s_hurts);
+
+	// gaps a running jump clears, linked on this nav too (a nav learned without course learning -
+	// or by hand - has none): from every edge of every area, every step along it, the jump check
+	// the learner uses; a landing on another area not linked yet gets a one-way link
+	{
+		s_learnHurts = s_hurts;
+		int made = 0;
+		for (size_t i = 0; i < n && made < 2000; i++)
+		{
+			CNavArea *area = s_areas[i];
+			if (DeadlyAt(s_hurts, *area->GetCenter()))
+				continue;
+			const Extent *e = area->GetExtent();
+			for (int dir = 0; dir < NUM_DIRECTIONS; dir++)
+			{
+				bool ns = dir == NORTH || dir == SOUTH;
+				// (a run-up: the area's depth that way)
+				float depth = ns ? e->hi.y - e->lo.y : e->hi.x - e->lo.x;
+				if (depth < 2.0f * GenerationStepSize - 1.0f)
+					continue;
+				float from = ns ? e->lo.x : e->lo.y, to = ns ? e->hi.x : e->hi.y;
+				CNavArea *lastTo = nullptr;
+				for (float t = from + 0.5f * GenerationStepSize; t < to; t += GenerationStepSize)
+				{
+					Vector p;
+					p.x = ns ? t : (dir == EAST ? e->hi.x : e->lo.x) - (dir == EAST ? 1.0f : -1.0f) * 0.5f * GenerationStepSize;
+					p.y = ns ? (dir == SOUTH ? e->hi.y : e->lo.y) - (dir == SOUTH ? 1.0f : -1.0f) * 0.5f * GenerationStepSize : t;
+					p.z = area->GetZ(&p);
+					Vector land, nrm;
+					// (floor just past the edge: no gap here)
+					Vector2D dv;
+					DirectionToVector2D((NavDirType)dir, &dv);
+					float gz;
+					if (GroundBelow(Vector(p.x + dv.x * GenerationStepSize, p.y + dv.y * GenerationStepSize, p.z + 24.0f), 84.0f, &gz, &nrm))
+						continue;
+					if (!GapJumpAt(p, dir, true, &land, &nrm, false))
+						continue;
+					Vector at = land + Vector(0, 0, 8.0f);
+					CNavArea *dest = TheNavAreaGrid.GetNavArea(&at);
+					if (!dest || dest == area || dest == lastTo || area->IsConnected(dest, NUM_DIRECTIONS) || DeadlyAt(s_hurts, *dest->GetCenter()))
+						continue;
+					// (only across a real gap: the areas don't touch)
+					const Extent *f = dest->GetExtent();
+					float sep = Q_max(Q_max(f->lo.x - e->hi.x, e->lo.x - f->hi.x), Q_max(f->lo.y - e->hi.y, e->lo.y - f->hi.y));
+					if (sep <= 10.0f)
+						continue;
+					area->ConnectTo(dest, (NavDirType)dir);
+					int j = Index(dest);
+					if (j >= 0)
+						s_out[i].push_back(j);
+					lastTo = dest;
+					made++;
+				}
+			}
+		}
+		if (made)
+			CONSOLE_ECHO("Loner-Strike deathrun: %d gap links made on this nav\n", made);
+	}
+
 	s_deadly.assign(n, 0);
 	for (size_t i = 0; i < n; i++)
 		s_deadly[i] = DeadlyAt(s_hurts, *s_areas[i]->GetCenter()) ? 1 : 0;
