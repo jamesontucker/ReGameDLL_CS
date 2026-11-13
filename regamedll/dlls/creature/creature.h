@@ -280,6 +280,7 @@ public:
 	const Vector &GetMoveGoal() const { return m_moveGoal; }
 	bool HasPath() const { return m_path.IsValid(); }
 	bool HasGoal() const { return m_hasGoal; }
+	void ForceRepath() { m_path.Invalidate(); m_repathFails = 0; m_repathTimer.Invalidate(); m_directStuckTimer.Invalidate(); }
 	bool IsStuck() const { return m_follower.IsStuck() || (m_directStuckTimer.HasStarted() && m_directStuckTimer.GetElapsedTime() > 1.5f); }
 	void SetMoveAngle(float angle) { m_moveAngle = angle; }
 
@@ -402,7 +403,13 @@ private:
 	bool PickWanderSpot(Vector *spot, float radius) const;
 	bool PickFleeSpot(Vector *spot, const Vector &from) const;
 	CBaseEntity *NextPatrolCorner(CBaseEntity *pFrom) const;
-	void SetAnim(int anim);
+	void SetAnim(int anim, bool restart = false);
+	void ResolveAnims();			// idle/walk/run sequences and their ground speeds, once per model
+	int PickSequence(int anim);
+	void UpdateStuck();				// no headway: jump, repath, then back to an earlier spot unseen
+	bool SeenByAnyone(const Vector &spot) const;
+	bool FreeSpot(const Vector &spot) const;
+	bool FindFreeSpot(Vector *spot) const;
 	void PlaySound(int kind, float volume = VOL_NORM);
 	void MakeNoise(float range);
 	float Dist2D(CBaseEntity *pOther) const { return (pOther->pev->origin - pev->origin).Make2D().Length(); }
@@ -455,6 +462,18 @@ private:
 	float m_flinchUntil;
 	float m_deadAt;
 	int m_anim;
+	int m_seq[3];				// LSAN_IDLE, LSAN_WALK, LSAN_RUN
+	float m_seqGround[3];		// their linear speeds (0 = in place)
+	bool m_hasRun;
+	bool m_animMoving;
+	float m_attackFramerate;	// the swing played to fit the attack rate
+	float m_attackAnimEnd;
+	Vector m_progressPos;		// stuck watch
+	float m_nextProgress;
+	int m_stuckSecs;
+	Vector m_crumbs[4];			// spots it walked through lately (where it goes back to when stuck)
+	int m_crumbCount;
+	int m_crumbNext;
 	Vector m_noisePos;
 	float m_noiseAt;
 	float m_noiseRange;
@@ -485,5 +504,6 @@ int LsCreatureCount();											// registered, alive or dead (iterate with LsCr
 ILsCreature *LsCreatureAt(int i);								// null for a gone one
 ILsCreature *LsCreatureOf(CBaseEntity *pEntity);				// null when it isn't a creature
 bool LsCreaturesExist();										// cheap: anything registered at all
+int LsCreatureShouldCollide(edict_t *pentTouched, edict_t *pentOther);	// NEW_DLL_FUNCTIONS: creatures pass through each other
 
 extern cvar_t ls_creature_debug;

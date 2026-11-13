@@ -305,8 +305,8 @@ static void LsBuiltinTypes()
 	t->fleeHealth = 0.3f;
 	t->bloodColor = BLOOD_COLOR_YELLOW;
 	Q_strlcpy(t->models, "models/bullsquid.mdl models/hostage.mdl");
-	t->hullMin = Vector(-24, -24, 0);
-	t->hullMax = Vector(24, 24, 40);
+	t->hullMin = Vector(-16, -16, 0);		// (the engine moves anything wider than 36 as a 64x64x64 box: stuck in doors)
+	t->hullMax = Vector(16, 16, 36);
 	t->fallbackGlowColor = Vector(120, 200, 40);
 	Q_strlcpy(t->sound[LSS_IDLE], "bullchicken/bc_idle1.wav bullchicken/bc_idle2.wav bullchicken/bc_idle3.wav");
 	Q_strlcpy(t->sound[LSS_ALERT], "bullchicken/bc_idle4.wav bullchicken/bc_idle5.wav");
@@ -575,6 +575,16 @@ static void LsCheckHull(LsCreatureType *t)
 			t->hullMin.x, t->hullMin.y, t->hullMin.z, t->hullMax.x, t->hullMax.y, t->hullMax.z);
 		t->hullMin = Vector(-16, -16, 0);
 		t->hullMax = Vector(16, 16, 72);
+	}
+
+	// the engine moves monsters with the player hulls by size: up to 36 wide it's the standing
+	// (32x32x72) or the crouched (32x32x36) one, wider is the 64x64x64 "large" hull that doesn't
+	// fit through doors the nav mesh (made for players) leads through - so never wider than a player
+	if (t->hullMin.x < -16.0f || t->hullMin.y < -16.0f || t->hullMax.x > 16.0f || t->hullMax.y > 16.0f)
+	{
+		CONSOLE_ECHO("ls_creature: type '%s' is wider than a player; its hull is narrowed to 32 (the nav mesh is for player-sized hulls)\n", t->name);
+		t->hullMin.x = t->hullMin.y = -16.0f;
+		t->hullMax.x = t->hullMax.y = 16.0f;
 	}
 }
 
@@ -1464,6 +1474,13 @@ void CLsCreature::Setup()
 	m_nextIdleSound = gpGlobals->time + RANDOM_FLOAT(4.0f, 12.0f);
 	m_painSoundAt = 0.0f;
 	m_flinchUntil = 0.0f;
+	m_animMoving = false;
+	m_attackFramerate = 1.0f;
+	m_attackAnimEnd = 0.0f;
+	m_stuckSecs = 0;
+	m_crumbCount = 0;
+	m_crumbNext = 0;
+	m_nextProgress = gpGlobals->time + 1.0f;
 	m_deadAt = 0.0f;
 	m_anim = -1;
 	m_noiseAt = -1000.0f;
@@ -1472,10 +1489,21 @@ void CLsCreature::Setup()
 	m_improv->OnReset();
 	m_improv->SetSpeeds(m_walkSpeed, m_runSpeed);
 
+	// (a spot inside a player or a wall - a wave spawner's random point - moves to a free one nearby)
+	if (!FreeSpot(pev->origin))
+	{
+		Vector spot = pev->origin;
+		if (FindFreeSpot(&spot))
+			UTIL_SetOrigin(pev, spot);
+	}
+
 	if (t->moves)
 		DROP_TO_FLOOR(edict());
 
-	SetAnim(LSAN_IDLE);
+	m_progressPos = pev->origin;
+	ResolveAnims();
+	m_anim = -1;
+	SetAnim(LSAN_IDLE, true);
 
 	SetThink(&CLsCreature::CreatureThink);
 	SetTouch(nullptr);
@@ -1531,6 +1559,175 @@ void CLsCreature::Touch(CBaseEntity *pOther)
 		m_improv->OnTouch(pOther);
 }
 
+// Creatures don't block each other (a horde squeezes through a door; one stopped in a choke
+// doesn't jam the rest, and two never end up stuck inside each other): the engine asks this for
+// every collision and trace. No creatures: always yes, as stock
+int LsCreatureShouldCollide(edict_t *pentTouched, edict_t *pentOther)
+{
+	if (!s_listLive || !pentTouched || !pentOther)
+		return 1;
+
+	if (!(pentTouched->v.flags & FL_MONSTER) || !(pentOther->v.flags & FL_MONSTER))
+		return 1;
+
+	if (FClassnameIs(pentTouched, "ls_creature") && FClassnameIs(pentOther, "ls_creature"))
+		return 0;
+
+	return 1;
+}
+
+// Room for its hull here (players and walls; other creatures don't count, see above)
+bool CLsCreature::FreeSpot(const Vector &spot) const
+{
+	const LsCreatureType *t = GetType();
+	bool tall = t->hullMax.z > 36.0f;
+	TraceResult tr;
+	Vector center = spot + Vector(0, 0, tall ? 37.0f : 19.0f);
+	UTIL_TraceHull(center, center, dont_ignore_monsters, tall ? human_hull : head_hull, ENT(pev), &tr);
+	return !tr.fStartSolid && !tr.fAllSolid;
+}
+
+// The nearest free spot around (rings out to 128), one it could walk to from here
+bool CLsCreature::FindFreeSpot(Vector *spot) const
+{
+	Vector from = *spot;
+	for (float r = 32.0f; r <= 128.0f; r += 32.0f)
+	{
+		for (int i = 0; i < 8; i++)
+		{
+			float yaw = i * 45.0f + r;
+			Vector to = from + Vector(BotCOS(yaw), BotSIN(yaw), 0.0f) * r;
+			if (!FreeSpot(to))
+				continue;
+
+			TraceResult tr;
+			UTIL_TraceLine(from + Vector(0, 0, 24), to + Vector(0, 0, 24), ignore_monsters, ENT(pev), &tr);
+			if (tr.flFraction < 1.0f)
+				continue;
+
+			*spot = to;
+			return true;
+		}
+	}
+
+	return false;
+}
+
+// Would anyone see it pop from one spot to another
+bool CLsCreature::SeenByAnyone(const Vector &spot) const
+{
+	for (int i = 1; i <= gpGlobals->maxClients; i++)
+	{
+		CBasePlayer *pPlayer = UTIL_PlayerByIndex(i);
+		if (!pPlayer || !pPlayer->IsAlive())
+			continue;
+
+		Vector eyes = pPlayer->pev->origin + pPlayer->pev->view_ofs;
+		if ((eyes - spot).IsLengthGreaterThan(3000.0f))
+			continue;
+
+		TraceResult tr;
+		UTIL_TraceLine(eyes, spot + Vector(0, 0, 36), ignore_monsters, ignore_glass, pPlayer->edict(), &tr);
+		if (tr.flFraction == 1.0f)
+			return true;
+	}
+
+	return false;
+}
+
+static int s_stuckTeleports = 0;
+
+// Once a second: trying to go somewhere and getting nowhere. 2 s: hop and shove sideways;
+// 4 s: a fresh path; 7 s (then every 4): back to a spot it walked through lately - or, past 15 s,
+// to where it spawned - when nobody can see it go or arrive
+void CLsCreature::UpdateStuck()
+{
+	float now = gpGlobals->time;
+	if (now < m_nextProgress)
+		return;
+
+	m_nextProgress = now + 1.0f;
+
+	const LsCreatureType *t = GetType();
+	bool trying = t->moves && m_improv->HasGoal() && !m_improv->IsStopped() && m_mode != MODE_ATTACK;
+	float moved = (pev->origin - m_progressPos).Make2D().Length();
+	m_progressPos = pev->origin;
+
+	if (!trying || moved > 24.0f)
+	{
+		m_stuckSecs = 0;
+
+		// (a breadcrumb every ~100 units of real progress, on the ground)
+		if (moved > 24.0f && (pev->flags & FL_ONGROUND))
+		{
+			int last = (m_crumbNext + 3) % 4;
+			if (!m_crumbCount || (m_crumbs[last] - pev->origin).IsLengthGreaterThan(96.0f))
+			{
+				m_crumbs[m_crumbNext] = pev->origin;
+				m_crumbNext = (m_crumbNext + 1) % 4;
+				m_crumbCount = Q_min(m_crumbCount + 1, 4);
+			}
+		}
+		return;
+	}
+
+	m_stuckSecs++;
+
+	if (m_stuckSecs == 2)
+	{
+		m_improv->Jump();
+		float yaw = pev->angles.y + (RANDOM_LONG(0, 1) ? 90.0f : -90.0f);
+		m_improv->ApplyForce(Vector(BotCOS(yaw), BotSIN(yaw), 0.0f) * 200.0f);
+		return;
+	}
+
+	if (m_stuckSecs == 4)
+	{
+		m_improv->ForceRepath();
+		float yaw = pev->angles.y + 180.0f + RANDOM_FLOAT(-60.0f, 60.0f);
+		m_improv->ApplyForce(Vector(BotCOS(yaw), BotSIN(yaw), 0.0f) * 250.0f);
+		return;
+	}
+
+	if (m_stuckSecs < 7 || (m_stuckSecs - 7) % 4 != 0 || SeenByAnyone(pev->origin))
+		return;
+
+	// newest breadcrumb first that isn't right here, free, and out of sight
+	Vector dest;
+	bool found = false;
+	for (int k = 1; k <= m_crumbCount && !found; k++)
+	{
+		const Vector &crumb = m_crumbs[(m_crumbNext - k + 8) % 4];
+		if ((crumb - pev->origin).IsLengthLessThan(48.0f) || !FreeSpot(crumb) || SeenByAnyone(crumb))
+			continue;
+
+		dest = crumb;
+		found = true;
+	}
+
+	if (!found && m_stuckSecs >= 15 && FreeSpot(m_spawnOrigin) && !SeenByAnyone(m_spawnOrigin))
+	{
+		dest = m_spawnOrigin;
+		found = true;
+	}
+
+	if (!found)
+		return;
+
+	if (ls_creature_debug.value > 0.0f)
+		CONSOLE_ECHO("ls_creature: %s#%d stuck %d s at %.0f %.0f %.0f, back to %.0f %.0f %.0f\n", t->name, entindex(), m_stuckSecs,
+			pev->origin.x, pev->origin.y, pev->origin.z, dest.x, dest.y, dest.z);
+
+	UTIL_SetOrigin(pev, dest);
+	pev->velocity = Vector(0, 0, 0);
+	m_progressPos = dest;
+	m_stuckSecs = 0;
+	m_crumbCount = 0;
+	m_improv->ForceRepath();
+	m_nextRepath = 0.0f;
+	s_stuckTeleports++;
+}
+
 bool CLsCreature::IsHostileTo(CBaseEntity *pOther) const
 {
 	return const_cast<CLsCreature *>(this)->IsAlive() && LsIsHostilePlayer(pOther, m_hates);
@@ -1568,55 +1765,96 @@ void CLsCreature::PlaySound(int kind, float volume)
 	MakeNoise((kind == LSS_IDLE) ? 600.0f : (kind == LSS_ATTACK && t->attack == LSA_RANGED) ? 1500.0f : 1000.0f);
 }
 
-void CLsCreature::SetAnim(int anim)
+// The sequence for a state, from the model's own table: the type's name first, then by
+// activity (weighted, as the model asks), then player-model names
+int CLsCreature::PickSequence(int anim)
 {
 	const LsCreatureType *t = GetType();
-	if (!t)
-		return;
-
-	// (a looping one already playing stays; a one-shot replays when asked again after it ended)
-	if (anim == m_anim && (m_fSequenceLoops || !m_fSequenceFinished) && anim != LSAN_ATTACK)
-		return;
-
 	int seq = t->anim[anim][0] ? LookupSequence(t->anim[anim]) : -1;
+	if (seq >= 0)
+		return seq;
+
+	// (a ranged attacker spits: its range attack before any melee one)
+	static const int acts[LSAN_COUNT][3] =
+	{
+		{ ACT_IDLE, ACT_IDLE, ACT_IDLE },
+		{ ACT_WALK, ACT_RUN, ACT_IDLE },
+		{ ACT_RUN, ACT_WALK, ACT_IDLE },
+		{ ACT_MELEE_ATTACK1, ACT_MELEE_ATTACK2, ACT_RANGE_ATTACK1 },
+		{ ACT_SMALL_FLINCH, ACT_BIG_FLINCH, ACT_FLINCH_CHEST },
+		{ ACT_DIESIMPLE, ACT_DIEFORWARD, ACT_DIEBACKWARD },
+	};
+	static const int rangedActs[3] = { ACT_RANGE_ATTACK1, ACT_RANGE_ATTACK2, ACT_MELEE_ATTACK1 };
+	const int *list = (anim == LSAN_ATTACK && t->attack == LSA_RANGED) ? rangedActs : acts[anim];
+
+	for (int i = 0; i < 3 && seq < 0; i++)
+		seq = LookupActivity(list[i]);
+
+	// (player models: sequences by name)
 	if (seq < 0)
 	{
-		// by activity, with fallbacks (the HL models and hostage.mdl have them)
-		static const int acts[LSAN_COUNT][3] =
-		{
-			{ ACT_IDLE, ACT_IDLE, ACT_IDLE },
-			{ ACT_WALK, ACT_RUN, ACT_IDLE },
-			{ ACT_RUN, ACT_WALK, ACT_IDLE },
-			{ ACT_MELEE_ATTACK1, ACT_RANGE_ATTACK1, ACT_MELEE_ATTACK2 },
-			{ ACT_SMALL_FLINCH, ACT_BIG_FLINCH, ACT_FLINCH_CHEST },
-			{ ACT_DIESIMPLE, ACT_DIEFORWARD, ACT_DIEBACKWARD },
-		};
+		static const char *names[LSAN_COUNT] = { "idle1", "walk", "run", "ref_shoot_knife", "gutshot", "death1" };
+		seq = LookupSequence(names[anim]);
+	}
 
-		for (int i = 0; i < 3 && seq < 0; i++)
-			seq = LookupActivity(acts[anim][i]);
+	return seq;
+}
 
-		// (player models: sequences by name)
-		if (seq < 0)
+// Once per model: the movement sequences and how fast each one's feet move
+void CLsCreature::ResolveAnims()
+{
+	int keep = pev->sequence;
+	void *pmodel = GET_MODEL_PTR(ENT(pev));
+
+	for (int a = LSAN_IDLE; a <= LSAN_RUN; a++)
+	{
+		m_seq[a] = PickSequence(a);
+		m_seqGround[a] = 0.0f;
+		if (m_seq[a] >= 0 && pmodel)
 		{
-			static const char *names[LSAN_COUNT] = { "idle1", "walk", "run", "ref_shoot_knife", "gutshot", "death1" };
-			seq = LookupSequence(names[anim]);
+			float fps = 0.0f, ground = 0.0f;
+			pev->sequence = m_seq[a];
+			::GetSequenceInfo(pmodel, pev, &fps, &ground);
+			m_seqGround[a] = ground;
 		}
 	}
 
+	// (a model without its own run - the HL zombie - plays its walk faster instead)
+	m_hasRun = m_seq[LSAN_RUN] >= 0 && m_seq[LSAN_RUN] != m_seq[LSAN_WALK] && m_seqGround[LSAN_RUN] > 1.0f;
+	pev->sequence = keep;
+
+	if (ls_creature_debug.value > 3.0f)
+		CONSOLE_ECHO("ls_creature: %s#%d idle %d walk %d (%.0f) run %d (%.0f)%s\n", GetType()->name, entindex(), m_seq[LSAN_IDLE],
+			m_seq[LSAN_WALK], m_seqGround[LSAN_WALK], m_seq[LSAN_RUN], m_seqGround[LSAN_RUN], m_hasRun ? "" : " (no run: walk sped up)");
+}
+
+void CLsCreature::SetAnim(int anim, bool restart)
+{
+	int seq = (anim <= LSAN_RUN) ? m_seq[anim] : PickSequence(anim);
 	if (seq < 0)
 	{
 		m_anim = anim;
 		return;
 	}
 
-	if (pev->sequence != seq || anim != m_anim || m_fSequenceFinished)
+	// (the same sequence keeps playing - walk to run on a model with one walk doesn't jump back
+	// to frame 0 - unless asked to restart, or a one-shot that ended)
+	if (seq == pev->sequence && !restart && !(m_fSequenceFinished && !m_fSequenceLoops))
 	{
-		pev->sequence = seq;
-		pev->frame = 0;
-		ResetSequenceInfo();
+		m_anim = anim;
+		return;
 	}
 
+	pev->sequence = seq;
+	pev->frame = 0;
+	ResetSequenceInfo();
 	m_anim = anim;
+
+	if (ls_creature_debug.value > 3.0f)
+	{
+		static const char *names[LSAN_COUNT] = { "idle", "walk", "run", "attack", "flinch", "die" };
+		CONSOLE_ECHO("ls_creature: %s#%d %s -> sequence %d\n", GetType()->name, entindex(), names[anim], seq);
+	}
 }
 
 void CLsCreature::UpdateAnimation()
@@ -1625,32 +1863,39 @@ void CLsCreature::UpdateAnimation()
 	if (m_mode == MODE_DEAD || !t)
 		return;
 
+	float now = gpGlobals->time;
 	float speed = m_improv->GetActualVelocity().Make2D().Length();
 
-	if (m_attackStart > 0.0f && gpGlobals->time < m_attackStart + Q_max(0.5f, 1.0f / t->attackRate))
+	// a swing or a flinch plays out once (started where it happens), then movement again
+	if (m_anim == LSAN_ATTACK && now < m_attackAnimEnd && !m_fSequenceFinished)
 	{
-		if (m_anim != LSAN_ATTACK)
-			SetAnim(LSAN_ATTACK);
+		pev->framerate = m_attackFramerate;
+		return;
+	}
+
+	if (m_anim == LSAN_FLINCH && now < m_flinchUntil && !m_fSequenceFinished)
+	{
 		pev->framerate = 1.0f;
 		return;
 	}
 
-	if (gpGlobals->time < m_flinchUntil)
+	// (moving or not, with a margin so it doesn't flicker between the two)
+	m_animMoving = speed > (m_animMoving ? 8.0f : 20.0f);
+	if (!m_animMoving)
 	{
-		if (m_anim != LSAN_FLINCH)
-			SetAnim(LSAN_FLINCH);
+		SetAnim(LSAN_IDLE);
 		pev->framerate = 1.0f;
 		return;
 	}
 
-	int anim = (speed > m_walkSpeed * 1.25f && speed > 60.0f) ? LSAN_RUN : (speed > 15.0f) ? LSAN_WALK : LSAN_IDLE;
+	// the run when the speed is nearer the run's than the walk's, feet matched to the ground
+	int anim = LSAN_WALK;
+	if (m_hasRun && speed > (m_seqGround[LSAN_WALK] + m_seqGround[LSAN_RUN]) * 0.5f)
+		anim = LSAN_RUN;
+
 	SetAnim(anim);
-
-	// (feet keep up with the ground: the sequence's own speed scaled to ours)
-	if (anim != LSAN_IDLE && m_flGroundSpeed > 1.0f)
-		pev->framerate = clamp(speed / m_flGroundSpeed, 0.4f, 2.5f);
-	else
-		pev->framerate = 1.0f;
+	float ground = m_seqGround[anim];
+	pev->framerate = (ground > 1.0f) ? clamp(speed / ground, 0.3f, 4.0f) : 1.0f;
 }
 
 void CLsCreature::SetTarget(CBaseEntity *pTarget)
@@ -2089,8 +2334,13 @@ BOOL CLsCreature::TakeDamage(entvars_t *pevInflictor, entvars_t *pevAttacker, fl
 	}
 
 	// a big hit makes it flinch (not mid-swing)
-	if (flDamage > pev->max_health * 0.15f && !m_attackStart && t->moves)
-		m_flinchUntil = gpGlobals->time + 0.4f;
+	if (flDamage > pev->max_health * 0.15f && !m_attackStart && t->moves && gpGlobals->time > m_flinchUntil + 2.0f)
+	{
+		SetAnim(LSAN_FLINCH, true);
+		float duration = GetSequenceDuration();
+		m_flinchUntil = gpGlobals->time + clamp(duration, 0.3f, 1.0f);
+		m_improv->Stop();
+	}
 
 	if (pAttacker && pAttacker->IsPlayer() && IsHostileTo(pAttacker))
 	{
@@ -2140,7 +2390,7 @@ void CLsCreature::Killed(entvars_t *pevAttacker, int iGib)
 	if (m_improv)
 		m_improv->Stop();
 
-	SetAnim(LSAN_DIE);
+	SetAnim(LSAN_DIE, true);
 	pev->framerate = 1.0f;
 	PlaySound(LSS_DIE);
 
@@ -2511,9 +2761,17 @@ void CLsCreature::UpdateChase()
 
 void CLsCreature::StartAttack()
 {
+	const LsCreatureType *t = GetType();
 	m_attackStart = gpGlobals->time;
 	m_attackLanded = false;
-	SetAnim(LSAN_ATTACK);
+	SetAnim(LSAN_ATTACK, true);
+
+	// (the swing fits the attack rate: a long HL swing plays faster, never slower than made)
+	float duration = GetSequenceDuration();
+	float period = 1.0f / t->attackRate;
+	m_attackFramerate = (duration > 0.0f) ? clamp(duration / period, 1.0f, 3.0f) : 1.0f;
+	m_attackAnimEnd = gpGlobals->time + ((duration > 0.0f) ? duration / m_attackFramerate : period);
+	pev->framerate = m_attackFramerate;
 	PlaySound(LSS_ATTACK);
 }
 
@@ -2598,14 +2856,24 @@ void CLsCreature::UpdateAttack()
 
 	m_improv->FaceTo(pTarget->pev->origin);
 
-	// melee keeps after them through the swing; ranged stands and shoots
-	if (t->attack == LSA_MELEE && t->moves)
+	// it stands for the swing (no sliding at them mid-swing); between swings a melee one keeps
+	// close, and a target stepping well out of reach mid-swing breaks it off
+	float reachNow = Dist2D(pTarget);
+	if (m_attackStart > 0.0f)
+	{
+		m_improv->Stop();
+		if (t->attack == LSA_MELEE && !m_attackLanded && reachNow > t->attackRange * 1.6f)
+		{
+			m_attackStart = 0.0f;
+			m_attackAnimEnd = 0.0f;
+			m_mode = MODE_CHASE;
+			return;
+		}
+	}
+	else if (t->attack == LSA_MELEE && t->moves && reachNow > 40.0f)
 	{
 		m_improv->Run();
-		if (Dist2D(pTarget) > 40.0f)
-			m_improv->MoveTo(pTarget->pev->origin);
-		else
-			m_improv->Stop();
+		m_improv->MoveTo(pTarget->pev->origin);
 	}
 	else
 		m_improv->Stop();
@@ -2755,6 +3023,16 @@ void CLsCreature::CreatureThink()
 		m_nextSense = now + RANDOM_FLOAT(0.2f, 0.3f);
 		UpdateSenses();
 	}
+
+	// (a flinch holds it still while it plays)
+	if (now < m_flinchUntil)
+	{
+		m_improv->Stop();
+		UpdateAnimation();
+		return;
+	}
+
+	UpdateStuck();
 
 	switch (m_mode)
 	{
