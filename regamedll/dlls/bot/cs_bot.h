@@ -1415,7 +1415,8 @@ private:
 		float until = 0.0f;
 		float holdSecs = 0.0f;						// a go: then hold the spot that long
 		float nextTry = 0.0f;
-		int tries = 0;								// times sent back on its way
+		int tries = 0;								// times sent back on its way (without getting closer)
+		float bestDist = 1e9f;						// the closest it's been to where it was sent
 	};
 	LsOrder m_lsOrder;
 	bool m_lsOrderFields = false;					// fuser4/vuser1 hold this code's order marks (cleared on respawn)
