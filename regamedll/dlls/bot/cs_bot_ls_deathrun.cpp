@@ -1633,6 +1633,15 @@ void CCSBot::LsDrPostUpdate()
 		if (r.done || now >= r.holdUntil || m_isEnemyVisible)
 			return;
 		ClearMovement();
+		// (waiting on a floor that carries you - a conveyor, a push, a moving platform's edge - isn't
+		// standing still: walk against the drift so the wait doesn't end in the pit it carries you to)
+		Vector2D drift = pev->basevelocity.Make2D();
+		if (drift.IsLengthGreaterThan(1.0f) && (pev->flags & FL_ONGROUND))
+		{
+			Vector2D up = -drift.Normalize() * 48.0f;
+			Vector against(pev->origin.x + up.x, pev->origin.y + up.y, pev->origin.z);
+			MoveTowardsPosition(&against);
+		}
 		ResetStuckMonitor();
 		SetLookAt("Loner-Strike: deathrun wait", &r.holdLook, PRIORITY_MEDIUM, 0.5f);
 		return;
