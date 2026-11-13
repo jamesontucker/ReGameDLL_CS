@@ -311,8 +311,21 @@ bool CCSBot::LsModePeace()
 	return since < 0.4f + 0.6f * LsTrait(205) + 0.4f * (1.0f - LsSkill());
 }
 
-// Just after the peace (a loot-up) ends, a while of gearing up first, as people do: 40-80 s,
-// each bot its own, over early once it's hit, holds a main gun, or takes on someone who came at it
+// Kitted out enough to go hunting: some armor, a pistol beside the main gun, and a spare
+// magazine for it
+bool CCSBot::LsModeKitted()
+{
+	CBasePlayerWeapon *pGun = static_cast<CBasePlayerWeapon *>(m_rgpPlayerItems[PRIMARY_WEAPON_SLOT]);
+	if (!pGun || pev->armorvalue < 30.0f || !m_rgpPlayerItems[PISTOL_SLOT])
+		return false;
+	int spare = (pGun->m_iPrimaryAmmoType > 0 && pGun->m_iPrimaryAmmoType < MAX_AMMO_SLOTS) ? m_rgAmmo[pGun->m_iPrimaryAmmoType] : 0;
+	return spare >= Q_max(pGun->iMaxClip(), 1);
+}
+
+// Just after the peace (a loot-up) ends, a while of gearing up first, as people do. Without a
+// main gun: 40-80 s, each bot its own, fighting only what comes for it. With one: looting on till
+// kitted out (90 s at most), but anyone in sight close by - landed together - is a fight now (a hot
+// drop). Over for anyone once it's hit
 bool CCSBot::LsModeGearing()
 {
 	if (s_lsPeace || s_lsPeaceEndAt < 0.0f)
@@ -326,7 +339,8 @@ bool CCSBot::LsModeGearing()
 	if (m_lsModeGearDone)
 		return false;
 	float since = gpGlobals->time - s_lsPeaceEndAt;
-	if (since < 0.0f || since > 40.0f + 40.0f * LsTrait(206) || m_rgpPlayerItems[PRIMARY_WEAPON_SLOT]
+	bool armed = m_rgpPlayerItems[PRIMARY_WEAPON_SLOT] != nullptr;
+	if (since < 0.0f || since > (armed ? 90.0f : 40.0f + 40.0f * LsTrait(206)) || (armed && LsModeKitted())
 		|| GetTimeSinceAttacked() < 2.0f)
 	{
 		m_lsModeGearDone = true;
@@ -347,6 +361,14 @@ bool CCSBot::LsModeLetsBe(CBasePlayer *pPlayer)
 	Vector toMe = pev->origin - pPlayer->pev->origin;
 	float d = toMe.Length();
 	bool threat = false;
+	// (armed, and someone in sight who landed close by: a hot drop - fight now; in sight already,
+	// this is only asked of players it sees)
+	if (m_rgpPlayerItems[PRIMARY_WEAPON_SLOT] && d < 500.0f)
+	{
+		m_lsModeGearDone = true;
+		LsWhy("mode gearing up: hot drop");
+		return false;
+	}
 	if (pPlayer->IsBot())
 	{
 		CCSBot *pOther = static_cast<CCSBot *>(pPlayer);
