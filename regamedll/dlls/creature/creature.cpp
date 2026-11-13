@@ -3981,6 +3981,23 @@ void CLsBarnacle::Spawn()
 
 	MAKE_STRING_CLASS("ls_barnacle", pev);
 	SET_MODEL(edict(), "models/barnacle.mdl");
+
+	// it always hangs from a ceiling: one left floating (or on the floor) moves up to the
+	// ceiling above it; none within reach (open sky) leaves it where the mapper put it
+	TraceResult up;
+	UTIL_TraceLine(pev->origin, pev->origin + Vector(0, 0, 4096), ignore_monsters, ENT(pev), &up);
+	if (!up.fStartSolid && !up.fAllSolid && up.flFraction < 1.0f)
+	{
+		bool sky = false;
+		if (const char *tex = TRACE_TEXTURE(up.pHit ? up.pHit : ENT(0), pev->origin, up.vecEndPos + Vector(0, 0, 8)))
+			sky = !Q_stricmp(tex, "sky");
+		if (!sky)
+		{
+			if (ls_creature_debug.value > 0.0f)
+				UTIL_LogPrintf("ls_barnacle: hung from the ceiling %.0f units above its spot\n", up.vecEndPos.z - pev->origin.z);
+			pev->origin = up.vecEndPos;
+		}
+	}
 	Setup();
 }
 
