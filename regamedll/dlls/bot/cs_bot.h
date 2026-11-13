@@ -2434,6 +2434,12 @@ public:
 		m_lsCrowdCount = 0;
 		if (m_lsTaste)
 			m_lsCrowdCount = pBot->LsCrowdAreas(m_lsCrowd, 32, &m_lsCrowdCost);
+		// Loner-Strike: a mode's avoid zones, blocked doors and safe zone, for the path the bot
+		// walks (none set: nothing changes); the zones it's already in it may walk out of
+		m_lsMode = lsTaste && LsModeCosts();
+		m_lsModeInside = 0;
+		if (m_lsMode)
+			pBot->LsModeInside(&m_lsModeInside);
 	}
 	float operator()(CNavArea *area, CNavArea *fromArea, const CNavLadder *ladder)
 	{
@@ -2487,6 +2493,16 @@ public:
 				// (Loner-Strike: somewhere it keeps getting stuck getting into: the long way)
 				if (m_bot->LsBadArea(area))
 					dist *= 20.0f;
+			}
+
+			// Loner-Strike: a mode's zones: costlier inside an avoid zone or outside the safe zone,
+			// never through a no-go one (a damage zone, a closed door)
+			if (m_lsMode)
+			{
+				float modeCost = LsModeAreaCost(area, m_lsModeInside);
+				if (modeCost < 0.0f)
+					return -1.0f;
+				dist *= modeCost;
 			}
 
 			// Loner-Strike: this bot's favourite (and not so favourite) parts of the map
@@ -2602,6 +2618,8 @@ private:
 	CNavArea *m_lsCrowd[32];
 	int m_lsCrowdCount;
 	float m_lsCrowdCost;
+	bool m_lsMode;
+	unsigned int m_lsModeInside;
 };
 
 class FollowTargetCollector
