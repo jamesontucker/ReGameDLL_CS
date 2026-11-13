@@ -547,7 +547,19 @@ bool CCSBot::LsModeShootTick()
 		m_lsModeStepUntil = now + 0.35f;
 	}
 	else if (!IsUsingKnife())
+	{
+		// (a person's rhythm at range: a burst standing still, then a sidestep with the trigger
+		// let go - counter-strafing; the bolder step more, close up it just stands and shoots)
+		float cycle = 1.4f, stand = 1.4f * (0.85f - 0.35f * LsAggro());
+		float phase = Q_fmod(now + float(LsSeed() % 97) * 0.13f, cycle);
+		if (gap > 400.0f && phase > stand)
+		{
+			m_lsModeStrafeUntil = now + 0.15f;
+			m_lsModeStrafeLeft = (int((now + float(LsSeed() % 97) * 0.13f) / cycle) % 2) == 0;
+			return true;
+		}
 		m_lsModeStillUntil = now + 0.4f;
+	}
 
 	// the trigger once the view's on it (the stock fire's tolerance: a body's width at that range)
 	Vector to = pos - GetGunPosition();
@@ -1277,7 +1289,7 @@ void CCSBot::LsModeStationTick(LsModeGoal &g, float dist)
 		return;
 
 	float aggro = LsAggro();
-	float hold = quiet ? RANDOM_FLOAT(5.0f, 10.0f) : RANDOM_FLOAT(8.0f, 12.0f) * (0.7f + 0.6f * (1.0f - aggro));
+	float hold = quiet ? RANDOM_FLOAT(5.0f, 9.0f) : RANDOM_FLOAT(5.0f, 9.0f) * (0.7f + 0.6f * (1.0f - aggro));
 	if (LsStyle() == LS_STYLE_CAMPER && !quiet)
 		hold *= 1.5f;
 
@@ -1341,13 +1353,21 @@ void CCSBot::LsModeStationTick(LsModeGoal &g, float dist)
 void CCSBot::LsModePostUpdate()
 {
 	float now = gpGlobals->time;
-	bool still = now < m_lsModeStillUntil, step = now < m_lsModeStepUntil, back = now < m_lsModeBackUntil && !IsOnLadder();
-	if (IsAttacking() || !(still || step || back))
+	bool strafe = now < m_lsModeStrafeUntil && !IsOnLadder();
+	bool still = now < m_lsModeStillUntil && !strafe, step = now < m_lsModeStepUntil, back = now < m_lsModeBackUntil && !IsOnLadder();
+	if (IsAttacking() || !(still || step || back || strafe))
 		return;
 	// (ClearMovement resets the whole command, buttons too: the trigger and use the mode pressed
 	// this think are pressed again - the stand-still is for shooting straight, the step for using)
 	ClearMovement();
-	if (!still && step)
+	if (strafe)
+	{
+		if (m_lsModeStrafeLeft)
+			StrafeLeft();
+		else
+			StrafeRight();
+	}
+	else if (!still && step)
 		MoveTowardsPosition(&m_lsModeStepTo);
 	else if (!still && back)
 		MoveAwayFromPosition(&m_lsModeBackFrom);
