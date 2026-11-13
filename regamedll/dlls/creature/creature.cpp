@@ -1350,6 +1350,8 @@ static char s_skipped[256] = "";
 static int LsPrecacheModel(const char *name)
 {
 	int slot = PRECACHE_MODEL((char *)name);
+	if (ls_creature_debug.value > 1.0f)
+		CONSOLE_ECHO("ls_creature: precache model %s -> slot %d%s\n", name, slot, slot > s_modelHigh ? " (new)" : "");
 	s_modelHigh = Q_max(s_modelHigh, slot);
 	return slot;
 }
@@ -1357,6 +1359,8 @@ static int LsPrecacheModel(const char *name)
 static int LsPrecacheSound(const char *name)
 {
 	int slot = PRECACHE_SOUND((char *)name);
+	if (ls_creature_debug.value > 1.0f)
+		CONSOLE_ECHO("ls_creature: precache sound %s -> slot %d%s\n", name, slot, slot > s_soundHigh ? " (new)" : "");
 	s_soundHigh = Q_max(s_soundHigh, slot);
 	return slot;
 }
