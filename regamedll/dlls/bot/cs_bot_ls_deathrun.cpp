@@ -972,6 +972,7 @@ bool LsDrCosts()
 // A jump across a gap costs a little more than the walk: people take the floor when there is one
 float LsDrLinkCost(const CNavArea *area, const CNavArea *fromArea)
 {
+	using namespace LsDr;
 	if (!fromArea || !area)
 		return 0.0f;
 	const Extent *ea = fromArea->GetExtent(), *eb = area->GetExtent();
