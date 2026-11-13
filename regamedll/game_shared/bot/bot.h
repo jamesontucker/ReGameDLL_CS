@@ -431,8 +431,20 @@ inline bool CBot::IsPlayerLookingAtMe(CBasePlayer *pOther) const
 	return false;
 }
 
+// Loner-Strike: a mode's ties between players (ls_mode friend / foe: a squad in free-for-all, a
+// traitor on the same team); g_lsModeTies is false unless a mode set one (cs_bot_ls_modes.cpp)
+extern bool g_lsModeTies;
+int LsModeTie(const CBasePlayer *me, const CBasePlayer *them);	// 0 friend, 1 foe, -1 no tie
+
 inline CBot::BotRelationshipTeam CBot::BotRelationship(CBasePlayer *pTarget) const
 {
+	if (g_lsModeTies)
+	{
+		int tie = LsModeTie(this, pTarget);
+		if (tie >= 0)
+			return tie == 0 ? BOT_TEAMMATE : BOT_ENEMY;
+	}
+
 #ifdef REGAMEDLL_ADD
 	if (CSGameRules()->IsFreeForAll())
 		return BOT_ENEMY;
