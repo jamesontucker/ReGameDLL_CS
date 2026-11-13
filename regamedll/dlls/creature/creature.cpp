@@ -357,6 +357,9 @@ static void LsBuiltinTypes()
 	t->bloodColor = DONT_BLEED;
 	t->corpseTime = 15.0f;
 	Q_strlcpy(t->models, "models/sentry.mdl models/hostage.mdl");
+	Q_strlcpy(t->anim[LSAN_IDLE], "spin");		// (sentry.mdl has no activities: its sequences by name)
+	Q_strlcpy(t->anim[LSAN_ATTACK], "fire");
+	Q_strlcpy(t->anim[LSAN_DIE], "die");
 	t->hullMin = Vector(-16, -16, 0);
 	t->hullMax = Vector(16, 16, 48);
 	t->fallbackGlowColor = Vector(40, 80, 200);
