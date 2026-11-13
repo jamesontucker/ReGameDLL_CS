@@ -1179,7 +1179,7 @@ bool CCSBot::LsModeOursHiding() const
 // The spot it's standing at for a station, for its teammates picking theirs (null: none)
 const Vector *CCSBot::LsModeSpot() const
 {
-	return (m_lsModeSpotOn && IsAlive() && LsModeOursHiding()) ? &m_lsModeSpot : nullptr;
+	return (m_lsModeSpotOn && const_cast<CCSBot *>(this)->IsAlive() && LsModeOursHiding()) ? &m_lsModeSpot : nullptr;
 }
 
 // Somewhere to stand in an area: a hiding spot (or a nav area's middle) inside it, away from the
