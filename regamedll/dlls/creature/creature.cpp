@@ -773,6 +773,76 @@ LsCreatureType *LsCreatureTypeAt(int index)
 	return (index >= 0 && index < s_typeCount) ? &s_types[index] : nullptr;
 }
 
+// Half-Life's models as current Steam has them (after the 25th anniversary update). The
+// server picks a sequence by its number in its own copy, and each player's game draws that
+// number from its copy: zombie.mdl gained a sequence near the start in that update, so an older
+// server copy (HLDS from SteamCMD still has it) made "walk" the game's "attack2" and "attack1" its
+// "falling". Size, CRC32 and sequence count of each file (Steam, 2026-11).
+struct LsKnownModel
+{
+	const char *path;
+	int size;
+	unsigned int crc;
+	int sequences;
+};
+
+static const LsKnownModel s_knownModels[] =
+{
+	{ "models/zombie.mdl", 647420, 0x1fb1b858u, 49 },
+	{ "models/bullsquid.mdl", 333568, 0x72f5f488u, 24 },
+	{ "models/houndeye.mdl", 116196, 0xca66883fu, 31 },
+	{ "models/agrunt.mdl", 152320, 0x51974987u, 32 },
+	{ "models/garg.mdl", 182172, 0x8eae0dc0u, 22 },
+	{ "models/headcrab.mdl", 70024, 0xa226e829u, 21 },
+	{ "models/sentry.mdl", 17744, 0x0027092du, 6 },
+	{ "models/barney.mdl", 574100, 0x08b4d0d6u, 71 },
+	{ "models/gman.mdl", 227952, 0x6ac90dbcu, 14 },
+};
+
+// A loud word when the server's copy of a Half-Life model isn't Steam's current one: players
+// would see the wrong animations (the sequences are numbered differently)
+static void LsCheckModelVersion(const char *model)
+{
+	const LsKnownModel *known = nullptr;
+	for (size_t i = 0; i < ARRAYSIZE(s_knownModels); i++)
+	{
+		if (!Q_stricmp(model, s_knownModels[i].path))
+			known = &s_knownModels[i];
+	}
+
+	if (!known)
+		return;
+
+	int length = 0;
+	byte *data = LOAD_FILE_FOR_ME((char *)model, &length);
+	if (!data)
+		return;
+
+	int sequences = (length >= int(sizeof(studiohdr_t))) ? ((studiohdr_t *)data)->numseq : -1;
+	CRC32_t crc;
+	CRC32_INIT(&crc);
+	CRC32_PROCESS_BUFFER(&crc, data, length);
+	crc = CRC32_FINAL(crc);
+	FREE_FILE(data);
+
+	if (length == known->size && sequences == known->sequences && crc == known->crc)
+		return;
+
+	if (length != known->size || sequences != known->sequences)
+	{
+		CONSOLE_ECHO("ls_creature: WARNING: this server's %s isn't the one current Half-Life games have (%d sequences, %d bytes; Steam's has %d, %d).
+"
+			"ls_creature: WARNING: players will see the wrong animations. Copy valve/%s from an up-to-date Half-Life (the Loner-Strike app does it at each start).
+",
+			model, sequences, length, known->sequences, known->size, model);
+	}
+	else if (ls_creature_debug.value > 0.0f)
+	{
+		CONSOLE_ECHO("ls_creature: %s differs from Steam's copy (CRC) but has the same layout
+", model);
+	}
+}
+
 // Precache one type's model and sounds: only while the map loads (the engine refuses later)
 bool LsCreaturePrecacheType(int index)
 {
@@ -808,6 +878,8 @@ bool LsCreaturePrecacheType(int index)
 		CONSOLE_ECHO("ls_creature: no model found for '%s' (%s)\n", t->name, t->models);
 		return false;
 	}
+
+	LsCheckModelVersion(t->model);
 
 	// (the engine keeps the pointer it's given: an engine string, never our arrays a reload rewrites)
 	t->iszModel = ALLOC_STRING(t->model);
