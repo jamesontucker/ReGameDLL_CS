@@ -2162,7 +2162,13 @@ void LsDrDrive(CBasePlayer *bot, float *forward, float *strafe, unsigned short *
 			wish = (r.landing.Make2D() - o);
 			float len = wish.Length();
 			wish = len > 1.0f ? wish / len : r.gapDir;
-			if (toEdge < 14.0f + 0.06f * Q_max(0.0f, speed) && toEdge > -20.0f && now - r.jumpedAt > 0.8f)
+			// (takes off as late as the jump needs: a long one - stepping stones near a running jump's
+			// limit - from the very edge; a short one may go early, with room to spare)
+			float pace = r.hopSpeed > 0.0f ? r.hopSpeed : 250.0f;
+			float need = DotProduct(r.landing.Make2D(), r.gapDir) - r.edge;
+			float slack = 0.66f * pace - need;
+			float early = Q_min(14.0f + 0.06f * Q_max(0.0f, speed), Q_max(3.0f, 0.5f * slack));
+			if (toEdge < early && toEdge > -20.0f && now - r.jumpedAt > 0.8f)
 			{
 				// (a full jump wants a run at it; a hop its own pace, give or take)
 				bool paced = r.hopSpeed > 0.0f ? (speed > 0.6f * r.hopSpeed && speed < 1.35f * r.hopSpeed) : speed > 200.0f;
