@@ -339,6 +339,8 @@ set(GAMEDLL_SRCS
 	"dlls/hostage/states/hostage_follow.cpp"
 	"dlls/hostage/states/hostage_idle.cpp"
 	"dlls/hostage/states/hostage_retreat.cpp"
+	"dlls/creature/creature.cpp"
+	"dlls/creature/creature_improv.cpp"
 )
 
 set(UNITTESTS_SRCS

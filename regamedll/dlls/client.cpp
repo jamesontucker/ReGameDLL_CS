@@ -3811,6 +3811,9 @@ void EXT_FUNC ServerDeactivate()
 		g_pHostages->ServerDeactivate();
 	}
 
+	// Loner-Strike: the creature list goes with the map
+	LsCreaturesServerDeactivate();
+
 	WeaponInfoReset();
 }
 
@@ -3883,6 +3886,9 @@ void EXT_FUNC ServerActivate(edict_t *pEdictList, int edictCount, int clientMax)
 	{
 		g_pHostages->ServerActivate();
 	}
+
+	// Loner-Strike: creatures can be spawned by command from now on
+	LsCreaturesServerActivate();
 
 #ifdef REGAMEDLL_ADD
 	CSGameRules()->ServerActivate();
