@@ -173,6 +173,7 @@ static bool GroundBelow(const Vector &from, float depth, float *z, Vector *norma
 // high), feet tucked 18 more for a landing higher up (a duck-jump); a hull that fits all the way;
 // a floor to land on that's flat enough, not a deadly trigger, not a fall that hurts much
 static bool GapJumpVec(const Vector &p, Vector2D d, bool runup, Vector *land, Vector *landNormal, bool say);
+static bool s_jumpRelaxed = false;	// (a runner with no other way: the full running jump's landing isn't checked)
 
 static bool GapJumpAt(const Vector &p, int dir, bool runup, Vector *land, Vector *landNormal, bool say)
 {
@@ -260,6 +261,8 @@ static bool GapJumpVec(const Vector &p, Vector2D d, bool runup, Vector *land, Ve
 				if (!GroundBelow(rc, 60.0f, &rz, &rn) || Q_fabs(rz - gz) > 20.0f || DeadlyAt(s_learnHurts, Vector(rc.x, rc.y, rz)))
 					solid = false;
 			}
+			if (!solid && s_jumpRelaxed)
+				solid = true;	// (no other way: the near-edge landing will do, a person would try it)
 			if (!solid)
 			{
 				if (say)
@@ -961,6 +964,11 @@ struct Runner
 	int passedTrap = -1;
 	float floorWaitSince = 0.0f;	// waiting for a floor that isn't there
 	float teleWaitSince = 0.0f;		// standing in a teleport that doesn't send it anywhere
+	int gaveUpArea = -1;			// the floor it last gave up on (another way) and when: back at it soon
+	float gaveUpAt = -99.0f;		// after means there is no other way
+	Vector gaveUpPos;
+	float noWayLogAt = -99.0f;
+	float noWayTryAt = -99.0f;
 	// a jump across a gap, armed by the path
 	bool gapArmed = false;
 	Vector takeoff, landing;
@@ -1877,14 +1885,9 @@ void CCSBot::LsDrPathTick()
 					r.floorWaitSince = now;
 				if (now - r.floorWaitSince > LsDrFloorPatience(B))
 				{
-					// (gone: a jump over it if there's one, else another way)
-					if (LsDrJumpGap(i))
+					// (gone: a jump over it if there's one, else another way - or, none, a jump / keep waiting)
+					if (LsDrJumpGap(i) || LsDrFloorGone(i, B))
 						return;
-					LsForceBadArea(B, 60.0f);
-					DestroyPath();
-					r.floorWaitSince = 0.0f;
-					LsWhy("deathrun: floor gone, another way");
-					return;
 				}
 				r.holdUntil = Q_max(r.holdUntil, now + 0.3f);
 				r.holdLook = land;
@@ -1924,14 +1927,8 @@ void CCSBot::LsDrPathTick()
 				return;
 			if (r.floorWaitSince <= 0.0f)
 				r.floorWaitSince = now;
-			if (now - r.floorWaitSince > LsDrFloorPatience(B))
-			{
-				LsForceBadArea(B, 60.0f);
-				DestroyPath();
-				r.floorWaitSince = 0.0f;
-				LsWhy("deathrun: floor gone, another way");
+			if (now - r.floorWaitSince > LsDrFloorPatience(B) && LsDrFloorGone(i, B))
 				return;
-			}
 			r.holdUntil = Q_max(r.holdUntil, now + 0.3f);
 			r.holdLook = m_path[i].pos;
 			LsWhy("deathrun: waits for the floor");
@@ -2002,6 +1999,60 @@ bool CCSBot::LsDrJumpGap(int i)
 		return true;
 	}
 	return false;
+}
+
+// Waited the floor's patience and no jump that's sure: another way (the floor marked bad for a minute).
+// But if it gave up on this same floor lately and the new path brought it straight back, there is no
+// other way: then the best jump there is (the landing at the near edge, not where a full running jump
+// comes down), and failing that it keeps waiting, for as long as the floor's been seen to take to come
+// back if it has, else till it does - no more marking and coming back. Says why in the trace.
+// True: handled (another way, a jump, or holding on).
+bool CCSBot::LsDrFloorGone(int i, const CNavArea *B)
+{
+	Runner &r = s_run[entindex()];
+	float now = gpGlobals->time;
+	int b = Index(B);
+	// (the same floor, or the same spot: a new path round the bad area can come back to the same gap
+	// by the area next to it)
+	bool cameBack = now - r.gaveUpAt < 90.0f && ((b >= 0 && b == r.gaveUpArea) || (pev->origin - r.gaveUpPos).Make2D().IsLengthLessThan(200.0f));
+	if (!cameBack)
+	{
+		r.gaveUpArea = b;
+		r.gaveUpAt = now;
+		r.gaveUpPos = pev->origin;
+		LsForceBadArea(B, 60.0f);
+		DestroyPath();
+		r.floorWaitSince = 0.0f;
+		LsWhy("deathrun: floor gone, another way");
+		return true;
+	}
+	r.gaveUpAt = now;	// (still no other way)
+	if (now - r.noWayTryAt > 1.0f)
+	{
+		r.noWayTryAt = now;
+		s_jumpRelaxed = true;
+		bool jumped = LsDrJumpGap(i);
+		s_jumpRelaxed = false;
+		if (jumped)
+		{
+			LsWhy("deathrun: no other way, best jump there is");
+			return true;
+		}
+	}
+	// (keep waiting: the floor's own cycle if it's been seen, else till it comes back)
+	if (now - r.noWayLogAt > 3.0f)
+	{
+		bool trapDeath;
+		bool fell = DeathsNear(pev->origin, 150.0f, &trapDeath) >= 2 && !trapDeath;
+		int fi = Index(B);
+		bool seen = fi >= 0 && size_t(fi) < s_floorLog.size() && s_floorLog[fi].cycle > 0.0f;
+		LsWhy(fell ? "deathrun: no other way, people fell jumping here: waits for the floor"
+			: seen ? "deathrun: no other way, no jump in reach: waits out the floor's cycle"
+			: "deathrun: no other way, no jump in reach: waits till the floor comes back");
+		r.noWayLogAt = now;
+	}
+	r.holdUntil = Q_max(r.holdUntil, now + 0.3f);
+	return true;
 }
 
 // Each command: the jump across a gap, timed at the edge (a think is too coarse for that), with a
