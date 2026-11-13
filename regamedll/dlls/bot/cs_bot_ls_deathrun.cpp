@@ -1658,6 +1658,38 @@ void CCSBot::LsDrPathTick()
 			{
 				r.tele = true;
 				m_goalPosition = tl.at;
+				// (one at a time: Deathrun Manager's semiclip makes runners within 128 units of each other
+				// not solid, and what isn't solid doesn't touch triggers - two together in a teleport stay
+				// put. The one nearer it goes; the others keep their distance till it's gone)
+				float mine = (pev->origin - tl.at).Make2D().Length();
+				if (mine < 320.0f)
+				{
+					bool wait = false, crowded = false;
+					for (int c = 1; c <= gpGlobals->maxClients; c++)
+					{
+						CBasePlayer *p = UTIL_PlayerByIndex(c);
+						if (!p || p == this || !p->IsAlive() || p->m_iTeam != CT)
+							continue;
+						float apart = (p->pev->origin - pev->origin).Make2D().Length();
+						if (apart > 170.0f)
+							continue;
+						crowded = true;
+						if ((p->pev->origin - tl.at).Make2D().Length() < mine)
+							wait = true;
+					}
+					if (wait)
+					{
+						Vector2D away = (pev->origin - tl.at).Make2D();
+						float len = away.Length();
+						away = len > 1.0f ? away / len : Vector2D(1.0f, 0.0f);
+						m_goalPosition = pev->origin + Vector(away.x, away.y, 0.0f) * 100.0f;
+						r.teleWaitSince = 0.0f;
+						LsWhy("deathrun: lets one through the teleport");
+						return;
+					}
+					if (crowded)
+						r.teleWaitSince = 0.0f;
+				}
 				// (close: walked straight into it, LsDrDrive - not round the edge of a hole beside it)
 				if ((pev->origin - tl.at).Make2D().IsLengthLessThan(200.0f))
 				{
@@ -1825,7 +1857,49 @@ bool CCSBot::LsDrJumpGap(int i)
 		LsWhy("deathrun: jumps the gap");
 		return true;
 	}
-	return false;
+
+	// (one big area over the hole - a floor learned whole that's broken now: straight on along the
+	// path, the first floor past the hole within a jump)
+	Vector ahead = m_path[Q_min(i + 1, m_pathLength - 1)].pos;
+	Vector2D d = (ahead - pev->origin).Make2D();
+	float len = d.Length();
+	if (len < 1.0f)
+		return false;
+	d = d / len;
+	float feet = GetFeetZ();
+	float edge = -1.0f, land = -1.0f, landZ = 0.0f;
+	for (float a = 0.0f; a <= 340.0f; a += 8.0f)
+	{
+		float z;
+		Vector n;
+		Vector p(pev->origin.x + d.x * a, pev->origin.y + d.y * a, feet + 44.0f);
+		bool ground = GroundBelow(p, 44.0f + 150.0f, &z, &n) && z > feet - 150.0f && z < feet + 40.0f && n.z >= 0.7f
+			&& !DeadlyAt(s_hurts, Vector(p.x, p.y, z));
+		if (edge < 0.0f)
+		{
+			if (!ground || z < feet - 20.0f)
+				edge = a;
+		}
+		else if (ground && z >= feet - 150.0f)
+		{
+			land = a + 20.0f;
+			landZ = z;
+			break;
+		}
+	}
+	if (edge < 0.0f || land < 0.0f || land - edge > 180.0f)
+		return false;
+	r.gapArmed = true;
+	r.tele = false;
+	r.armedAt = now;
+	r.landing = Vector(pev->origin.x + d.x * land, pev->origin.y + d.y * land, landZ);
+	r.gapDir = d;
+	r.edge = DotProduct(pev->origin.Make2D(), d) + edge - 4.0f;
+	r.duckJump = landZ > feet + 12.0f;
+	m_goalPosition = r.landing;
+	SetLookAt("Loner-Strike: the jump", &r.landing, PRIORITY_HIGH, 0.3f);
+	LsWhy("deathrun: jumps the hole");
+	return true;
 }
 
 // Each command: the jump across a gap, timed at the edge (a think is too coarse for that), with a
