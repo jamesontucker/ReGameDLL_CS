@@ -1718,6 +1718,17 @@ void LsDrCommand()
 		GapJumpAt(p, Q_atoi(CMD_ARGV(5)) & 3, true, &land, &n, true);
 		return;
 	}
+	// ls_dr ents <x> <y> <z> <r>: entities round a spot, their solid type and box (a trigger's state)
+	if (CMD_ARGC() >= 6 && FStrEq(CMD_ARGV(1), "ents"))
+	{
+		Vector p(Q_atof(CMD_ARGV(2)), Q_atof(CMD_ARGV(3)), Q_atof(CMD_ARGV(4)));
+		CBaseEntity *pEnt = nullptr;
+		while ((pEnt = UTIL_FindEntityInSphere(pEnt, p, Q_atof(CMD_ARGV(5)))) != nullptr)
+			CONSOLE_ECHO("  #%d %s '%s' solid %d movetype %d box %.0f %.0f %.0f .. %.0f %.0f %.0f effects %d\n", pEnt->entindex(), STRING(pEnt->pev->classname),
+				STRING(pEnt->pev->targetname), pEnt->pev->solid, pEnt->pev->movetype, pEnt->pev->absmin.x, pEnt->pev->absmin.y, pEnt->pev->absmin.z,
+				pEnt->pev->absmax.x, pEnt->pev->absmax.y, pEnt->pev->absmax.z, pEnt->pev->effects);
+		return;
+	}
 	if (!Ready())
 	{
 		CONSOLE_ECHO("ls_dr: no course (bot_ls_deathrun %s, deathrun map %d, nav areas %d)\n", cv_bot_ls_deathrun.string, LsDrMapName() ? 1 : 0, int(TheNavAreaList.size()));
