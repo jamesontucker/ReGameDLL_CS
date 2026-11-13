@@ -129,6 +129,7 @@
     <ClCompile Include="..\dlls\bot\cs_bot_ls_moves.cpp" />
     <ClCompile Include="..\dlls\bot\cs_bot_ls_modes.cpp" />
     <ClCompile Include="..\dlls\bot\cs_bot_surf.cpp" />
+    <ClCompile Include="..\dlls\bot\cs_bot_ls_deathrun.cpp" />
     <ClCompile Include="..\dlls\bot\cs_bot_radio.cpp">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
       </ExcludedFromBuild>

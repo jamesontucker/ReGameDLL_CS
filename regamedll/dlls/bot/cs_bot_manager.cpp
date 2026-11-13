@@ -155,6 +155,10 @@ void CCSBotManager::StartFrame()
 	if (UTIL_BotsInGame() > 0)
 		LsSurfStep();
 
+	// (Loner-Strike: deathrun - who died where, which trap buttons went down)
+	if (UTIL_BotsInGame() > 0)
+		LsDrStep();
+
 	// debug zone extent visualization
 	if (cv_bot_debug.value == 5.0f)
 	{
@@ -285,6 +289,7 @@ void CCSBotManager::AddServerCommands()
 	AddServerCommand("bot_kill");
 	AddServerCommand("bot_kick");
 	AddServerCommand("ls_bot");	// Loner-Strike (cs_bot_ls.cpp)
+	AddServerCommand("ls_dr");	// Loner-Strike: what the brain knows of a deathrun course (cs_bot_ls_deathrun.cpp)
 	AddServerCommand("ls_mode");	// Loner-Strike: game modes tell the bots (cs_bot_ls_modes.cpp)
 	AddServerCommand("ls_mark");	// Loner-Strike: a moment flagged in the trace
 	AddServerCommand("bot_knives_only");
@@ -726,6 +731,10 @@ void CCSBotManager::ServerCommand(const char *pcmd)
 	else if (FStrEq(pcmd, "ls_mode"))
 	{
 		Bot_LsModeCommand();
+	}
+	else if (FStrEq(pcmd, "ls_dr"))
+	{
+		LsDrCommand();
 	}
 	else if (FStrEq(pcmd, "ls_mark"))
 	{

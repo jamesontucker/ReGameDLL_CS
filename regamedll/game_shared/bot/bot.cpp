@@ -256,6 +256,7 @@ bool CBot::IsUsingScope() const
 
 bool LsSurfDrive(CBasePlayer *bot, float msec, float *forward, float *strafe, unsigned short *buttons);
 void LsNoSidestep(CBasePlayer *bot, float *forward, float *strafe, unsigned short *buttons);
+void LsDrDrive(CBasePlayer *bot, float *forward, float *strafe, unsigned short *buttons);
 
 void CBot::ExecuteCommand()
 {
@@ -271,6 +272,9 @@ void CBot::ExecuteCommand()
 
 	// Loner-Strike: no sidestepping on a beam or a narrow ledge (bot/cs_bot_ls.cpp)
 	LsNoSidestep(this, &m_forwardSpeed, &m_strafeSpeed, &m_buttonFlags);
+
+	// Loner-Strike: a deathrun runner's jump across a gap, timed at the edge (bot/cs_bot_ls_deathrun.cpp)
+	LsDrDrive(this, &m_forwardSpeed, &m_strafeSpeed, &m_buttonFlags);
 
 	// Loner-Strike: a surf bot's movement, when the brain steers surf (bot_ls_surf, bot/cs_bot_surf.cpp)
 	LsSurfDrive(this, float(adjustedMSec), &m_forwardSpeed, &m_strafeSpeed, &m_buttonFlags);

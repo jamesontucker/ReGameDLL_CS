@@ -1847,6 +1847,7 @@ void GenerateNavigationAreaMesh()
 	MergeGeneratedAreas();
 	SquareUpAreas();
 	MarkJumpAreas();
+	LsCourseLinkAreas();	// Loner-Strike: gaps a running jump clears (obstacle courses)
 }
 
 // Return true if 'pos' is within 2D extents of area.
@@ -4415,7 +4416,8 @@ bool GetGroundHeight(const Vector *pos, float *height, Vector *normal)
 		{
 			// ignoring any entities that we can walk through (Loner-Strike: except a breakable
 			// that's a floor: a glass arena's panes, a plank bridge)
-			if (IsEntityWalkable(VARS(result.pHit), WALK_THRU_DOORS | WALK_THRU_BREAKABLES) && !IsBreakableFloor(result))
+			// (nor, on an obstacle course, a door that's a floor: LsMoverFloor)
+			if (IsEntityWalkable(VARS(result.pHit), WALK_THRU_DOORS | WALK_THRU_BREAKABLES) && !IsBreakableFloor(result) && !LsMoverFloor(result))
 			{
 				ignore = result.pHit;
 				continue;

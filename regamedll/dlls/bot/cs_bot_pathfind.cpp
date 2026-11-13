@@ -1381,6 +1381,9 @@ CCSBot::PathResult CCSBot::UpdatePathMovement(bool allowSpeedChange)
 		SetPathIndex(newIndex);
 	}
 
+	// Loner-Strike deathrun: a gap to jump, a teleport to walk into, a floor to wait for
+	LsDrPathTick();
+
 	if (!IsUsingLadder())
 	{
 		// Crouching
@@ -1515,7 +1518,8 @@ CCSBot::PathResult CCSBot::UpdatePathMovement(bool allowSpeedChange)
 	}
 
 	// dont use adjustedGoal, as it can vary wildly from the feeler adjustment
-	if (!IsAttacking() && IsFriendInTheWay(&m_goalPosition))
+	// (Loner-Strike: deathrun runners pass through each other)
+	if (!IsAttacking() && !LsDrRunner() && IsFriendInTheWay(&m_goalPosition))
 	{
 		if (!m_isWaitingBehindFriend)
 		{
