@@ -137,7 +137,7 @@ static std::vector<int> s_teleSeeded;			// trigger_teleports whose destination h
 static int s_gapSeeds = 0, s_teleSeeds = 0;
 
 // The ground under a point, by a trace down from it (doors that are floors count)
-static bool GroundBelow(const Vector &from, float depth, float *z, Vector *normal)
+static bool GroundBelow(const Vector &from, float depth, float *z, Vector *normal, edict_t **hit = nullptr)
 {
 	TraceResult tr;
 	Vector to = from - Vector(0, 0, depth);
@@ -156,6 +156,8 @@ static bool GroundBelow(const Vector &from, float depth, float *z, Vector *norma
 		}
 		*z = tr.vecEndPos.z;
 		*normal = tr.vecPlaneNormal;
+		if (hit)
+			*hit = tr.pHit;
 		return true;
 	}
 	return false;
@@ -811,6 +813,8 @@ static void Build()
 		s_end.x, s_end.y, s_end.z, s_course, int(s_traps.size()), reach, int(s_teles.size()), int(std::count(s_deadly.begin(), s_deadly.end(), 1)));
 }
 
+static void DeathsLoad();
+
 // Rebuilt when the map or its nav changes
 static bool Ready()
 {
@@ -819,13 +823,15 @@ static bool Ready()
 	const char *map = STRING(gpGlobals->mapname);
 	if (Q_strcmp(s_map, map) || s_navLoads != g_lsNavLoads || s_navFront != TheNavAreaList.front() || s_navSize != TheNavAreaList.size())
 	{
-		if (Q_strcmp(s_map, map))
-			s_deaths.clear();
+		bool newMap = Q_strcmp(s_map, map) != 0;
 		Q_strlcpy(s_map, map);
 		s_navLoads = g_lsNavLoads;
 		s_navFront = TheNavAreaList.front();
 		s_navSize = TheNavAreaList.size();
 		Build();
+		// (what was learned here last time, from the file)
+		if (newMap)
+			DeathsLoad();
 	}
 	return s_ready;
 }
@@ -911,14 +917,88 @@ static float RoundStart()
 	return CSGameRules() ? CSGameRules()->m_fRoundStartTime : 0.0f;
 }
 
+// Deaths are kept beside the map's knowledge, maps/<map>.lsdr: a text file, a version line then
+// "x y z count trap" a line (the next visit's runners know where people fell or were caught)
+static const int LSDR_VERSION = 1;
+
+static void DeathsSave()
+{
+	char gd[64]{}, path[MAX_OSPATH], tmp[MAX_OSPATH];
+	GET_GAME_DIR(gd);
+	Q_snprintf(path, sizeof(path), "%s/maps/%s.lsdr", gd, s_map);
+	Q_snprintf(tmp, sizeof(tmp), "%s.part", path);
+	FILE *f = fopen(tmp, "wt");
+	if (!f)
+		return;
+	fprintf(f, "LSDR %d\n", LSDR_VERSION);
+	for (const Death &d : s_deaths)
+		fprintf(f, "%.0f %.0f %.0f %d %d\n", d.at.x, d.at.y, d.at.z, d.count, d.trap ? 1 : 0);
+	bool ok = !ferror(f);
+	fclose(f);
+	if (!ok)
+	{
+		remove(tmp);
+		return;
+	}
+	remove(path);
+	if (rename(tmp, path) != 0)
+		remove(tmp);
+}
+
+static void DeathsLoad()
+{
+	s_deaths.clear();
+	char rel[128];
+	Q_snprintf(rel, sizeof(rel), "maps/%s.lsdr", s_map);
+	int len = 0;
+	byte *data = LOAD_FILE_FOR_ME(rel, &len);
+	if (!data)
+		return;
+	std::vector<char> text((char *)data, (char *)data + len);
+	FREE_FILE(data);
+	text.push_back('\0');
+	char *line = text.data();
+	int version = 0;
+	bool first = true;
+	while (line && *line)
+	{
+		char *next = strchr(line, '\n');
+		if (next)
+			*next++ = '\0';
+		if (first)
+		{
+			first = false;
+			if (sscanf(line, "LSDR %d", &version) != 1 || version != LSDR_VERSION)
+				return;	// (another version: start over)
+		}
+		else
+		{
+			float x, y, z;
+			int count, trap;
+			if (sscanf(line, "%f %f %f %d %d", &x, &y, &z, &count, &trap) == 5 && s_deaths.size() < 64
+				&& Q_fabs(x) < 16384.0f && Q_fabs(y) < 16384.0f && Q_fabs(z) < 16384.0f)
+			{
+				Death d;
+				d.at = Vector(x, y, z);
+				d.count = Q_max(1, Q_min(count, 20));
+				d.trap = trap != 0;
+				d.when = 0.0f;
+				s_deaths.push_back(d);
+			}
+		}
+		line = next;
+	}
+}
+
 // a death this map: where it was standing last; a trap's if a button went down just before
 static void NoteDeath(const Vector &at, bool trap)
 {
 	for (Death &d : s_deaths)
 		if ((d.at - at).IsLengthLessThan(120.0f) && d.trap == trap)
 		{
-			d.count++;
+			d.count = Q_min(d.count + 1, 20);
 			d.when = gpGlobals->time;
+			DeathsSave();
 			return;
 		}
 	if (s_deaths.size() >= 64)
@@ -932,6 +1012,7 @@ static void NoteDeath(const Vector &at, bool trap)
 	for (Trap &t : s_traps)
 		if (trap && InTrap(t, at, 48.0f))
 			t.kills++;
+	DeathsSave();
 }
 
 static int DeathsNear(const Vector &at, float r, bool *trap)
@@ -1484,13 +1565,60 @@ static bool LsDrSeparated(const CNavArea *a, const CNavArea *b)
 	return Q_max(dx, dy) > 10.0f;
 }
 
-static bool LsDrFloorThere(const CNavArea *area, const Vector &nearPos)
+// The floor there now (the nearest point pulled a little way in - an area's edge can be a block's
+// edge - or its middle); stay: still under that point in that many seconds (a platform moving
+// along, a train, something turning: where it'll be by then)
+static bool LsDrFloorThere(const CNavArea *area, const Vector &nearPos, float stay = 0.0f)
 {
 	Vector p;
 	area->GetClosestPointOnArea(&nearPos, &p);
-	float z;
-	Vector n;
-	return GroundBelow(Vector(p.x, p.y, area->GetZ(&p) + 40.0f), 100.0f, &z, &n);
+	const Vector *c = area->GetCenter();
+	Vector flat(c->x, c->y, p.z);
+	float toMid = (flat - p).Length();
+	Vector in = toMid > 0.5f ? p + (flat - p) * (Q_min(12.0f, toMid) / toMid) : p;
+	Vector spots[2] = { in, *c };
+	for (int k = 0; k < 2; k++)
+	{
+		float z;
+		Vector n;
+		edict_t *hit = nullptr;
+		if (!GroundBelow(Vector(spots[k].x, spots[k].y, area->GetZ(&spots[k]) + 40.0f), 100.0f, &z, &n, &hit))
+			continue;
+		if (stay <= 0.0f || !hit || FNullEnt(hit) || hit == INDEXENT(0))
+			return true;
+		entvars_t *pv = VARS(hit);
+		if (pv->avelocity.Length() > 1.0f)
+			continue;	// (turning: not something to jump onto mid-turn)
+		if (pv->velocity.Length() < 1.0f)
+			return true;
+		Vector shift = pv->velocity * stay;
+		Vector at = spots[k] - shift;
+		if (at.x >= pv->absmin.x + 8.0f && at.x <= pv->absmax.x - 8.0f && at.y >= pv->absmin.y + 8.0f && at.y <= pv->absmax.y - 8.0f)
+			return true;
+	}
+	return false;
+}
+
+// Floors that come and go (platforms, trap floors, turning stones): when each area's floor was
+// last seen there, by anyone, this map - a floor that's been seen to come back is worth a longer wait
+static std::vector<float> s_floorSeenAt;
+
+static void LsDrFloorSeen(const CNavArea *area, bool there)
+{
+	int i = Index(area);
+	if (i < 0)
+		return;
+	if (s_floorSeenAt.size() != s_areas.size())
+		s_floorSeenAt.assign(s_areas.size(), -999.0f);
+	if (there)
+		s_floorSeenAt[i] = gpGlobals->time;
+}
+
+static float LsDrFloorPatience(const CNavArea *area)
+{
+	int i = Index(area);
+	bool comesBack = i >= 0 && size_t(i) < s_floorSeenAt.size() && gpGlobals->time - s_floorSeenAt[i] < 90.0f && s_floorSeenAt[i] <= gpGlobals->time;
+	return comesBack ? 30.0f : 12.0f;
 }
 
 void CCSBot::LsDrPathTick()
@@ -1565,13 +1693,18 @@ void CCSBot::LsDrPathTick()
 		land.y += d.y * 24.0f;
 		land.z = B->GetZ(&land);
 		// (the floor over there isn't there right now - a platform away, a trap floor open: wait)
-		if (!LsDrFloorThere(B, land))
+		bool there = LsDrFloorThere(B, land);
+		LsDrFloorSeen(B, there);
+		// (and still there by the time it lands: a moving platform's timed, not jumped at blindly)
+		if (there && !LsDrFloorThere(B, land, 0.6f))
+			there = false;
+		if (!there)
 		{
 			if ((pev->origin - takeoff).Make2D().IsLengthLessThan(150.0f))
 			{
 				if (r.floorWaitSince <= 0.0f)
 					r.floorWaitSince = now;
-				if (now - r.floorWaitSince > 12.0f)
+				if (now - r.floorWaitSince > LsDrFloorPatience(B))
 				{
 					LsForceBadArea(B, 20.0f);
 					DestroyPath();
@@ -1604,11 +1737,15 @@ void CCSBot::LsDrPathTick()
 			continue;
 		if ((pev->origin - m_path[i].pos).Make2D().IsLengthGreaterThan(120.0f))
 			break;
-		if (!LsDrFloorThere(B, m_path[i].pos))
+		bool there = LsDrFloorThere(B, m_path[i].pos);
+		LsDrFloorSeen(B, there);
+		if (there && !LsDrFloorThere(B, m_path[i].pos, 0.4f))
+			there = false;
+		if (!there)
 		{
 			if (r.floorWaitSince <= 0.0f)
 				r.floorWaitSince = now;
-			if (now - r.floorWaitSince > 12.0f)
+			if (now - r.floorWaitSince > LsDrFloorPatience(B))
 			{
 				LsForceBadArea(B, 20.0f);
 				DestroyPath();
