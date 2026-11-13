@@ -341,12 +341,18 @@ bool CCSBot::LsModeLetsBe(CBasePlayer *pPlayer)
 {
 	if (!LsModeGearing())
 		return false;
-	// (right on it and facing it, or coming at it facing it from close by - two heading for the
-	// same crate from across a field aren't)
+	// (another bot: only once it's going for this one - two at one crate who bump or glance at each
+	// other kept setting each other off; a person: right on it facing it, or coming at it facing it
+	// from close by)
 	Vector toMe = pev->origin - pPlayer->pev->origin;
 	float d = toMe.Length();
 	bool threat = false;
-	if (d < 250.0f)
+	if (pPlayer->IsBot())
+	{
+		CCSBot *pOther = static_cast<CCSBot *>(pPlayer);
+		threat = pOther->IsAttacking() && pOther->GetEnemy() == this;
+	}
+	else if (d < 250.0f)
 	{
 		UTIL_MakeVectors(pPlayer->pev->v_angle);
 		Vector dir = toMe / Q_max(d, 1.0f);
