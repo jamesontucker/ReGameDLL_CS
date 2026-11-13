@@ -56,6 +56,10 @@ void CCreatureImprov::OnReset()
 	m_isFacingTo = false;
 	m_path.Invalidate();
 	m_repathTimer.Invalidate();
+	m_repathFails = 0;
+	m_failedGoal = Vector(0, 0, 0);
+	m_directCheckTimer.Invalidate();
+	m_directOk = false;
 	m_directStuckTimer.Invalidate();
 	m_jumpTimer.Invalidate();
 	m_hasJumped = false;
@@ -81,8 +85,34 @@ void CCreatureImprov::MoveTo(const Vector &goal)
 	m_moveGoal = goal;
 	m_hasGoal = true;
 	m_path.Invalidate();
-	m_repathTimer.Invalidate();
 	m_directStuckTimer.Invalidate();
+	m_directCheckTimer.Invalidate();
+
+	// (an unreachable target asked for again and again keeps its back-off; a new place doesn't)
+	if (!m_repathFails || (goal - m_failedGoal).IsLengthGreaterThan(256.0f))
+	{
+		m_repathFails = 0;
+		m_repathTimer.Invalidate();
+	}
+}
+
+// Path searches across all creatures: at most two a frame, the rest wait their turn (a tick or two)
+static bool LsPathBudget()
+{
+	static float s_frame = -1.0f;
+	static int s_used = 0;
+
+	if (gpGlobals->time != s_frame)
+	{
+		s_frame = gpGlobals->time;
+		s_used = 0;
+	}
+
+	if (s_used >= 2)
+		return false;
+
+	s_used++;
+	return true;
 }
 
 void CCreatureImprov::Stop()
@@ -484,7 +514,7 @@ void CCreatureImprov::OnTouch(CBaseEntity *pOther)
 			}
 		}
 	}
-	else if (pOther->IsPlayer() || LsCreatureOf(pOther))
+	else if (pOther->IsPlayer() || FClassnameIs(pOther->pev, "ls_creature"))
 	{
 		Vector2D to = (m_creature->pev->origin - pOther->pev->origin).Make2D();
 		to.NormalizeInPlace();
@@ -534,27 +564,47 @@ void CCreatureImprov::UpdatePosition(float deltaT)
 	{
 		// close by and in plain sight: straight at it, no path (a target shuffling about)
 		Vector toGoal = m_moveGoal - GetFeet();
-		bool direct = TheNavAreaList.empty()
-			|| (toGoal.Make2D().IsLengthLessThan(160.0f) && Q_fabs(toGoal.z) < 40.0f && IsVisible(m_moveGoal + Vector(0, 0, HalfHumanHeight)));
+		bool nearGoal = toGoal.Make2D().IsLengthLessThan(160.0f) && Q_fabs(toGoal.z) < 40.0f;
+		if (nearGoal && m_directCheckTimer.IsElapsed())
+		{
+			m_directCheckTimer.Start(0.2f);
+			m_directOk = IsVisible(m_moveGoal + Vector(0, 0, HalfHumanHeight));
+		}
+		bool direct = TheNavAreaList.empty() || (nearGoal && m_directOk);
+		bool waiting = false;
 
 		if (!direct && !m_path.IsValid() && m_repathTimer.IsElapsed())
 		{
-			HostagePathCost pathCost;
-			if (m_path.Compute(&GetFeet(), &m_moveGoal, pathCost))
+			if (!LsPathBudget())
 			{
-				m_follower.SetPath(&m_path);
-				m_follower.SetImprov(this);
-				m_follower.Reset();
-				m_follower.Debug(ls_creature_debug.value > 1.0f);
+				waiting = true;
 			}
 			else
 			{
-				// (no way there: try again in a bit, straight at it meanwhile)
-				m_repathTimer.Start(1.0f);
+				HostagePathCost pathCost;
+				if (m_path.Compute(&GetFeet(), &m_moveGoal, pathCost))
+				{
+					m_repathFails = 0;
+					m_follower.SetPath(&m_path);
+					m_follower.SetImprov(this);
+					m_follower.Reset();
+					m_follower.Debug(ls_creature_debug.value > 1.0f);
+				}
+				else
+				{
+					// (no way there: wait longer each time it's still no way, straight at it meanwhile)
+					m_failedGoal = m_moveGoal;
+					m_repathTimer.Start(float(1 << Q_min(m_repathFails, 3)));
+					m_repathFails++;
+				}
 			}
 		}
 
-		if (!direct && m_path.IsValid())
+		if (waiting)
+		{
+			// (its turn for a path search comes next frame: stand rather than walk into a wall)
+		}
+		else if (!direct && m_path.IsValid())
 		{
 			m_directStuckTimer.Invalidate();
 			m_follower.Update(deltaT, m_inhibitObstacleAvoidance.IsElapsed());

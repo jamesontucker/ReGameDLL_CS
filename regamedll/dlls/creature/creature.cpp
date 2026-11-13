@@ -39,6 +39,7 @@ cvar_t ls_creature_debug     = { "ls_creature_debug", "0", 0, 0.0f, nullptr };
 cvar_t ls_creature_last      = { "ls_creature_last", "0", 0, 0.0f, nullptr };		// the last one spawned (entity index), for plugins
 cvar_t ls_creature_alive     = { "ls_creature_alive", "0", 0, 0.0f, nullptr };		// how many are alive (all providers)
 cvar_t ls_creature_ver       = { "ls_creature_ver", "1", 0, 1.0f, nullptr };
+cvar_t ls_creature_frags     = { "ls_creature_frags", "0", 0, 0.0f, nullptr };		// 1 = kills add the type's frags to the score (counts toward mp_fraglimit)
 
 void LsCreatures_RegisterCVars()
 {
@@ -50,6 +51,7 @@ void LsCreatures_RegisterCVars()
 	CVAR_REGISTER(&ls_creature_last);
 	CVAR_REGISTER(&ls_creature_alive);
 	CVAR_REGISTER(&ls_creature_ver);
+	CVAR_REGISTER(&ls_creature_frags);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1704,7 +1706,7 @@ void CLsCreature::KillQuietly()
 
 // What it sees: a hostile player inside its sight radius, in its view cone (all round when
 // it's already alert), not behind a wall
-bool CLsCreature::CanSee(CBaseEntity *pOther, bool alert) const
+bool CLsCreature::CanSee(CBaseEntity *pOther, bool alert, bool thorough) const
 {
 	Vector eyes = pev->origin + pev->view_ofs;
 	Vector body = pOther->pev->origin + pOther->pev->view_ofs * 0.5f;
@@ -1737,6 +1739,10 @@ bool CLsCreature::CanSee(CBaseEntity *pOther, bool alert) const
 	UTIL_TraceLine(eyes, pOther->pev->origin + pOther->pev->view_ofs, ignore_monsters, ignore_glass, ENT(pev), &tr);
 	if (tr.flFraction == 1.0f)
 		return true;
+
+	// (whom it's after gets a second look, at the body: head behind a crate isn't gone)
+	if (!thorough)
+		return false;
 
 	UTIL_TraceLine(eyes, body, ignore_monsters, ignore_glass, ENT(pev), &tr);
 	return tr.flFraction == 1.0f;
@@ -1813,16 +1819,57 @@ void CLsCreature::UpdateSenses()
 	float bestDist = 0.0f;
 	bool currentSeen = false;
 
+	// (only the nearest few in range get sight traces - and whom it's after, always)
+	const int maxLooks = 4;
+	CBasePlayer *looks[maxLooks + 1];
+	float lookDist[maxLooks + 1];
+	int lookCount = 0;
+	float range = m_detect * 1.5f;
+
 	for (int i = 1; i <= gpGlobals->maxClients; i++)
 	{
 		CBasePlayer *pPlayer = UTIL_PlayerByIndex(i);
 		if (!pPlayer || !IsHostileTo(pPlayer))
 			continue;
 
-		if (!CanSee(pPlayer, alert || pPlayer == pCurrent))
+		float dist = (pPlayer->pev->origin - pev->origin).Length();
+		if (dist > range || pPlayer == pCurrent)
 			continue;
 
-		float dist = (pPlayer->pev->origin - pev->origin).Length();
+		// (insertion into the short sorted list)
+		int at = lookCount;
+		while (at > 0 && lookDist[at - 1] > dist)
+			at--;
+
+		if (at >= maxLooks)
+			continue;
+
+		for (int k = Q_min(lookCount, maxLooks - 1); k > at; k--)
+		{
+			looks[k] = looks[k - 1];
+			lookDist[k] = lookDist[k - 1];
+		}
+
+		looks[at] = static_cast<CBasePlayer *>(pPlayer);
+		lookDist[at] = dist;
+		lookCount = Q_min(lookCount + 1, maxLooks);
+	}
+
+	if (pCurrent && pCurrent->IsPlayer())
+	{
+		looks[lookCount] = static_cast<CBasePlayer *>(pCurrent);
+		lookDist[lookCount] = (pCurrent->pev->origin - pev->origin).Length();
+		lookCount++;
+	}
+
+	for (int l = 0; l < lookCount; l++)
+	{
+		CBasePlayer *pPlayer = looks[l];
+		float dist = lookDist[l];
+
+		if (!CanSee(pPlayer, alert || pPlayer == pCurrent, pPlayer == pCurrent))
+			continue;
+
 		if (pPlayer == pCurrent)
 		{
 			currentSeen = true;
@@ -2102,7 +2149,7 @@ void CLsCreature::Killed(entvars_t *pevAttacker, int iGib)
 	if (pKiller && pKiller->IsPlayer() && pKiller != this)
 	{
 		CBasePlayer *pPlayer = static_cast<CBasePlayer *>(pKiller);
-		if (t && t->frags)
+		if (t && t->frags && ls_creature_frags.value > 0.0f)
 			pPlayer->AddPoints(t->frags, FALSE);
 		if (t && t->money)
 			pPlayer->AddAccount(t->money, RT_ENEMY_KILLED);

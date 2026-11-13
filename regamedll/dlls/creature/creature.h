@@ -317,6 +317,10 @@ private:
 	CNavPath m_path;
 	CNavPathFollower m_follower;
 	CountdownTimer m_repathTimer;		// a failed path isn't tried again every tick
+	int m_repathFails;					// failures in a row to about the same goal: the wait doubles (1, 2, 4, 8 s)
+	Vector m_failedGoal;
+	CountdownTimer m_directCheckTimer;	// the "straight at it" sight check, a few times a second
+	bool m_directOk;
 	IntervalTimer m_directStuckTimer;	// no path: how long it's made no headway
 
 	NavRelativeDirType m_wiggleDirection;
@@ -388,8 +392,7 @@ private:
 	void UpdateSearch();
 	void UpdateFlee();
 	void UpdateAnimation();
-	void ChooseTarget();
-	bool CanSee(CBaseEntity *pOther, bool alert) const;
+	bool CanSee(CBaseEntity *pOther, bool alert, bool thorough) const;
 	bool WantsToFight(CBaseEntity *pOther, float dist) const;
 	void Notice(CBaseEntity *pOther, bool alert);
 	void StartAttack();
