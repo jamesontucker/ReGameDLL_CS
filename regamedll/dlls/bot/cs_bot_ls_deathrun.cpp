@@ -1880,7 +1880,7 @@ bool CCSBot::LsDrJumpGap(int i)
 			if (!ground || z < feet - 20.0f)
 				edge = a;
 		}
-		else if (ground && z >= feet - 150.0f)
+		else if (ground && z >= feet - 60.0f)
 		{
 			land = a + 20.0f;
 			landZ = z;
