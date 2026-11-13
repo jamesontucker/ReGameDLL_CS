@@ -340,8 +340,10 @@ bool CCSBot::LsModeGearing()
 		return false;
 	float since = gpGlobals->time - s_lsPeaceEndAt;
 	bool armed = m_rgpPlayerItems[PRIMARY_WEAPON_SLOT] != nullptr;
+	// (hit: armed, the fight's on; unarmed, it fights whoever hit it - LsModeLetsBe - and goes
+	// back to looting: a knife let loose on whoever's nearest set off the chains of knife kills)
 	if (since < 0.0f || since > (armed ? 90.0f : 40.0f + 40.0f * LsTrait(206)) || (armed && LsModeKitted())
-		|| GetTimeSinceAttacked() < 2.0f)
+		|| (armed && GetTimeSinceAttacked() < 2.0f))
 	{
 		m_lsModeGearDone = true;
 		return false;
@@ -360,7 +362,8 @@ bool CCSBot::LsModeLetsBe(CBasePlayer *pPlayer)
 	// from close by)
 	Vector toMe = pev->origin - pPlayer->pev->origin;
 	float d = toMe.Length();
-	bool threat = false;
+	// (whoever hit it lately is a fight)
+	bool threat = pPlayer == GetAttacker() && GetTimeSinceAttacked() < 5.0f;
 	// (armed, and someone in sight who landed close by: a hot drop - fight now; in sight already,
 	// this is only asked of players it sees)
 	if (m_rgpPlayerItems[PRIMARY_WEAPON_SLOT] && d < 500.0f)
@@ -369,12 +372,12 @@ bool CCSBot::LsModeLetsBe(CBasePlayer *pPlayer)
 		LsWhy("mode gearing up: hot drop");
 		return false;
 	}
-	if (pPlayer->IsBot())
+	if (!threat && pPlayer->IsBot())
 	{
 		CCSBot *pOther = static_cast<CCSBot *>(pPlayer);
 		threat = pOther->IsAttacking() && pOther->GetEnemy() == this && pOther->IsEnemyVisible();
 	}
-	else if (d < 250.0f)
+	else if (!threat && d < 250.0f)
 	{
 		UTIL_MakeVectors(pPlayer->pev->v_angle);
 		Vector dir = toMe / Q_max(d, 1.0f);
