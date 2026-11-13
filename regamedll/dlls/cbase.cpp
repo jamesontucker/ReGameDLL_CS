@@ -58,7 +58,7 @@ NEW_DLL_FUNCTIONS gNewDLLFunctions =
 {
 	&OnFreeEntPrivateData,
 	&OnGameShutdown,
-	nullptr,
+	&LsCreatureShouldCollide,	// Loner-Strike: creatures pass through each other (always yes without creatures)
 	nullptr,
 	nullptr
 };

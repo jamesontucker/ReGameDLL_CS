@@ -387,6 +387,8 @@ void EXT_FUNC GameDLLInit()
 	ADD_SERVER_COMMAND("endround", GameDLL_EndRound_f);
 	ADD_SERVER_COMMAND("swapteams", GameDLL_SwapTeams_f);
 	ADD_SERVER_COMMAND("ls_surfcheck", LsSurfCheck_f);	// Loner-Strike: the surf movement check (bot/cs_bot_surf.cpp)
+	ADD_SERVER_COMMAND("ls_creature", LsCreature_f);	// Loner-Strike: creatures (creature/creature.cpp)
+	LsCreatures_RegisterCVars();
 
 	CVAR_REGISTER(&game_version);
 	CVAR_REGISTER(&maxmoney);
