@@ -1843,6 +1843,7 @@ void LsDrCommand();
 void LsDrDrive(CBasePlayer *bot, float *forward, float *strafe, unsigned short *buttons);
 bool LsDrCosts();
 float LsDrAreaCost(const CNavArea *area);
+float LsDrLinkCost(const CNavArea *area, const CNavArea *fromArea);
 bool LsSightReady();
 bool LsSees(const CNavArea *a, const CNavArea *b);	// someone in one area could see into the other
 int LsSightQuality(const CNavArea *a, const CNavArea *b);	// 0-255, how much
@@ -2541,7 +2542,7 @@ public:
 				float drCost = LsDrAreaCost(area);
 				if (drCost < 0.0f)
 					return -1.0f;
-				dist *= drCost;
+				dist = dist * drCost + LsDrLinkCost(area, fromArea);
 			}
 
 			// Loner-Strike: this bot's favourite (and not so favourite) parts of the map

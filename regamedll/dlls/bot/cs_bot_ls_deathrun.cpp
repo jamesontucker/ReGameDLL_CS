@@ -71,7 +71,8 @@ bool LsMoverFloor(const TraceResult &result)
 	if (!result.pHit || result.vecPlaneNormal.z < 0.7f || !LsNavCourse())
 		return false;
 	entvars_t *pevHit = VARS(result.pHit);
-	if (!FClassnameIs(pevHit, "func_door") && !FClassnameIs(pevHit, "func_door_rotating"))
+	// (and a breakable floor of any stuff: deathrun's floors that crumble when the trap's pressed)
+	if (!FClassnameIs(pevHit, "func_door") && !FClassnameIs(pevHit, "func_door_rotating") && !FClassnameIs(pevHit, "func_breakable"))
 		return false;
 	Vector size = pevHit->absmax - pevHit->absmin;
 	if (size.x < 40.0f || size.y < 40.0f)
@@ -271,7 +272,10 @@ static bool GapJumpAt(const Vector &p, int dir, bool runup, Vector *land, Vector
 
 static bool GapJump(const CNavNode *node, int dir, Vector *land, Vector *landNormal)
 {
-	return GapJumpAt(*node->GetPosition(), dir, node->GetConnectedNode(OppositeDirection((NavDirType)dir)) != nullptr, land, landNormal, false);
+	// (a run-up: two steps behind it, straight)
+	const CNavNode *back = node->GetConnectedNode(OppositeDirection((NavDirType)dir));
+	bool runup = back && back->GetConnectedNode(OppositeDirection((NavDirType)dir)) != nullptr;
+	return GapJumpAt(*node->GetPosition(), dir, runup, land, landNormal, false);
 }
 
 } // namespace LsDr
@@ -965,6 +969,22 @@ bool LsDrCosts()
 	return LsDrOn() && LsDr::s_ready;
 }
 
+// A jump across a gap costs a little more than the walk: people take the floor when there is one
+float LsDrLinkCost(const CNavArea *area, const CNavArea *fromArea)
+{
+	if (!fromArea || !area)
+		return 0.0f;
+	const Extent *ea = fromArea->GetExtent(), *eb = area->GetExtent();
+	float sep = Q_max(Q_max(eb->lo.x - ea->hi.x, ea->lo.x - eb->hi.x), Q_max(eb->lo.y - ea->hi.y, ea->lo.y - eb->hi.y));
+	if (sep <= 10.0f)
+		return 0.0f;
+	int ia = Index(fromArea), ib = Index(area);
+	for (const Tele &tl : s_teles)
+		if (tl.from == ia && tl.to == ib)
+			return 0.0f;
+	return 250.0f + 2.0f * sep;
+}
+
 float LsDrAreaCost(const CNavArea *area)
 {
 	using namespace LsDr;
@@ -1558,7 +1578,7 @@ void LsDrDrive(CBasePlayer *bot, float *forward, float *strafe, unsigned short *
 			wish = len > 1.0f ? wish / len : r.gapDir;
 			if (toEdge < 14.0f + 0.06f * Q_max(0.0f, speed) && toEdge > -20.0f && now - r.jumpedAt > 0.8f)
 			{
-				if (speed > 170.0f)
+				if (speed > 200.0f)
 				{
 					if (me->IsCrouching())
 						me->StandUp();
@@ -1566,7 +1586,7 @@ void LsDrDrive(CBasePlayer *bot, float *forward, float *strafe, unsigned short *
 						r.jumpedAt = now;
 				}
 				else if (toEdge < 6.0f)
-					r.backUntil = now + 0.3f;
+					r.backUntil = now + 0.45f;
 			}
 		}
 	}
