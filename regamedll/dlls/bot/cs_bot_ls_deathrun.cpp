@@ -654,8 +654,28 @@ static void Build()
 		CBaseEntity *pDest = UTIL_FindEntityByTargetname(nullptr, STRING(pTele->pev->target));
 		if (!pDest)
 			continue;
+		// (where you end up: a destination over a shaft drops you into the next teleport - followed)
 		Vector dest = pDest->pev->origin;
-		int to = Index(AreaAt(dest));
+		CNavArea *destArea = nullptr;
+		for (int chain = 0; chain < 4 && !destArea; chain++)
+		{
+			destArea = TheNavAreaGrid.GetNavArea(&dest, 400.0f);
+			if (destArea)
+				break;
+			TraceResult tr;
+			UTIL_TraceLine(dest, dest - Vector(0, 0, 8192.0f), ignore_monsters, nullptr, &tr);
+			Vector bottom = tr.vecEndPos + Vector(0, 0, 16.0f);
+			CBaseEntity *pNext = nullptr, *pFound = nullptr;
+			while ((pNext = UTIL_FindEntityByClassname(pNext, "trigger_teleport")) != nullptr)
+				if (pNext != pTele && bottom.x >= pNext->pev->absmin.x && bottom.x <= pNext->pev->absmax.x && bottom.y >= pNext->pev->absmin.y
+					&& bottom.y <= pNext->pev->absmax.y && bottom.z >= pNext->pev->absmin.z - 32.0f && bottom.z <= pNext->pev->absmax.z && !FStringNull(pNext->pev->target))
+					pFound = pNext;
+			CBaseEntity *pNextDest = pFound ? UTIL_FindEntityByTargetname(nullptr, STRING(pFound->pev->target)) : nullptr;
+			if (!pNextDest)
+				break;
+			dest = pNextDest->pev->origin;
+		}
+		int to = Index(destArea);
 		if (to < 0)
 			continue;
 		Vector lo = pTele->pev->absmin, hi = pTele->pev->absmax;
