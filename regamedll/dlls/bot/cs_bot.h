@@ -1721,7 +1721,8 @@ public:
 	void LsModeInside(unsigned int *avoidMask) const;	// the avoid zones it's standing in (paths may leave them)
 	void LsModePostUpdate();						// after the state machine: a stand-still or step a goal asked for
 	bool LsModePeace();								// a mode's peace (a loot-up), or the moment after it: no player enemies
-	bool LsModeGearing();							// just after the peace: gearing up before hunting (40-80 s)
+	bool LsModeGearing();							// just after the peace: gearing up before hunting
+	bool LsModeKitted();							// armor, a pistol and a spare magazine beside a main gun
 	bool LsModeLetsBe(CBasePlayer *pPlayer);		// ...someone in sight left be (not right on it, nor coming at it)
 	const Vector *LsModeSpot() const;				// the spot it holds for a station (teammates pick others)
 	int LsModeGoalNow() const { return m_lsModeGoalOn >= 0 ? m_lsModeGoal[m_lsModeGoalOn].kind : 0; }	// what it's on (trace)
