@@ -141,6 +141,7 @@ struct LsCreatureType
 	float respawn;			// seconds after death it comes back at home (0 = never)
 	float corpseTime;		// seconds the body stays
 	bool moves;				// false: a turret
+	bool canClimb;			// may path up and down ladders (no built-in type does)
 	int frags;				// score for the killer
 	int money;				// money for the killer
 
@@ -396,6 +397,7 @@ private:
 	void UpdateAnimation();
 	bool CanSee(CBaseEntity *pOther, bool alert, bool thorough) const;
 	bool WantsToFight(CBaseEntity *pOther, float dist) const;
+	bool SkipsTarget(CBaseEntity *pOther) const { return pOther == m_skipTarget && gpGlobals->time < m_skipUntil; }
 	void Notice(CBaseEntity *pOther, bool alert);
 	void StartAttack();
 	void LandAttack();
@@ -439,6 +441,10 @@ private:
 	Mode m_mode;
 	EHANDLE m_target;
 	EHANDLE m_forcedTarget;		// told whom to attack (ls_creature target)
+	EHANDLE m_skipTarget;		// one it couldn't get to (up a ladder): left alone a while
+	float m_skipUntil;
+	float m_cantReachSince;		// close below the target and not getting higher, since (0 = not)
+	float m_cantReachZ;
 	EHANDLE m_lastAttacker;
 	EHANDLE m_noticing;			// seen, not yet sure
 	float m_noticeStart;

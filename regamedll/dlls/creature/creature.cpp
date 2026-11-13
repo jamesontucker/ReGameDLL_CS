@@ -651,6 +651,7 @@ static void LsSetTypeKey(LsCreatureType *t, const char *key, const char *value)
 	else if (!Q_stricmp(key, "respawn")) t->respawn = LsNum(value, 0.0f, 3600.0f, t->respawn);
 	else if (!Q_stricmp(key, "corpse_time")) t->corpseTime = LsNum(value, 0.0f, 120.0f, t->corpseTime);
 	else if (!Q_stricmp(key, "moves")) t->moves = Q_atoi(value) != 0;
+	else if (!Q_stricmp(key, "can_climb")) t->canClimb = Q_atoi(value) != 0;
 	else if (!Q_stricmp(key, "frags")) t->frags = clamp(Q_atoi(value), -100, 100);
 	else if (!Q_stricmp(key, "money")) t->money = clamp(Q_atoi(value), -16000, 16000);
 	else if (!Q_stricmp(key, "model") || !Q_stricmp(key, "models")) Q_strlcpy(t->models, value);
@@ -1725,6 +1726,9 @@ void CLsCreature::Setup()
 	m_nextIdleSound = gpGlobals->time + RANDOM_FLOAT(4.0f, 12.0f);
 	m_painSoundAt = 0.0f;
 	m_flinchUntil = 0.0f;
+	m_skipTarget = nullptr;
+	m_skipUntil = 0.0f;
+	m_cantReachSince = 0.0f;
 	m_animMoving = false;
 	m_attackFramerate = 1.0f;
 	m_attackAnimEnd = 0.0f;
@@ -2325,7 +2329,7 @@ void CLsCreature::UpdateSenses()
 	for (int i = 1; i <= gpGlobals->maxClients; i++)
 	{
 		CBasePlayer *pPlayer = UTIL_PlayerByIndex(i);
-		if (!pPlayer || !IsHostileTo(pPlayer))
+		if (!pPlayer || !IsHostileTo(pPlayer) || SkipsTarget(pPlayer))
 			continue;
 
 		float dist = (pPlayer->pev->origin - pev->origin).Length();
@@ -2397,7 +2401,7 @@ void CLsCreature::UpdateSenses()
 		for (int i = 1; i <= gpGlobals->maxClients; i++)
 		{
 			CBasePlayer *pPlayer = UTIL_PlayerByIndex(i);
-			if (!pPlayer || !IsHostileTo(pPlayer))
+			if (!pPlayer || !IsHostileTo(pPlayer) || SkipsTarget(pPlayer))
 				continue;
 
 			float dist = (pPlayer->pev->origin - pev->origin).Length();
@@ -2997,6 +3001,28 @@ void CLsCreature::UpdateChase()
 	if (!t->moves)
 	{
 		m_improv->FaceTo(m_targetLastSeen);
+		return;
+	}
+
+	// can't get to them (up a ladder it can't climb, on a ledge): close below them and not getting
+	// any higher. A few seconds of that and it leaves them be a while - another target, or back
+	// to its round (it doesn't stand under the ladder for ever)
+	bool onLadder = pTarget->IsPlayer() && static_cast<CBasePlayer *>(pTarget)->IsOnLadder() && !t->canClimb;
+	bool below = dist < 250.0f && pTarget->pev->origin.z - pev->origin.z > 56.0f;
+	if (!(below || onLadder))
+		m_cantReachSince = 0.0f;
+	else if (m_cantReachSince <= 0.0f || pev->origin.z > m_cantReachZ + 16.0f)
+	{
+		// (climbing stairs towards them: still getting there)
+		m_cantReachSince = now;
+		m_cantReachZ = pev->origin.z;
+	}
+	else if (now - m_cantReachSince > 3.0f && m_forcedTarget != pTarget)
+	{
+		m_skipTarget = pTarget;
+		m_skipUntil = now + 8.0f;
+		m_cantReachSince = 0.0f;
+		GoHome();
 		return;
 	}
 
