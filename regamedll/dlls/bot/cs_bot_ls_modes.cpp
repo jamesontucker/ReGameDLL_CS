@@ -401,6 +401,33 @@ static void LsModeRefreshTargets()
 	}
 }
 
+// Something between a bot and a mode enemy (a barricade, a fence): shot through by design -
+// one of the mode's own entities (ls_*) marked so (pev->iuser4 1: built to let bullets by, a
+// fence of wire or boards with gaps)
+static bool LsModeShootThrough(CBaseEntity *pThing)
+{
+	return pThing && !FNullEnt(pThing->pev) && !Q_strncmp(STRING(pThing->pev->classname), "ls_", 3) && pThing->pev->iuser4 == 1;
+}
+
+// ...or seen through: shot through by design, nothing drawn (a beam fence's box), or see-through
+// (a window, a barricade faded with damage; the sight traces skip such "glass", bullets don't)
+static bool LsModeSeeThrough(CBaseEntity *pThing)
+{
+	if (!pThing || FNullEnt(pThing->pev))
+		return false;
+	return LsModeShootThrough(pThing) || FStringNull(pThing->pev->model) || !STRING(pThing->pev->model)[0]
+		|| (pThing->pev->effects & EF_NODRAW) || (pThing->pev->rendermode != kRenderNormal && pThing->pev->renderamt < 200.0f);
+}
+
+// One of the mode enemies alive now
+static bool LsModeIsTarget(CBaseEntity *pThing)
+{
+	for (int k = 0; k < s_lsTargetCount; k++)
+		if (s_lsTarget[k] == pThing)
+			return LsModeTargetOk(pThing);
+	return false;
+}
+
 // A mode enemy in sight: a point on it seen from the eyes (a monster's middle and its upper
 // body; a brush creature's nearest side and its middle - a line to the middle of a brush
 // stops on its own surface, which counts). *at gets the point seen; *traces counts the lines
@@ -431,11 +458,16 @@ bool CCSBot::LsModeSees(CBaseEntity *pEntity, bool testFOV, Vector *at, int *tra
 		TraceResult result;
 		UTIL_TraceLine(eye, pos, ignore_monsters, ignore_glass, ENT(pev), &result);
 		(*traces)++;
-		if (result.flFraction == 1.0f || result.pHit == pEntity->edict())
-		{
-			*at = pos;
-			return true;
-		}
+		if (result.flFraction < 1.0f && result.pHit != pEntity->edict())
+			continue;
+		// (the line skipped "glass": anything solid in it that isn't see-through - a barricade,
+		// opaque boards - hides it after all)
+		UTIL_TraceLine(eye, pos, ignore_monsters, dont_ignore_glass, ENT(pev), &result);
+		(*traces)++;
+		if (result.flFraction < 1.0f && result.pHit != pEntity->edict() && !LsModeSeeThrough(CBaseEntity::Instance(result.pHit)))
+			continue;
+		*at = pos;
+		return true;
 	}
 	return false;
 }
@@ -560,6 +592,38 @@ bool CCSBot::LsModeShootTick()
 		}
 		m_lsModeStillUntil = now + 0.4f;
 	}
+
+	// no shot that can't reach it: the bullet's own line from the gun - a barricade, boards, a
+	// fence that stops bullets in the way and the trigger stays off (it keeps watching; after a
+	// moment it moves for another angle, or waits for them to break through)
+	TraceResult shot;
+	UTIL_TraceLine(GetGunPosition(), pos, dont_ignore_monsters, dont_ignore_glass, ENT(pev), &shot);
+	CBaseEntity *pInWay = (shot.flFraction < 1.0f && shot.pHit != pTarget->edict()) ? CBaseEntity::Instance(shot.pHit) : nullptr;
+	if (shot.flFraction < 1.0f && shot.pHit != pTarget->edict() && !(pInWay && (LsModeShootThrough(pInWay) || LsModeIsTarget(pInWay))))
+	{
+		if (m_lsModeBlockedSince < 0.0f)
+		{
+			m_lsModeBlockedSince = now;
+			LsWhy("mode enemy: held fire, something in the way");
+		}
+		m_lsModeStillUntil = 0.0f;
+		if (now - m_lsModeBlockedSince < 1.5f)
+			return true;
+		// (another angle: a spot near by, once in a while; meanwhile the rest of its play goes on)
+		if (now >= m_lsModeAngleAt && !IsUsingLadder())
+		{
+			m_lsModeAngleAt = now + 4.0f;
+			Vector spot;
+			if (LsModePickSpot(pev->origin, 350.0f, &spot))
+			{
+				LsModeMove(spot, true);
+				m_lsModePushUntil = now + 3.0f;
+				LsWhy("mode enemy: moving for an angle");
+			}
+		}
+		return false;
+	}
+	m_lsModeBlockedSince = -1.0f;
 
 	// the trigger once the view's on it (the stock fire's tolerance: a body's width at that range)
 	Vector to = pos - GetGunPosition();
