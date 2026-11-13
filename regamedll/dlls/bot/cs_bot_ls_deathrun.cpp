@@ -106,9 +106,10 @@ static void DeadlyHurts(std::vector<Box> &out)
 	{
 		if (pEnt->pev->dmg < 50.0f || (pEnt->pev->spawnflags & 2) || !FStringNull(pEnt->pev->targetname))
 			continue;
+		// (its own box: absmin/absmax are padded a unit all round, and on a floor a unit decides)
 		Box b;
-		b.lo = pEnt->pev->absmin;
-		b.hi = pEnt->pev->absmax;
+		b.lo = pEnt->pev->origin + pEnt->pev->mins;
+		b.hi = pEnt->pev->origin + pEnt->pev->maxs;
 		out.push_back(b);
 	}
 }
