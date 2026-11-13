@@ -1394,7 +1394,7 @@ static bool LsSurfSteer(CBasePlayer *bot, LsSurf::SurfBot &b, float msec, float 
 			// (once exploring's mostly done - early on it's going everywhere anyway - and once a place)
 			long long seedKey = Key(me.o);
 			if (!me.onground && Under(me) && s_iters >= MAX_ITERS * 3 / 4 && s_seeds.size() < 8 && s_seedsTaken < 200
-				&& (int)s_nodes.size() < MAX_NODES && s_seeded.find(seedKey) == s_seeded.end())
+				&& (int)s_nodes.size() < LsSurf::MAX_NODES && s_seeded.find(seedKey) == s_seeded.end())
 			{
 				s_seeded[seedKey] = true;
 				Player seed = me;
