@@ -341,16 +341,17 @@ bool CCSBot::LsModeLetsBe(CBasePlayer *pPlayer)
 {
 	if (!LsModeGearing())
 		return false;
+	// (right on it and facing it, or coming at it facing it; just near - both at one crate - isn't)
 	Vector toMe = pev->origin - pPlayer->pev->origin;
 	float d = toMe.Length();
-	bool threat = d < 200.0f;
-	if (!threat && d < 500.0f)
+	bool threat = false;
+	if (d < 500.0f)
 	{
 		UTIL_MakeVectors(pPlayer->pev->v_angle);
 		Vector dir = toMe / Q_max(d, 1.0f);
 		bool facing = DotProduct(gpGlobals->v_forward, dir) > 0.9f;
 		bool closing = DotProduct(pPlayer->pev->velocity, dir) > 100.0f;
-		threat = facing && closing;
+		threat = facing && (d < 100.0f || closing);
 	}
 	if (threat)
 	{
@@ -365,17 +366,23 @@ bool CCSBot::LsModeLetsBe(CBasePlayer *pPlayer)
 // from anyone close (looting, not crowding the others for the moment the fighting starts)
 void CCSBot::LsModePeaceTick()
 {
-	float now = gpGlobals->time;
 	if (IsAttacking())
 		StopAttacking();
 	if (IsFollowing())
 		StopFollowing();
 	ForgetNoise();
-	if (now < m_lsModePeaceMoveAt || IsOnLadder())
+	LsModeRoomTick(350.0f);
+}
+
+// Room from anyone close: now and then it walks away from the nearest one within reach
+void CCSBot::LsModeRoomTick(float reach)
+{
+	float now = gpGlobals->time;
+	if (now < m_lsModePeaceMoveAt || IsOnLadder() || IsAttacking())
 		return;
 	m_lsModePeaceMoveAt = now + RANDOM_FLOAT(1.5f, 3.0f);
 	CBasePlayer *pNear = nullptr;
-	float nearest = 350.0f;
+	float nearest = reach;
 	for (int i = 1; i <= gpGlobals->maxClients; i++)
 	{
 		CBasePlayer *pPlayer = UTIL_PlayerByIndex(i);
@@ -1029,8 +1036,12 @@ void CCSBot::LsModeTick()
 		LsModePeaceTick();
 	// (gearing up after it: far noises aren't chased, the loot is)
 	bool gearing = LsModeGearing();
-	if (gearing && IsNoiseHeard() && (m_noisePosition - pev->origin).IsLengthGreaterThan(600.0f))
-		ForgetNoise();
+	if (gearing)
+	{
+		if (IsNoiseHeard() && (m_noisePosition - pev->origin).IsLengthGreaterThan(600.0f))
+			ForgetNoise();
+		LsModeRoomTick(250.0f);
+	}
 
 	bool shooting = LsModeShootTick();
 
