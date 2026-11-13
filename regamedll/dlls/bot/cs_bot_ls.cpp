@@ -69,6 +69,7 @@ cvar_t cv_ls_sites          = { "ls_sites", "", 0, 0.0f, nullptr };
 const char LS_PEEK[] = "Loner-Strike: peek";
 
 extern cvar_t cv_bot_ls_surf, cv_bot_ls_surf_land;	// bot/cs_bot_surf.cpp
+extern cvar_t cv_ls_mode_ver;	// bot/cs_bot_ls_modes.cpp
 
 void Bot_LsRegisterCVars()
 {
@@ -83,6 +84,7 @@ void Bot_LsRegisterCVars()
 	CVAR_REGISTER(&cv_bot_ls_match);
 	CVAR_REGISTER(&cv_bot_ls_trace);
 	CVAR_REGISTER(&cv_ls_sites);
+	CVAR_REGISTER(&cv_ls_mode_ver);	// (cs_bot_ls_modes.cpp)
 }
 
 // The bomb sites' letters as the nav names them (BombsiteA / BombsiteB), published once per
