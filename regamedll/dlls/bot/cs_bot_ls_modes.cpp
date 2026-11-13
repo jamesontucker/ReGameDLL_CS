@@ -311,21 +311,85 @@ bool CCSBot::LsModePeace()
 	return since < 0.4f + 0.6f * LsTrait(205) + 0.4f * (1.0f - LsSkill());
 }
 
+// Just after the peace (a loot-up) ends, a while of gearing up first, as people do: 40-80 s,
+// each bot its own, over early once it's hit, holds a main gun, or takes on someone who came at it
+bool CCSBot::LsModeGearing()
+{
+	if (s_lsPeace || s_lsPeaceEndAt < 0.0f)
+		return false;
+	// (a new peace's end: a new gearing up)
+	if (m_lsModeGearFor != s_lsPeaceEndAt)
+	{
+		m_lsModeGearFor = s_lsPeaceEndAt;
+		m_lsModeGearDone = false;
+	}
+	if (m_lsModeGearDone)
+		return false;
+	float since = gpGlobals->time - s_lsPeaceEndAt;
+	if (since < 0.0f || since > 40.0f + 40.0f * LsTrait(206) || m_rgpPlayerItems[PRIMARY_WEAPON_SLOT]
+		|| GetTimeSinceAttacked() < 2.0f)
+	{
+		m_lsModeGearDone = true;
+		return false;
+	}
+	return true;
+}
+
+// Gearing up, someone in sight is left be - unless they're right on it, or coming at it facing it
+// (then it's a fight, and the gearing up is over)
+bool CCSBot::LsModeLetsBe(CBasePlayer *pPlayer)
+{
+	if (!LsModeGearing())
+		return false;
+	// (another bot: only once it's going for this one - two at one crate who bump or glance at each
+	// other kept setting each other off; a person: right on it facing it, or coming at it facing it
+	// from close by)
+	Vector toMe = pev->origin - pPlayer->pev->origin;
+	float d = toMe.Length();
+	bool threat = false;
+	if (pPlayer->IsBot())
+	{
+		CCSBot *pOther = static_cast<CCSBot *>(pPlayer);
+		threat = pOther->IsAttacking() && pOther->GetEnemy() == this;
+	}
+	else if (d < 250.0f)
+	{
+		UTIL_MakeVectors(pPlayer->pev->v_angle);
+		Vector dir = toMe / Q_max(d, 1.0f);
+		bool facing = DotProduct(gpGlobals->v_forward, dir) > 0.9f;
+		bool closing = DotProduct(pPlayer->pev->velocity, dir) > 100.0f;
+		threat = facing && (d < 100.0f || closing);
+	}
+	if (threat)
+	{
+		m_lsModeGearDone = true;
+		LsWhy("mode gearing up: someone came at it");
+		return false;
+	}
+	return true;
+}
+
 // In the peace: a fight it was in ends, noises of others aren't chased, and it keeps its distance
 // from anyone close (looting, not crowding the others for the moment the fighting starts)
 void CCSBot::LsModePeaceTick()
 {
-	float now = gpGlobals->time;
 	if (IsAttacking())
 		StopAttacking();
 	if (IsFollowing())
 		StopFollowing();
 	ForgetNoise();
-	if (now < m_lsModePeaceMoveAt || IsOnLadder())
+	LsModeRoomTick(350.0f);
+}
+
+// Room from anyone close: now and then it walks away from the nearest one within reach
+void CCSBot::LsModeRoomTick(float reach)
+{
+	float now = gpGlobals->time;
+	if (now < m_lsModePeaceMoveAt || IsOnLadder() || IsAttacking())
 		return;
 	m_lsModePeaceMoveAt = now + RANDOM_FLOAT(1.5f, 3.0f);
 	CBasePlayer *pNear = nullptr;
-	float nearest = 350.0f;
+	float nearest = reach;
 	for (int i = 1; i <= gpGlobals->maxClients; i++)
 	{
 		CBasePlayer *pPlayer = UTIL_PlayerByIndex(i);
@@ -934,12 +998,12 @@ bool CCSBot::LsModeEscape()
 
 // Hunting with nothing better to do: now and then off to somewhere the mode says is worth it
 // (a weapon spawner, a crate, a supply drop), the greedier the likelier, the nearer the likelier
-bool CCSBot::LsModeAttractTick()
+bool CCSBot::LsModeAttractTick(bool gearing)
 {
 	float now = gpGlobals->time;
 	if (!IsHunting() || now < m_lsModeAttractAt)
 		return false;
-	m_lsModeAttractAt = now + 3.0f;
+	m_lsModeAttractAt = now + (gearing ? 1.5f : 3.0f);
 	const LsModeZone *pBest = nullptr;
 	float bestScore = 0.0f;
 	for (int i = 0; i < LS_MODE_ZONES; i++)
@@ -957,7 +1021,8 @@ bool CCSBot::LsModeAttractTick()
 			pBest = &z;
 		}
 	}
-	if (!pBest || RANDOM_FLOAT(0.0f, 1.0f) >= Q_min(1.0f, bestScore) * LsModeGreed())
+	// (gearing up, the nearest worthwhile loot every time; otherwise a roll)
+	if (!pBest || (!gearing && RANDOM_FLOAT(0.0f, 1.0f) >= Q_min(1.0f, bestScore) * LsModeGreed()))
 		return false;
 	LsModeMove(LsModeOnMesh(pBest->at), false);
 	LsWhy("mode attract");
@@ -976,6 +1041,14 @@ void CCSBot::LsModeTick()
 	// (a peace phase: no fights, room between players; then the goals - crates - as usual)
 	if (s_lsPeace)
 		LsModePeaceTick();
+	// (gearing up after it: far noises aren't chased, the loot is)
+	bool gearing = LsModeGearing();
+	if (gearing)
+	{
+		if (IsNoiseHeard() && (m_noisePosition - pev->origin).IsLengthGreaterThan(600.0f))
+			ForgetNoise();
+		LsModeRoomTick(250.0f);
+	}
 
 	bool shooting = LsModeShootTick();
 
@@ -1013,6 +1086,9 @@ void CCSBot::LsModeTick()
 
 	if (best < 0)
 	{
+		// (gearing up: off to loot rather than hunting)
+		if (gearing && !shooting && LsModeAttractTick(true))
+			return;
 		// (a creature mode's free players: roam like one)
 		if (!shooting && !(s_lsClassCount > 0 && LsFree() && !m_isEnemyVisible && !IsOnLadder() && LsModeRoamTick()))
 			LsModeAttractTick();

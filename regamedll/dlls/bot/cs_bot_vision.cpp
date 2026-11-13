@@ -1344,7 +1344,7 @@ CBasePlayer *CCSBot::FindMostDangerousThreat()
 #endif
 			// (Loner-Strike: a mode's peace - a loot-up nobody can be hurt in - and the moment after
 			// it: nobody's an enemy, nor a friend to tag along with)
-			if (LsModePeace())
+			if (LsModePeace() || LsModeLetsBe(pPlayer))
 				continue;
 			// is it an enemy?
 			if (BotRelationship(pPlayer) == BOT_TEAMMATE)
