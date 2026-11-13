@@ -279,15 +279,17 @@ int CMD_ARGC_()
 	return i;
 }
 
+// (Loner-Strike: never a null pointer - a bot's command, or one a plugin fakes, has nothing
+// behind its last argument, and "drop" with a null name crashed in DropPlayerItem)
 const char *CMD_ARGV_(int i)
 {
+	const char *arg = nullptr;
 	if (!UseBotArgs)
-		return CMD_ARGV(i);
+		arg = CMD_ARGV(i);
+	else if (i >= 0 && i < 4)
+		arg = BotArgs[i];
 
-	if (i < 4)
-		return BotArgs[i];
-
-	return nullptr;
+	return arg ? arg : "";
 }
 
 NOXREF void set_suicide_frame(entvars_t *pev)
@@ -3735,13 +3737,17 @@ void EXT_FUNC ClientCommand_(edict_t *pEntity)
 	if (!pEntity->pvPrivateData)
 		return;
 
+	// (Loner-Strike: CMD_ARGV_ never gives a null pointer now - see there)
+	const char *arg0 = CMD_ARGV_(0);
+	const char *arg1 = CMD_ARGV_(1);
+
 	static char command[128] = "";
-	Q_strncpy(command, CMD_ARGV_(0), sizeof command - 1);
+	Q_strncpy(command, arg0, sizeof command - 1);
 	command[sizeof command - 1] = '\0';
 	LsMark("client command", ENTINDEX(pEntity));	// Loner-Strike: the watchdog's marks (and which command: LsMarkText)
 	LsMarkText(command);
 
-	g_ReGameHookchains.m_InternalCommand.callChain(InternalCommand, pEntity, command, CMD_ARGV_(1));
+	g_ReGameHookchains.m_InternalCommand.callChain(InternalCommand, pEntity, command, arg1);
 }
 
 // called after the player changes userinfo - gives dll a chance to modify it before it gets sent into the rest of the engine.
