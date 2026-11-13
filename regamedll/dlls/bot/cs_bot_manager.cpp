@@ -244,6 +244,7 @@ void CCSBotManager::ServerActivate()
 
 	m_zoneCount = 0;
 	m_gameScenario = SCENARIO_DEATHMATCH;
+	LsModeMapStart();	// Loner-Strike: a mode's goals and zones were for the last map
 
 	LoadNavigationMap();
 	RestartRound();
@@ -284,6 +285,7 @@ void CCSBotManager::AddServerCommands()
 	AddServerCommand("bot_kill");
 	AddServerCommand("bot_kick");
 	AddServerCommand("ls_bot");	// Loner-Strike (cs_bot_ls.cpp)
+	AddServerCommand("ls_mode");	// Loner-Strike: game modes tell the bots (cs_bot_ls_modes.cpp)
 	AddServerCommand("ls_mark");	// Loner-Strike: a moment flagged in the trace
 	AddServerCommand("bot_knives_only");
 	AddServerCommand("bot_pistols_only");
@@ -720,6 +722,10 @@ void CCSBotManager::ServerCommand(const char *pcmd)
 	else if (FStrEq(pcmd, "ls_bot"))
 	{
 		Bot_LsServerCommand();
+	}
+	else if (FStrEq(pcmd, "ls_mode"))
+	{
+		Bot_LsModeCommand();
 	}
 	else if (FStrEq(pcmd, "ls_mark"))
 	{
