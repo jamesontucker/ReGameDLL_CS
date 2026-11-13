@@ -162,6 +162,7 @@ struct LsCreatureType
 
 	char anim[LSAN_COUNT][32];			// sequence names ("" = by activity)
 	char sound[LSS_COUNT][160];			// space separated lists, files that exist are kept
+	char say[LSS_COUNT][24];			// a sentence group instead (sentences.txt: HG_IDLE...): no precache slots
 
 	// filled in at precache
 	bool precached;
@@ -493,6 +494,42 @@ private:
 	float m_aggression;
 	float m_detect;
 	int m_hates;
+};
+
+// A barnacle: a ceiling hazard a mapper places ("ls_barnacle", Half-Life's barnacle.mdl). Its tongue
+// hangs to the floor; a player who walks into it is hauled up and chewed until the barnacle is shot
+// dead or they are. Keys: health (25), damage (10 a bite), length (longest tongue, 512), speed (haul,
+// 80 u/s), hates (all | t | ct). Comes back every round.
+class CLsBarnacle: public CBaseMonster
+{
+public:
+	virtual void Spawn();
+	virtual void Precache();
+	virtual void KeyValue(KeyValueData *pkvd);
+	virtual int ObjectCaps() { return (CBaseMonster::ObjectCaps() & ~FCAP_ACROSS_TRANSITION) | FCAP_MUST_RESET; }
+	virtual void Restart();
+	virtual int Classify() { return CLASS_ALIEN_MONSTER; }
+	virtual BOOL TakeDamage(entvars_t *pevInflictor, entvars_t *pevAttacker, float flDamage, int bitsDamageType);
+	virtual void Killed(entvars_t *pevAttacker, int iGib);
+	virtual int BloodColor() { return BLOOD_COLOR_RED; }
+
+	void EXPORT BarnacleThink();
+
+private:
+	void Setup();
+	void Release();
+	void SetTongue(float length);
+	bool Wants(CBasePlayer *pPlayer) const;
+
+	float m_maxHealth;
+	float m_bite;
+	float m_maxLength;
+	float m_haul;
+	int m_hates;
+	float m_tongue;				// how far it hangs now
+	EHANDLE m_victim;
+	float m_nextBite;
+	bool m_ready;				// its model and sounds got precache slots
 };
 
 // The registry and what the rest of the game DLL calls

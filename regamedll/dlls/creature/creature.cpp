@@ -39,6 +39,10 @@ cvar_t ls_creature_debug     = { "ls_creature_debug", "0", 0, 0.0f, nullptr };
 cvar_t ls_creature_last      = { "ls_creature_last", "0", 0, 0.0f, nullptr };		// the last one spawned (entity index), for plugins
 cvar_t ls_creature_alive     = { "ls_creature_alive", "0", 0, 0.0f, nullptr };		// how many are alive (all providers)
 cvar_t ls_creature_ver       = { "ls_creature_ver", "1", 0, 1.0f, nullptr };
+cvar_t ls_creature_reserve   = { "ls_creature_reserve", "40 60", 0, 0.0f, nullptr };	// model and sound slots creatures always leave free
+cvar_t ls_creature_sounds    = { "ls_creature_sounds", "2", 0, 2.0f, nullptr };		// sounds of each kind a type keeps (idle, alert, ...)
+cvar_t ls_creature_skipped   = { "ls_creature_skipped", "", 0, 0.0f, nullptr };		// types left out this map for want of precache room
+cvar_t ls_creature_precache_late = { "ls_creature_precache_late", "1", 0, 1.0f, nullptr };	// precache at ServerActivate (the real count)
 cvar_t ls_creature_frags     = { "ls_creature_frags", "0", 0, 0.0f, nullptr };		// 1 = kills add the type's frags to the score (counts toward mp_fraglimit)
 
 cvar_t ls_watchdog           = { "ls_watchdog", "10", 0, 10.0f, nullptr };
@@ -302,6 +306,10 @@ void LsCreatures_RegisterCVars()
 	CVAR_REGISTER(&ls_creature_last);
 	CVAR_REGISTER(&ls_creature_alive);
 	CVAR_REGISTER(&ls_creature_ver);
+	CVAR_REGISTER(&ls_creature_reserve);
+	CVAR_REGISTER(&ls_creature_sounds);
+	CVAR_REGISTER(&ls_creature_skipped);
+	CVAR_REGISTER(&ls_creature_precache_late);
 	CVAR_REGISTER(&ls_creature_frags);
 }
 
@@ -861,8 +869,8 @@ static void LsBuiltinTypes()
 	t->fallbackGlow = false;
 	for (int s = 0; s < LSS_COUNT; s++)
 		t->sound[s][0] = '\0';
-	Q_strlcpy(t->sound[LSS_IDLE], "hgrunt/gr_idle1.wav hgrunt/gr_idle2.wav hgrunt/gr_idle3.wav");
-	Q_strlcpy(t->sound[LSS_ALERT], "hgrunt/gr_alert1.wav");
+	Q_strlcpy(t->say[LSS_IDLE], "HG_IDLE");		// (Half-Life's grunt chatter, through sentences: no slots)
+	Q_strlcpy(t->say[LSS_ALERT], "HG_ALERT");
 	Q_strlcpy(t->sound[LSS_ATTACK], "hgrunt/gr_mgun1.wav hgrunt/gr_mgun2.wav hgrunt/gr_mgun3.wav | weapons/mp5-1.wav");
 	Q_strlcpy(t->sound[LSS_PAIN], "hgrunt/gr_pain1.wav hgrunt/gr_pain2.wav hgrunt/gr_pain3.wav | player/pl_pain2.wav");
 	Q_strlcpy(t->sound[LSS_DIE], "hgrunt/gr_die1.wav hgrunt/gr_die2.wav hgrunt/gr_die3.wav | player/die1.wav");
@@ -981,6 +989,14 @@ static void LsSetTypeKey(LsCreatureType *t, const char *key, const char *value)
 	else if (!Q_stricmp(key, "corpse_time")) t->corpseTime = LsNum(value, 0.0f, 120.0f, t->corpseTime);
 	else if (!Q_stricmp(key, "moves")) t->moves = Q_atoi(value) != 0;
 	else if (!Q_stricmp(key, "can_climb")) t->canClimb = Q_atoi(value) != 0;
+	else if (!Q_strnicmp(key, "say_", 4))
+	{
+		// say_idle = HG_IDLE: a sentence group for that kind of sound
+		static const char *kinds[LSS_COUNT] = { "idle", "alert", "attack", "hit", "miss", "pain", "die" };
+		for (int k = 0; k < LSS_COUNT; k++)
+			if (!Q_stricmp(key + 4, kinds[k]))
+				Q_strlcpy(t->say[k], value);
+	}
 	else if (!Q_stricmp(key, "shot_fx")) t->shotFx = !Q_stricmp(value, "zap") ? 1 : !Q_stricmp(value, "none") ? 2 : 0;
 	else if (!Q_stricmp(key, "hops")) t->hops = LsNum(value, 0.0f, 1.0f, t->hops);
 	else if (!Q_stricmp(key, "flank")) t->flank = Q_atoi(value) != 0;
@@ -1317,6 +1333,67 @@ static void LsCheckModelVersion(const char *model)
 }
 
 // Precache one type's model and sounds: only while the map loads (the engine refuses later)
+// ---- the precache budget -------------------------------------------------------------------
+//
+// The engine has 512 model and 512 sound slots, and a map that asks for one more fails to load.
+// Every PRECACHE_* returns the slot it got, so the highest slot seen is how full the table is (an
+// item already there gives its old, lower slot). Creatures keep a reserve free (ls_creature_reserve
+// "40 60") and, short of room, drop a type's lesser sounds first, then the type itself, with a word
+// on the console and in the log: never a failed map.
+const int LS_MAX_MODELS = 512;
+const int LS_MAX_SOUNDS = 512;
+static int s_modelHigh = 0;		// highest model slot seen this map
+static int s_soundHigh = 0;
+static bool s_precacheOpen = false;	// the late window: ServerActivate, everything else already in
+static char s_skipped[256] = "";
+
+static int LsPrecacheModel(const char *name)
+{
+	int slot = PRECACHE_MODEL((char *)name);
+	s_modelHigh = Q_max(s_modelHigh, slot);
+	return slot;
+}
+
+static int LsPrecacheSound(const char *name)
+{
+	int slot = PRECACHE_SOUND((char *)name);
+	s_soundHigh = Q_max(s_soundHigh, slot);
+	return slot;
+}
+
+static void LsReserve(int *models, int *sounds)
+{
+	*models = 40;
+	*sounds = 60;
+	sscanf(ls_creature_reserve.string, "%d %d", models, sounds);
+	*models = clamp(*models, 0, 256);
+	*sounds = clamp(*sounds, 0, 256);
+}
+
+// (a sound this map already has from us: no new slot)
+static bool LsSoundOurs(const char *file)
+{
+	for (int i = 0; i < s_typeCount; i++)
+	{
+		const LsCreatureType *o = &s_types[i];
+		if (!o->precached)
+			continue;
+		for (int k = 0; k < LSS_COUNT; k++)
+			for (int j = 0; j < o->soundCount[k]; j++)
+				if (!Q_stricmp(o->soundFile[k][j], file))
+					return true;
+	}
+	return false;
+}
+
+static void LsNoteSkipped(const LsCreatureType *t, const char *why)
+{
+	CONSOLE_ECHO("ls_creature: '%s' %s (precache budget: models %d/%d, sounds %d/%d, reserve %s)\n", t->name, why,
+		s_modelHigh, LS_MAX_MODELS, s_soundHigh, LS_MAX_SOUNDS, ls_creature_reserve.string);
+	UTIL_LogPrintf("[ls_creature] \"%s\" %s (models %d/%d, sounds %d/%d)\n", t->name, why, s_modelHigh, LS_MAX_MODELS, s_soundHigh, LS_MAX_SOUNDS);
+}
+
+// Precache one type's model and sounds: only while the map loads (the engine refuses later)
 bool LsCreaturePrecacheType(int index)
 {
 	LsCreatureType *t = LsCreatureTypeAt(index);
@@ -1326,7 +1403,7 @@ bool LsCreaturePrecacheType(int index)
 	if (t->precached)
 		return true;
 
-	if (g_bServerActive)
+	if (g_bServerActive && !s_precacheOpen)
 		return false;
 
 	// the first model that's there (Half-Life's own when the install has them)
@@ -1352,20 +1429,65 @@ bool LsCreaturePrecacheType(int index)
 		return false;
 	}
 
+	int reserveModels, reserveSounds;
+	LsReserve(&reserveModels, &reserveSounds);
+
+	// room for its model (and the zap's sprite)? Else the type stays out
+	int modelsNeeded = 1 + ((t->shotFx == 1 && !s_zapSprite) ? 1 : 0);
+	if (s_modelHigh + modelsNeeded > LS_MAX_MODELS - reserveModels)
+	{
+		LsNoteSkipped(t, "left out: no room for its model");
+		Q_strlcat(s_skipped, t->name);
+		Q_strlcat(s_skipped, " ");
+		CVAR_SET_STRING("ls_creature_skipped", s_skipped);
+		return false;
+	}
+
+	// its sounds: at most ls_creature_sounds of each kind (2), the files that are there
+	int perKind = clamp(int(ls_creature_sounds.value), 0, LS_CREATURE_MAX_SOUNDS);
+	for (int k = 0; k < LSS_COUNT; k++)
+		t->soundCount[k] = Q_min(LsPickFiles(t->sound[k], "sound/", t->soundFile[k], LS_CREATURE_MAX_SOUNDS), perKind);
+
+	// short of sound slots: the lesser kinds go first (idle chatter, the alert, a miss...), the
+	// attack last; a creature without sounds is still a creature
+	static const int dropOrder[LSS_COUNT] = { LSS_IDLE, LSS_ALERT, LSS_MISS, LSS_HIT, LSS_PAIN, LSS_DIE, LSS_ATTACK };
+	auto newSounds = [&]() {
+		int n = 0;
+		for (int k = 0; k < LSS_COUNT; k++)
+			for (int j = 0; j < t->soundCount[k]; j++)
+				if (!LsSoundOurs(t->soundFile[k][j]))
+					n++;
+		return n;
+	};
+	int dropped = 0;
+	for (int d = 0; d < LSS_COUNT && s_soundHigh + newSounds() > LS_MAX_SOUNDS - reserveSounds; d++)
+	{
+		dropped += t->soundCount[dropOrder[d]];
+		t->soundCount[dropOrder[d]] = 0;
+	}
+
+	if (dropped)
+		LsNoteSkipped(t, "kept with fewer sounds");
+
 	LsCheckModelVersion(t->model);
 
 	// (the engine keeps the pointer it's given: an engine string, never our arrays a reload rewrites)
 	t->iszModel = ALLOC_STRING(t->model);
-	PRECACHE_MODEL(STRING(t->iszModel));
+	LsPrecacheModel(STRING(t->iszModel));
 	s_precachedModels++;
 
 	for (int s = 0; s < LSS_COUNT; s++)
 	{
-		t->soundCount[s] = LsPickFiles(t->sound[s], "sound/", t->soundFile[s], LS_CREATURE_MAX_SOUNDS);
 		for (int i = 0; i < t->soundCount[s]; i++)
 		{
+			// (and one more look before each: the model may have shown the table fuller than we knew)
+			if (!LsSoundOurs(t->soundFile[s][i]) && s_soundHigh + 1 > LS_MAX_SOUNDS - reserveSounds)
+			{
+				t->soundCount[s] = i;
+				break;
+			}
 			t->iszSound[s][i] = ALLOC_STRING(t->soundFile[s][i]);
-			PRECACHE_SOUND(STRING(t->iszSound[s][i]));
+			LsPrecacheSound(STRING(t->iszSound[s][i]));
 			s_precachedSounds++;
 		}
 	}
@@ -1376,36 +1498,18 @@ bool LsCreaturePrecacheType(int index)
 	// (the zap's beam: one sprite for every type that uses it)
 	if (t->shotFx == 1 && !s_zapSprite)
 	{
-		s_zapSprite = PRECACHE_MODEL("sprites/lgtning.spr");
+		s_zapSprite = LsPrecacheModel("sprites/lgtning.spr");
 		s_precachedModels++;
 	}
 
 	if (ls_creature_debug.value > 0.0f)
 		CONSOLE_ECHO("ls_creature: precached '%s' (%s%s)\n", t->name, t->model, t->usingFallback ? ", stand-in" : "");
 
-	if (ls_creature_budget.value > 0.0f && s_precachedModels + s_precachedSounds > int(ls_creature_budget.value))
-	{
-		CONSOLE_ECHO("ls_creature: warning: creatures now take %d models and %d sounds of the 512/512 precache limit (ls_creature_budget %d)\n",
-			s_precachedModels, s_precachedSounds, int(ls_creature_budget.value));
-	}
-
 	return true;
 }
 
-// The map loads: precache the types the mode asked for (ls_creature_precache), nothing otherwise
-void LsCreaturesPrecache()
+static void LsPrecacheList()
 {
-	s_mapRunning = false;
-	s_zapSprite = 0;
-	s_precachedModels = 0;
-	s_precachedSounds = 0;
-
-	// (a fresh read each map: the file may have changed, and the engine forgot the files)
-	for (int i = 0; i < s_typeCount; i++)
-		s_types[i].precached = false;
-
-	s_typesLoaded = false;
-
 	const char *want = ls_creature_precache.string;
 	if (!want || !*want)
 		return;
@@ -1415,7 +1519,8 @@ void LsCreaturesPrecache()
 	if (!Q_stricmp(want, "all"))
 	{
 		for (int i = 0; i < s_typeCount; i++)
-			LsCreaturePrecacheType(i);
+			if (!s_types[i].disabled)
+				LsCreaturePrecacheType(i);
 	}
 	else
 	{
@@ -1432,7 +1537,44 @@ void LsCreaturesPrecache()
 		}
 	}
 
-	CONSOLE_ECHO("ls_creature: %d models and %d sounds precached for creatures\n", s_precachedModels, s_precachedSounds);
+	CONSOLE_ECHO("ls_creature: %d models and %d sounds precached for creatures; the map now uses %d/%d models, %d/%d sounds%s%s\n",
+		s_precachedModels, s_precachedSounds, s_modelHigh, LS_MAX_MODELS, s_soundHigh, LS_MAX_SOUNDS,
+		s_skipped[0] ? "; left out: " : "", s_skipped);
+}
+
+// The map loads (CWorld::Precache): a fresh start; the list itself waits for ServerActivate, when
+// the map's entities and the plugins have taken their slots and the count is real
+void LsCreaturesPrecache()
+{
+	s_mapRunning = false;
+	s_zapSprite = 0;
+	s_precachedModels = 0;
+	s_precachedSounds = 0;
+	s_modelHigh = 0;
+	s_soundHigh = 0;
+	s_skipped[0] = '\0';
+	CVAR_SET_STRING("ls_creature_skipped", "");
+
+	// (a fresh read each map: the file may have changed, and the engine forgot the files)
+	for (int i = 0; i < s_typeCount; i++)
+		s_types[i].precached = false;
+
+	s_typesLoaded = false;
+
+	// (or now, the old way: ls_creature_precache_late 0)
+	if (ls_creature_precache_late.value <= 0.0f)
+		LsPrecacheList();
+}
+
+// ServerActivate, before the map runs: the engine still takes precaches here
+static void LsPrecacheLate()
+{
+	if (ls_creature_precache_late.value <= 0.0f)
+		return;
+
+	s_precacheOpen = true;
+	LsPrecacheList();
+	s_precacheOpen = false;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1456,6 +1598,7 @@ static float s_nextAliveCount = 0.0f;
 
 void LsCreaturesServerActivate()
 {
+	LsPrecacheLate();
 	s_mapRunning = true;
 	LsCrashQuietInstall();
 }
@@ -2359,7 +2502,18 @@ void CLsCreature::MakeNoise(float range)
 void CLsCreature::PlaySound(int kind, float volume)
 {
 	const LsCreatureType *t = GetType();
-	if (!t || t->soundCount[kind] <= 0)
+	if (!t)
+		return;
+
+	// a sentence (sound/sentences.txt, the same file on every CS install): the game sends its number
+	// and each player's game finds the words itself, so it takes no sound precache slot
+	if (t->say[kind][0] && SENTENCEG_PlayRndSz(edict(), t->say[kind], volume, ATTN_NORM, 0, PITCH_NORM + RANDOM_LONG(-3, 3)) >= 0)
+	{
+		MakeNoise((kind == LSS_IDLE) ? 600.0f : 1000.0f);
+		return;
+	}
+
+	if (t->soundCount[kind] <= 0)
 		return;
 
 	const char *file = STRING(t->iszSound[kind][RANDOM_LONG(0, t->soundCount[kind] - 1)]);
@@ -3746,6 +3900,246 @@ void CLsCreature::CreatureThinkBody()
 			UTIL_DrawBeamPoints(pev->origin + Vector(0, 0, 60), pTarget->pev->origin, 2, 255, 0, 0);
 		if (ls_creature_debug.value > 2.0f)
 			CONSOLE_ECHO("%s#%d %s hp %.0f\n", t->name, entindex(), modes[m_mode], pev->health);
+	}
+}
+
+// ---------------------------------------------------------------------------------------------
+// The barnacle (see creature.h)
+
+LINK_ENTITY_TO_CLASS(ls_barnacle, CLsBarnacle, CCSMonster)
+
+void CLsBarnacle::KeyValue(KeyValueData *pkvd)
+{
+	const char *key = pkvd->szKeyName;
+	const char *value = pkvd->szValue;
+	if (FStrEq(key, "health") || FStrEq(key, "hp"))
+		m_maxHealth = LsNum(value, 1.0f, 10000.0f, 25.0f);
+	else if (FStrEq(key, "damage"))
+		m_bite = LsNum(value, 1.0f, 1000.0f, 10.0f);
+	else if (FStrEq(key, "length"))
+		m_maxLength = LsNum(value, 32.0f, 2048.0f, 512.0f);
+	else if (FStrEq(key, "speed"))
+		m_haul = LsNum(value, 10.0f, 600.0f, 80.0f);
+	else if (FStrEq(key, "hates"))
+		m_hates = LsHatesFromString(value);
+	else
+	{
+		CBaseMonster::KeyValue(pkvd);
+		return;
+	}
+	pkvd->fHandled = TRUE;
+}
+
+void CLsBarnacle::Precache()
+{
+	// (the budget rules as for creatures: no room, no barnacle - never a failed map)
+	int reserveModels, reserveSounds;
+	LsReserve(&reserveModels, &reserveSounds);
+	m_ready = false;
+	if (!g_pFileSystem->FileExists("models/barnacle.mdl"))
+	{
+		CONSOLE_ECHO("ls_barnacle: models/barnacle.mdl isn't there; no barnacle\n");
+		return;
+	}
+	if (s_modelHigh + 1 > LS_MAX_MODELS - reserveModels)
+	{
+		CONSOLE_ECHO("ls_barnacle: no precache room for its model (models %d/%d); no barnacle\n", s_modelHigh, LS_MAX_MODELS);
+		return;
+	}
+	LsPrecacheModel("models/barnacle.mdl");
+	static const char *const sounds[] = { "barnacle/bcl_alert2.wav", "barnacle/bcl_chew1.wav", "barnacle/bcl_chew2.wav", "barnacle/bcl_die1.wav" };
+	for (const char *snd : sounds)
+	{
+		if (s_soundHigh + 1 > LS_MAX_SOUNDS - reserveSounds)
+			break;
+		LsPrecacheSound(snd);
+	}
+	m_ready = true;
+}
+
+void CLsBarnacle::Spawn()
+{
+	if (m_maxHealth <= 0.0f)
+		m_maxHealth = 25.0f;
+	if (m_bite <= 0.0f)
+		m_bite = 10.0f;
+	if (m_maxLength <= 0.0f)
+		m_maxLength = 512.0f;
+	if (m_haul <= 0.0f)
+		m_haul = 80.0f;
+
+	Precache();
+	if (!m_ready)
+	{
+		pev->flags |= FL_KILLME;
+		return;
+	}
+
+	MAKE_STRING_CLASS("ls_barnacle", pev);
+	SET_MODEL(edict(), "models/barnacle.mdl");
+	Setup();
+}
+
+void CLsBarnacle::Setup()
+{
+	pev->movetype = MOVETYPE_NONE;
+	pev->solid = SOLID_SLIDEBOX;
+	pev->takedamage = DAMAGE_AIM;
+	pev->flags |= FL_MONSTER;
+	pev->deadflag = DEAD_NO;
+	pev->effects &= ~EF_NODRAW;
+	pev->health = pev->max_health = m_maxHealth;
+	UTIL_SetSize(pev, Vector(-16, -16, -32), Vector(16, 16, 0));
+	UTIL_SetOrigin(pev, pev->origin);
+	m_victim = nullptr;
+	m_nextBite = 0.0f;
+	m_bloodColor = BLOOD_COLOR_RED;
+
+	pev->sequence = LookupSequence("idle3");
+	pev->frame = 0;
+	ResetSequenceInfo();
+	InitBoneControllers();
+
+	// the tongue: down to the floor below, at most its length
+	TraceResult tr;
+	UTIL_TraceLine(pev->origin, pev->origin - Vector(0, 0, m_maxLength), ignore_monsters, ENT(pev), &tr);
+	SetTongue((pev->origin - tr.vecEndPos).Length() - 8.0f);
+
+	SetThink(&CLsBarnacle::BarnacleThink);
+	pev->nextthink = gpGlobals->time + RANDOM_FLOAT(0.1f, 0.3f);
+}
+
+void CLsBarnacle::Restart()
+{
+	if (!m_ready)
+		return;
+	Release();
+	Setup();
+}
+
+void CLsBarnacle::SetTongue(float length)
+{
+	m_tongue = clamp(length, 8.0f, m_maxLength);
+	SetBoneController(0, -m_tongue);
+}
+
+bool CLsBarnacle::Wants(CBasePlayer *pPlayer) const
+{
+	return pPlayer && pPlayer->IsAlive() && LsIsHostilePlayer(pPlayer, m_hates);
+}
+
+void CLsBarnacle::Release()
+{
+	CBaseEntity *pVictim = m_victim;
+	if (pVictim && pVictim->IsPlayer())
+		pVictim->pev->velocity = Vector(0, 0, -50);
+	m_victim = nullptr;
+}
+
+void CLsBarnacle::BarnacleThink()
+{
+	pev->nextthink = gpGlobals->time + 0.05f;
+	StudioFrameAdvance();
+
+	if (pev->deadflag != DEAD_NO)
+		return;
+
+	CBaseEntity *pHeld = m_victim;
+	CBasePlayer *pVictim = (pHeld && pHeld->IsPlayer()) ? static_cast<CBasePlayer *>(pHeld) : nullptr;
+	if (pVictim && !Wants(pVictim))
+	{
+		Release();
+		pVictim = nullptr;
+		pev->sequence = LookupSequence("idle3");
+		ResetSequenceInfo();
+	}
+
+	if (!pVictim)
+	{
+		// someone in the tongue's line: caught
+		for (int i = 1; i <= gpGlobals->maxClients; i++)
+		{
+			CBasePlayer *pPlayer = UTIL_PlayerByIndex(i);
+			if (!Wants(pPlayer))
+				continue;
+
+			Vector to = pPlayer->pev->origin - pev->origin;
+			if (to.Make2D().IsLengthGreaterThan(20.0f) || to.z > 0.0f || -to.z > m_tongue + 36.0f)
+				continue;
+
+			m_victim = pPlayer;
+			EMIT_SOUND_DYN(edict(), CHAN_WEAPON, "barnacle/bcl_alert2.wav", VOL_NORM, ATTN_NORM, 0, PITCH_NORM);
+			pev->sequence = LookupSequence("attack1");
+			ResetSequenceInfo();
+			break;
+		}
+		return;
+	}
+
+	// haul them up to the mouth, then chew
+	Vector mouth = pev->origin - Vector(0, 0, 40);
+	Vector at = pVictim->pev->origin + Vector(0, 0, pVictim->pev->maxs.z);		// (their head)
+	float gap = at.z - mouth.z;
+	Vector pos = pVictim->pev->origin;
+	pos.x = pev->origin.x;
+	pos.y = pev->origin.y;
+	if (gap < -2.0f)
+		pos.z += Q_min(-gap, m_haul * 0.05f);
+	UTIL_SetOrigin(pVictim->pev, pos);
+	pVictim->pev->velocity = Vector(0, 0, 0);
+	SetTongue(pev->origin.z - (pos.z + pVictim->pev->maxs.z));
+
+	if (gap >= -4.0f)
+	{
+		if (pev->sequence != LookupSequence("chewcycle"))
+		{
+			pev->sequence = LookupSequence("chewcycle");
+			ResetSequenceInfo();
+		}
+		if (gpGlobals->time >= m_nextBite)
+		{
+			m_nextBite = gpGlobals->time + 1.0f;
+			EMIT_SOUND_DYN(edict(), CHAN_VOICE, RANDOM_LONG(0, 1) ? "barnacle/bcl_chew1.wav" : "barnacle/bcl_chew2.wav", VOL_NORM, ATTN_NORM, 0, PITCH_NORM);
+			pVictim->TakeDamage(pev, pev, m_bite, DMG_SLASH);
+		}
+	}
+}
+
+BOOL CLsBarnacle::TakeDamage(entvars_t *pevInflictor, entvars_t *pevAttacker, float flDamage, int bitsDamageType)
+{
+	if (pev->takedamage == DAMAGE_NO || pev->deadflag != DEAD_NO || !LsFinite(flDamage) || flDamage <= 0.0f)
+		return FALSE;
+
+	pev->health -= flDamage;
+	if (pev->health <= 0.0f)
+		Killed(pevAttacker, GIB_NORMAL);
+	return TRUE;
+}
+
+void CLsBarnacle::Killed(entvars_t *pevAttacker, int iGib)
+{
+	if (pev->deadflag != DEAD_NO)
+		return;
+
+	Release();
+	pev->deadflag = DEAD_DEAD;
+	pev->takedamage = DAMAGE_NO;
+	pev->solid = SOLID_NOT;
+	pev->health = 0.0f;
+	UTIL_SetOrigin(pev, pev->origin);
+	SetTongue(8.0f);
+	pev->sequence = LookupSequence("death");
+	pev->frame = 0;
+	ResetSequenceInfo();
+	EMIT_SOUND_DYN(edict(), CHAN_VOICE, "barnacle/bcl_die1.wav", VOL_NORM, ATTN_NORM, 0, PITCH_NORM);
+
+	CBaseEntity *pKiller = pevAttacker ? CBaseEntity::Instance(pevAttacker) : nullptr;
+	if (pKiller && pKiller->IsPlayer())
+	{
+		CBasePlayer *pPlayer = static_cast<CBasePlayer *>(pKiller);
+		UTIL_LogPrintf("\"%s<%i><%s><%s>\" triggered \"ls_barnacle_killed\" (entity \"%d\")\n",
+			STRING(pPlayer->pev->netname), GETPLAYERUSERID(pPlayer->edict()), GETPLAYERAUTHID(pPlayer->edict()),
+			GetTeam(pPlayer->m_iTeam), entindex());
 	}
 }
 
