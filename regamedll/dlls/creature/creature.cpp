@@ -41,7 +41,8 @@ cvar_t ls_creature_alive     = { "ls_creature_alive", "0", 0, 0.0f, nullptr };		
 cvar_t ls_creature_ver       = { "ls_creature_ver", "1", 0, 1.0f, nullptr };
 cvar_t ls_creature_frags     = { "ls_creature_frags", "0", 0, 0.0f, nullptr };		// 1 = kills add the type's frags to the score (counts toward mp_fraglimit)
 
-cvar_t ls_watchdog           = { "ls_watchdog", "10", 0, 10.0f, nullptr };		// seconds without a frame before the marks are written (0 = off)
+cvar_t ls_watchdog           = { "ls_watchdog", "10", 0, 10.0f, nullptr };
+cvar_t ls_crash_quiet        = { "ls_crash_quiet", "1", 0, 1.0f, nullptr };		// a dedicated server's crash: log and end, no dialog (Windows/Wine)		// seconds without a frame before the marks are written (0 = off)
 
 // ---------------------------------------------------------------------------------------------
 // Watchdog (see creature.h)
@@ -185,7 +186,34 @@ static LONG WINAPI LsCrashHandler(EXCEPTION_POINTERS *ep)
 	fclose(f);
 	return EXCEPTION_CONTINUE_SEARCH;
 }
+
+// A dedicated server that crashes ends quietly, with ls_crash.log written: the default handler
+// would start Wine's/Windows' crash dialog (winedbg --auto, or Windows Error Reporting), which
+// keeps the dead server holding its port until someone clicks it away - on a Mac's own desktop
+// for a CrossOver server. Only for dedicated servers: the player's game keeps its usual behaviour
+static LONG WINAPI LsUnhandled(EXCEPTION_POINTERS *ep)
+{
+	LsCrashHandler(ep);
+	FILE *f = fopen(s_watchPath[0] ? s_watchPath : "ls_watchdog.log", "a");
+	if (f)
+	{
+		fprintf(f, "unhandled exception 0x%08lx at 0x%08lx: the server ends (see ls_crash.log)\n\n",
+			(unsigned long)ep->ExceptionRecord->ExceptionCode, (unsigned long)(size_t)ep->ExceptionRecord->ExceptionAddress);
+		fclose(f);
+	}
+	TerminateProcess(GetCurrentProcess(), ep->ExceptionRecord->ExceptionCode);
+	return EXCEPTION_EXECUTE_HANDLER;
+}
 #endif
+
+// (each map: the engine and Steam's crash handler may have set their own filter since)
+void LsCrashQuietInstall()
+{
+#ifdef _WIN32
+	if (IS_DEDICATED_SERVER() && ls_crash_quiet.value > 0.0f)
+		SetUnhandledExceptionFilter(LsUnhandled);
+#endif
+}
 
 // The second thread: once a second, did a frame come? (only reads; writes nothing the game uses)
 static void LsWatchdogLoop()
@@ -264,6 +292,7 @@ void LsWatchdogStart()
 void LsCreatures_RegisterCVars()
 {
 	CVAR_REGISTER(&ls_watchdog);
+	CVAR_REGISTER(&ls_crash_quiet);
 	LsWatchdogStart();
 	CVAR_REGISTER(&ls_creature_file);
 	CVAR_REGISTER(&ls_creature_precache);
@@ -1196,6 +1225,7 @@ static float s_nextAliveCount = 0.0f;
 void LsCreaturesServerActivate()
 {
 	s_mapRunning = true;
+	LsCrashQuietInstall();
 }
 
 bool LsCreaturesExist()
