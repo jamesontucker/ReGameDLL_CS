@@ -969,6 +969,7 @@ struct Runner
 	Vector gaveUpPos;
 	float noWayLogAt = -99.0f;
 	float noWayTryAt = -99.0f;
+	float noWayJumpUntil = 0.0f;		// a no-other-way jump armed: kept armed till then
 	// a jump across a gap, armed by the path
 	bool gapArmed = false;
 	Vector takeoff, landing;
@@ -1995,7 +1996,8 @@ bool CCSBot::LsDrJumpGap(int i)
 		r.duckJump = land.z > feet + 12.0f;
 		m_goalPosition = land;
 		SetLookAt("Loner-Strike: the jump", &land, PRIORITY_HIGH, 0.3f);
-		LsWhy("deathrun: jumps the gap");
+		if (!s_jumpRelaxed)
+			LsWhy("deathrun: jumps the gap");	// (no other way: the caller says so)
 		return true;
 	}
 	return false;
@@ -2027,7 +2029,9 @@ bool CCSBot::LsDrFloorGone(int i, const CNavArea *B)
 		return true;
 	}
 	r.gaveUpAt = now;	// (still no other way)
-	if (now - r.noWayTryAt > 1.0f)
+	// (a jump found is kept armed every think while it runs up and goes - an arm not renewed within
+	// 0.35 s is let go; looked for again once a second while there's none)
+	if (now < r.noWayJumpUntil || now - r.noWayTryAt > 1.0f)
 	{
 		r.noWayTryAt = now;
 		s_jumpRelaxed = true;
@@ -2035,9 +2039,12 @@ bool CCSBot::LsDrFloorGone(int i, const CNavArea *B)
 		s_jumpRelaxed = false;
 		if (jumped)
 		{
+			if (now >= r.noWayJumpUntil)
+				r.noWayJumpUntil = now + 3.0f;
 			LsWhy("deathrun: no other way, best jump there is");
 			return true;
 		}
+		r.noWayJumpUntil = 0.0f;
 	}
 	// (keep waiting: the floor's own cycle if it's been seen, else till it comes back)
 	if (now - r.noWayLogAt > 3.0f)
