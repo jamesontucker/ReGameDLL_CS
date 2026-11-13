@@ -66,9 +66,11 @@ bool LsDrOn()
 // ground search walks through doors - a door's top edge isn't somewhere to stand - so a course
 // built on them was a pit to it). Wide both ways (a door standing up is a few units thick), and
 // the trace met its top
-bool LsMoverFloor(const TraceResult &result)
+static bool s_lsCourseLearning = false;	// (learning a nav right now, with course learning on)
+
+static bool LsFloorTop(const TraceResult &result)
 {
-	if (!result.pHit || result.vecPlaneNormal.z < 0.7f || !LsNavCourse())
+	if (!result.pHit || result.vecPlaneNormal.z < 0.7f)
 		return false;
 	entvars_t *pevHit = VARS(result.pHit);
 	// (and a breakable floor of any stuff: deathrun's floors that crumble when the trap's pressed)
@@ -78,6 +80,12 @@ bool LsMoverFloor(const TraceResult &result)
 	if (size.x < 40.0f || size.y < 40.0f)
 		return false;
 	return result.vecEndPos.z >= pevHit->absmax.z - 4.0f;
+}
+
+// (for the learner's ground search only: in play the ground search is the stock one)
+bool LsMoverFloor(const TraceResult &result)
+{
+	return s_lsCourseLearning && LsFloorTop(result);
 }
 
 namespace LsDr
@@ -140,7 +148,7 @@ static bool GroundBelow(const Vector &from, float depth, float *z, Vector *norma
 		UTIL_TraceLine(start, to, ignore_monsters, dont_ignore_glass, ignore, &tr);
 		if (tr.fStartSolid || tr.flFraction >= 1.0f)
 			return false;
-		if (tr.pHit && IsEntityWalkable(VARS(tr.pHit), WALK_THRU_DOORS | WALK_THRU_BREAKABLES) && !LsMoverFloor(tr))
+		if (tr.pHit && IsEntityWalkable(VARS(tr.pHit), WALK_THRU_DOORS | WALK_THRU_BREAKABLES) && !LsFloorTop(tr))
 		{
 			ignore = tr.pHit;
 			start = tr.vecEndPos - Vector(0, 0, 1.0f);
@@ -287,7 +295,8 @@ void LsCourseLearnStart()
 	s_scanned.clear();
 	s_teleSeeded.clear();
 	s_gapSeeds = s_teleSeeds = 0;
-	if (LsNavCourse())
+	s_lsCourseLearning = LsNavCourse();
+	if (s_lsCourseLearning)
 		DeadlyHurts(s_learnHurts);
 }
 
@@ -373,7 +382,9 @@ CNavNode *LsCourseSeedSearch()
 void LsCourseLinkAreas()
 {
 	using namespace LsDr;
-	if (!LsNavCourse())
+	bool was = s_lsCourseLearning;
+	s_lsCourseLearning = false;
+	if (!was)
 		return;
 	int made = 0, noArea = 0, same = 0, already = 0;
 	for (const Link &l : s_learnLinks)
@@ -599,9 +610,15 @@ static bool InTrap(const Trap &t, const Vector &p, float pad)
 	return false;
 }
 
+static bool s_btnDown[160];
+static void ResetBots();
+
 static void Build()
 {
 	s_ready = false;
+	// (indexes into the last nav's tables are no good now)
+	ResetBots();
+	Q_memset(s_btnDown, 0, sizeof(s_btnDown));
 	s_areas.clear();
 	s_idx.clear();
 	s_out.clear();
@@ -841,6 +858,7 @@ struct Runner
 	Vector2D gapDir;
 	float edge = 0.0f;				// the takeoff edge along gapDir
 	float jumpedAt = -9.0f;
+	float armedAt = -9.0f;			// (the path armed it then: a jump not re-armed lately is let go)
 	bool duckJump = false;
 	float backUntil = 0.0f;			// backing up for a run-up
 	bool tele = false;				// walking into a teleport rather than jumping
@@ -869,6 +887,16 @@ struct Activator
 
 static Runner s_run[MAX_CLIENTS + 1];
 static Activator s_act;
+
+static void ResetBots()
+{
+	for (int i = 0; i <= MAX_CLIENTS; i++)
+	{
+		s_run[i].waypoint = s_run[i].waitTrap = s_run[i].passedTrap = -1;
+		s_run[i].gapArmed = false;
+	}
+	s_act.target = -1;
+}
 
 static float RoundStart()
 {
@@ -928,7 +956,6 @@ static CBasePlayer *TheActivator()
 void LsDrStep()
 {
 	using namespace LsDr;
-	static bool s_btnDown[160];
 	if (!LsDrOn() || !Ready())
 		return;
 	for (size_t i = 0; i < s_traps.size() && i < 160; i++)
@@ -1156,6 +1183,8 @@ bool CCSBot::LsDrTick()
 	else
 		way = s_endIdx;
 	bool headed = IsMovingTo() && Q_fabs(m_stateTimestamp - r.moveState) < 0.05f;
+	if (r.waypoint >= int(s_toEnd.size()))
+		r.waypoint = -1;
 	bool farFromWay = r.waypoint < 0 || way < 0 || (s_toEnd[r.waypoint] >= 0.0f && s_toEnd[way] >= 0.0f && s_toEnd[r.waypoint] - s_toEnd[way] > 500.0f);
 	if (way >= 0 && (!headed || farFromWay || (way == s_endIdx && r.waypoint != s_endIdx)))
 	{
@@ -1192,8 +1221,18 @@ bool CCSBot::LsDrActivatorTick()
 		for (Trap &t : s_traps)
 			t.usedThisRound = false;
 	}
-	if (a.fighting || IsAttacking() || m_isEnemyVisible || IsOnLadder())
+	if (a.fighting || IsOnLadder())
 		return false;
+	// (a runner close by, in sight: a fight; one seen across the course doesn't take it off its
+	// button - the traps are the job)
+	if (IsAttacking() || m_isEnemyVisible)
+	{
+		CBasePlayer *pEnemy = GetEnemy();
+		if (pEnemy && (pEnemy->pev->origin - pev->origin).IsLengthLessThan(350.0f))
+			return false;
+		StopAttacking();
+		IgnoreEnemies(0.5f);
+	}
 
 	// the runners
 	CBasePlayer *runners[MAX_CLIENTS];
@@ -1385,7 +1424,7 @@ void CCSBot::LsDrPostUpdate()
 		SetLookAt("Loner-Strike: deathrun wait", &r.holdLook, PRIORITY_MEDIUM, 0.5f);
 		return;
 	}
-	if (m_iTeam != TERRORIST || s_act.fighting || s_act.target < 0 || s_act.target >= int(s_traps.size()) || m_isEnemyVisible)
+	if (m_iTeam != TERRORIST || s_act.fighting || s_act.target < 0 || s_act.target >= int(s_traps.size()))
 		return;
 	Activator &a = s_act;
 	Trap &t = s_traps[a.target];
@@ -1512,6 +1551,7 @@ void CCSBot::LsDrPathTick()
 		}
 		r.floorWaitSince = 0.0f;
 		r.gapArmed = true;
+		r.armedAt = now;
 		r.takeoff = takeoff;
 		r.landing = land;
 		r.gapDir = d;
@@ -1564,6 +1604,13 @@ void LsDrDrive(CBasePlayer *bot, float *forward, float *strafe, unsigned short *
 	CCSBot *me = static_cast<CCSBot *>(bot);
 	float now = gpGlobals->time;
 	bool ground = (bot->pev->flags & FL_ONGROUND) != 0;
+	// (only while the path keeps arming it, or in the air on the jump; not in a fight)
+	bool fresh = now - r.armedAt < 0.35f || (!ground && now - r.jumpedAt < 1.5f);
+	if (!fresh || bot->m_iTeam != CT || me->IsAttacking() || me->IsOnLadder())
+	{
+		r.gapArmed = false;
+		return;
+	}
 	Vector2D o = bot->pev->origin.Make2D();
 	Vector2D wish;
 	if (ground)
