@@ -830,16 +830,13 @@ static void LsCheckModelVersion(const char *model)
 
 	if (length != known->size || sequences != known->sequences)
 	{
-		CONSOLE_ECHO("ls_creature: WARNING: this server's %s isn't the one current Half-Life games have (%d sequences, %d bytes; Steam's has %d, %d).
-"
-			"ls_creature: WARNING: players will see the wrong animations. Copy valve/%s from an up-to-date Half-Life (the Loner-Strike app does it at each start).
-",
+		CONSOLE_ECHO("ls_creature: WARNING: this server's %s isn't the one current Half-Life games have (%d sequences, %d bytes; Steam's has %d, %d).\n"
+			"ls_creature: WARNING: players will see the wrong animations. Copy valve/%s from an up-to-date Half-Life (the Loner-Strike app does it at each start).\n",
 			model, sequences, length, known->sequences, known->size, model);
 	}
 	else if (ls_creature_debug.value > 0.0f)
 	{
-		CONSOLE_ECHO("ls_creature: %s differs from Steam's copy (CRC) but has the same layout
-", model);
+		CONSOLE_ECHO("ls_creature: %s differs from Steam's copy (CRC) but has the same layout\n", model);
 	}
 }
 
