@@ -141,6 +141,7 @@ struct LsCreatureType
 	float respawn;			// seconds after death it comes back at home (0 = never)
 	float corpseTime;		// seconds the body stays
 	bool moves;				// false: a turret
+	bool canClimb;			// may path up and down ladders (no built-in type does)
 	int frags;				// score for the killer
 	int money;				// money for the killer
 
@@ -362,6 +363,7 @@ public:
 
 public:
 	void EXPORT CreatureThink();
+	void CreatureThinkBody();
 
 	// what the framework asks of it (LsNativeCreature forwards here)
 	const LsCreatureType *GetType() const;
@@ -395,6 +397,7 @@ private:
 	void UpdateAnimation();
 	bool CanSee(CBaseEntity *pOther, bool alert, bool thorough) const;
 	bool WantsToFight(CBaseEntity *pOther, float dist) const;
+	bool SkipsTarget(CBaseEntity *pOther) const { return pOther == m_skipTarget && gpGlobals->time < m_skipUntil; }
 	void Notice(CBaseEntity *pOther, bool alert);
 	void StartAttack();
 	void LandAttack();
@@ -438,6 +441,10 @@ private:
 	Mode m_mode;
 	EHANDLE m_target;
 	EHANDLE m_forcedTarget;		// told whom to attack (ls_creature target)
+	EHANDLE m_skipTarget;		// one it couldn't get to (up a ladder): left alone a while
+	float m_skipUntil;
+	float m_cantReachSince;		// close below the target and not getting higher, since (0 = not)
+	float m_cantReachZ;
 	EHANDLE m_lastAttacker;
 	EHANDLE m_noticing;			// seen, not yet sure
 	float m_noticeStart;
@@ -507,3 +514,13 @@ bool LsCreaturesExist();										// cheap: anything registered at all
 int LsCreatureShouldCollide(edict_t *pentTouched, edict_t *pentOther);	// NEW_DLL_FUNCTIONS: creatures pass through each other
 
 extern cvar_t ls_creature_debug;
+
+// Loner-Strike watchdog: where the game DLL was when a server frame stops coming (a hang). The main
+// thread leaves cheap marks (a string and an entity index) in a ring; a second thread notices
+// when frames stop for ls_watchdog seconds and writes the last marks to ls_watchdog.log in the
+// game folder. A last mark that's an "end" means the time went outside the game DLL (the engine
+// or a plugin).
+void LsMark(const char *where, int ent = 0);
+void LsMarkText(const char *text);				// a short copy kept beside the newest mark (a command's name)
+void LsWatchdogFrame();						// StartFrame: a frame came
+void LsWatchdogStart();						// GameDLLInit

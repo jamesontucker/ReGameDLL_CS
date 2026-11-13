@@ -96,6 +96,36 @@ void CCreatureImprov::MoveTo(const Vector &goal)
 	}
 }
 
+// The hostage's path cost (crouch and jump areas cost more), and ladders only for a type that
+// climbs: a zombie doesn't follow anyone up one (the search then ends at the nearest area it
+// can reach, below)
+class CreaturePathCost
+{
+public:
+	CreaturePathCost(bool canClimb) : m_canClimb(canClimb) {}
+
+	float operator()(CNavArea *area, CNavArea *fromArea, const CNavLadder *ladder)
+	{
+		if (!fromArea)
+			return 0.0f;
+
+		if (ladder)
+			return m_canClimb ? ladder->m_length * 10.0f + fromArea->GetCostSoFar() : -1.0f;
+
+		float dist = (*area->GetCenter() - *fromArea->GetCenter()).Length();
+		float cost = dist + fromArea->GetCostSoFar();
+		if (area->GetAttributes() & NAV_CROUCH)
+			cost += 10.0f * dist;
+		if (area->GetAttributes() & NAV_JUMP)
+			cost += 10.0f * dist;
+
+		return cost;
+	}
+
+private:
+	bool m_canClimb;
+};
+
 // Path searches across all creatures: at most two a frame, the rest wait their turn (a tick or two)
 static bool LsPathBudget()
 {
@@ -581,8 +611,11 @@ void CCreatureImprov::UpdatePosition(float deltaT)
 			}
 			else
 			{
-				HostagePathCost pathCost;
-				if (m_path.Compute(&GetFeet(), &m_moveGoal, pathCost))
+				CreaturePathCost pathCost(m_creature->GetType()->canClimb);
+				LsMark("creature path", m_creature->entindex());
+				bool found = m_path.Compute(&GetFeet(), &m_moveGoal, pathCost);
+				LsMark("creature path end", m_creature->entindex());
+				if (found)
 				{
 					m_repathFails = 0;
 					m_follower.SetPath(&m_path);

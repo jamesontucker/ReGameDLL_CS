@@ -37,7 +37,7 @@ if (NOT XASH_COMPAT)
 endif()
 
 set(COMPILE_FLAGS "-U_FORTIFY_SOURCE")
-set(LINK_LIBS dl)
+set(LINK_LIBS dl pthread)
 
 # do not strip debuginfo during link
 if (NOT DEBUG)

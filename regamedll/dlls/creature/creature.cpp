@@ -41,8 +41,259 @@ cvar_t ls_creature_alive     = { "ls_creature_alive", "0", 0, 0.0f, nullptr };		
 cvar_t ls_creature_ver       = { "ls_creature_ver", "1", 0, 1.0f, nullptr };
 cvar_t ls_creature_frags     = { "ls_creature_frags", "0", 0, 0.0f, nullptr };		// 1 = kills add the type's frags to the score (counts toward mp_fraglimit)
 
+cvar_t ls_watchdog           = { "ls_watchdog", "10", 0, 10.0f, nullptr };
+cvar_t ls_crash_quiet        = { "ls_crash_quiet", "1", 0, 1.0f, nullptr };		// a dedicated server's crash: log and end, no dialog (Windows/Wine)		// seconds without a frame before the marks are written (0 = off)
+
+// ---------------------------------------------------------------------------------------------
+// Watchdog (see creature.h)
+
+struct LsWatchMark
+{
+	const char *where;
+	int ent;
+	float time;
+};
+
+static const unsigned LS_WATCH_MARKS = 64;
+static LsWatchMark s_watchMarks[LS_WATCH_MARKS];
+static volatile unsigned s_watchNext = 0;
+static volatile unsigned s_watchFrames = 0;
+static char s_watchPath[260] = "";
+static char s_watchText[64] = "";		// the newest LsMarkText
+
+void LsMarkText(const char *text)
+{
+	Q_strlcpy(s_watchText, text ? text : "");
+}
+
+void LsMark(const char *where, int ent)
+{
+	unsigned i = s_watchNext % LS_WATCH_MARKS;
+	s_watchMarks[i].where = where;
+	s_watchMarks[i].ent = ent;
+	s_watchMarks[i].time = gpGlobals ? gpGlobals->time : 0.0f;
+	s_watchNext = s_watchNext + 1;
+}
+
+void LsWatchdogFrame()
+{
+	s_watchFrames = s_watchFrames + 1;
+	LsMark("frame");
+}
+
+static void LsWatchdogWrite(unsigned frames, int secs, bool resumed)
+{
+	FILE *f = fopen(s_watchPath, "a");
+	if (!f)
+		return;
+
+	if (resumed)
+	{
+		fprintf(f, "frames came again after %d s\n\n", secs);
+		fclose(f);
+		return;
+	}
+
+	time_t now = time(nullptr);
+	fprintf(f, "%sno server frame for %d s (frame %u); the last marks, oldest first (game time, where, entity):\n", ctime(&now), secs, frames);
+	unsigned next = s_watchNext;
+	unsigned count = (next < LS_WATCH_MARKS) ? next : LS_WATCH_MARKS;
+	for (unsigned k = next - count; k != next; k++)
+	{
+		const LsWatchMark &m = s_watchMarks[k % LS_WATCH_MARKS];
+		fprintf(f, "  %10.2f  %-28s %d\n", m.time, m.where ? m.where : "?", m.ent);
+	}
+	fprintf(f, "  (last text: %s)\n\n", s_watchText);
+	fclose(f);
+}
+
+#ifdef _WIN32
+// A crash on Windows: the faulting address and every return address on the stack that points
+// into a loaded module (module+offset, for llvm-symbolizer with the CI's mp.pdb), with the
+// watchdog's marks, to ls_crash.log beside ls_watchdog.log. Vectored, so it runs before the
+// engine's own handler; access violations and the like only, the first few.
+static void LsCrashModule(FILE *f, DWORD addr)
+{
+	MEMORY_BASIC_INFORMATION mbi;
+	char name[MAX_PATH] = "?";
+	if (VirtualQuery((LPCVOID)(size_t)addr, &mbi, sizeof(mbi)) && mbi.AllocationBase
+		&& GetModuleFileNameA((HMODULE)mbi.AllocationBase, name, sizeof(name)))
+	{
+		const char *base = Q_strrchr(name, '\\');
+		fprintf(f, "  0x%08lx  %s+0x%lx\n", (unsigned long)addr, base ? base + 1 : name, (unsigned long)(addr - (DWORD)(size_t)mbi.AllocationBase));
+	}
+}
+
+static bool LsCrashIsCode(DWORD addr)
+{
+	MEMORY_BASIC_INFORMATION mbi;
+	if (!VirtualQuery((LPCVOID)(size_t)addr, &mbi, sizeof(mbi)) || mbi.State != MEM_COMMIT || mbi.Type != MEM_IMAGE)
+		return false;
+	return (mbi.Protect & (PAGE_EXECUTE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY)) != 0;
+}
+
+static LONG WINAPI LsCrashHandler(EXCEPTION_POINTERS *ep)
+{
+	static volatile LONG s_written = 0;
+	DWORD code = ep->ExceptionRecord->ExceptionCode;
+	if (code != EXCEPTION_ACCESS_VIOLATION && code != EXCEPTION_ILLEGAL_INSTRUCTION && code != EXCEPTION_STACK_OVERFLOW
+		&& code != EXCEPTION_INT_DIVIDE_BY_ZERO && code != EXCEPTION_PRIV_INSTRUCTION)
+		return EXCEPTION_CONTINUE_SEARCH;
+
+	if (InterlockedIncrement(&s_written) > 3 || !s_watchPath[0])
+		return EXCEPTION_CONTINUE_SEARCH;
+
+	char path[260];
+	Q_strlcpy(path, s_watchPath);
+	char *slash = Q_strrchr(path, '/');
+	Q_strlcpy(slash ? slash + 1 : path, "ls_crash.log", sizeof(path) - (slash ? (slash + 1 - path) : 0));
+
+	FILE *f = fopen(path, "a");
+	if (!f)
+		return EXCEPTION_CONTINUE_SEARCH;
+
+	time_t now = time(nullptr);
+	DWORD eip = ep->ContextRecord->Eip, esp = ep->ContextRecord->Esp;
+	fprintf(f, "%sexception 0x%08lx at 0x%08lx (first-chance; the game may still handle it)\n", ctime(&now), (unsigned long)code, (unsigned long)eip);
+	if (code == EXCEPTION_ACCESS_VIOLATION && ep->ExceptionRecord->NumberParameters >= 2)
+		fprintf(f, "  %s 0x%08lx\n", ep->ExceptionRecord->ExceptionInformation[0] ? "writing" : "reading", (unsigned long)ep->ExceptionRecord->ExceptionInformation[1]);
+
+	fprintf(f, "where:\n");
+	LsCrashModule(f, eip);
+	fprintf(f, "return addresses on the stack (newest first):\n");
+	int found = 0;
+	for (DWORD *p = (DWORD *)(size_t)esp; found < 40 && p < (DWORD *)(size_t)esp + 4096; p++)
+	{
+		MEMORY_BASIC_INFORMATION mbi;
+		if (!VirtualQuery(p, &mbi, sizeof(mbi)) || mbi.State != MEM_COMMIT)
+			break;
+		if (LsCrashIsCode(*p))
+		{
+			LsCrashModule(f, *p);
+			found++;
+		}
+	}
+
+	fprintf(f, "last marks:\n");
+	unsigned next = s_watchNext;
+	unsigned count = (next < LS_WATCH_MARKS) ? next : LS_WATCH_MARKS;
+	for (unsigned k = next - count; k != next; k++)
+	{
+		const LsWatchMark &m = s_watchMarks[k % LS_WATCH_MARKS];
+		fprintf(f, "  %10.2f  %-28s %d\n", m.time, m.where ? m.where : "?", m.ent);
+	}
+	fprintf(f, "  (last text: %s)\n\n", s_watchText);
+	fclose(f);
+	return EXCEPTION_CONTINUE_SEARCH;
+}
+
+// A dedicated server that crashes ends quietly, with ls_crash.log written: the default handler
+// would start Wine's/Windows' crash dialog (winedbg --auto, or Windows Error Reporting), which
+// keeps the dead server holding its port until someone clicks it away - on a Mac's own desktop
+// for a CrossOver server. Only for dedicated servers: the player's game keeps its usual behaviour
+static LONG WINAPI LsUnhandled(EXCEPTION_POINTERS *ep)
+{
+	LsCrashHandler(ep);
+	FILE *f = fopen(s_watchPath[0] ? s_watchPath : "ls_watchdog.log", "a");
+	if (f)
+	{
+		fprintf(f, "unhandled exception 0x%08lx at 0x%08lx: the server ends (see ls_crash.log)\n\n",
+			(unsigned long)ep->ExceptionRecord->ExceptionCode, (unsigned long)(size_t)ep->ExceptionRecord->ExceptionAddress);
+		fclose(f);
+	}
+	TerminateProcess(GetCurrentProcess(), ep->ExceptionRecord->ExceptionCode);
+	return EXCEPTION_EXECUTE_HANDLER;
+}
+#endif
+
+// (each map: the engine and Steam's crash handler may have set their own filter since)
+void LsCrashQuietInstall()
+{
+#ifdef _WIN32
+	if (IS_DEDICATED_SERVER() && ls_crash_quiet.value > 0.0f)
+		SetUnhandledExceptionFilter(LsUnhandled);
+#endif
+}
+
+// The second thread: once a second, did a frame come? (only reads; writes nothing the game uses)
+static void LsWatchdogLoop()
+{
+	unsigned seen = s_watchFrames;
+	int still = 0;
+	bool told = false;
+	for (;;)
+	{
+#ifdef _WIN32
+		Sleep(1000);
+#else
+		sleep(1);
+#endif
+		unsigned frames = s_watchFrames;
+		int limit = int(ls_watchdog.value);
+		if (frames != seen || !g_bServerActive || limit <= 0)
+		{
+			if (told && frames != seen)
+				LsWatchdogWrite(frames, still, true);
+			seen = frames;
+			still = 0;
+			told = false;
+			continue;
+		}
+
+		if (++still >= limit && !told)
+		{
+			told = true;
+			LsWatchdogWrite(frames, still, false);
+		}
+	}
+}
+
+#ifdef _WIN32
+static DWORD WINAPI LsWatchdogThread(LPVOID)
+{
+	LsWatchdogLoop();
+	return 0;
+}
+#else
+static void *LsWatchdogThread(void *)
+{
+	LsWatchdogLoop();
+	return nullptr;
+}
+#endif
+
+void LsWatchdogStart()
+{
+	static bool started = false;
+	if (started)
+		return;
+
+	started = true;
+	char dir[200];
+	GET_GAME_DIR(dir);
+	Q_snprintf(s_watchPath, sizeof(s_watchPath), "%s/ls_watchdog.log", dir);
+
+#ifdef _WIN32
+	AddVectoredExceptionHandler(1, LsCrashHandler);
+	HANDLE h = CreateThread(nullptr, 64 * 1024, LsWatchdogThread, nullptr, 0, nullptr);
+	if (h)
+		CloseHandle(h);
+#else
+	pthread_t thread;
+	pthread_attr_t attr;
+	pthread_attr_init(&attr);
+	pthread_attr_setstacksize(&attr, 64 * 1024);
+	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+	pthread_create(&thread, &attr, LsWatchdogThread, nullptr);
+	pthread_attr_destroy(&attr);
+#endif
+}
+
 void LsCreatures_RegisterCVars()
 {
+	CVAR_REGISTER(&ls_watchdog);
+	CVAR_REGISTER(&ls_crash_quiet);
+	LsWatchdogStart();
 	CVAR_REGISTER(&ls_creature_file);
 	CVAR_REGISTER(&ls_creature_precache);
 	CVAR_REGISTER(&ls_creature_max);
@@ -517,6 +768,7 @@ static void LsSetTypeKey(LsCreatureType *t, const char *key, const char *value)
 	else if (!Q_stricmp(key, "respawn")) t->respawn = LsNum(value, 0.0f, 3600.0f, t->respawn);
 	else if (!Q_stricmp(key, "corpse_time")) t->corpseTime = LsNum(value, 0.0f, 120.0f, t->corpseTime);
 	else if (!Q_stricmp(key, "moves")) t->moves = Q_atoi(value) != 0;
+	else if (!Q_stricmp(key, "can_climb")) t->canClimb = Q_atoi(value) != 0;
 	else if (!Q_stricmp(key, "frags")) t->frags = clamp(Q_atoi(value), -100, 100);
 	else if (!Q_stricmp(key, "money")) t->money = clamp(Q_atoi(value), -16000, 16000);
 	else if (!Q_stricmp(key, "model") || !Q_stricmp(key, "models")) Q_strlcpy(t->models, value);
@@ -973,6 +1225,7 @@ static float s_nextAliveCount = 0.0f;
 void LsCreaturesServerActivate()
 {
 	s_mapRunning = true;
+	LsCrashQuietInstall();
 }
 
 bool LsCreaturesExist()
@@ -1591,6 +1844,9 @@ void CLsCreature::Setup()
 	m_nextIdleSound = gpGlobals->time + RANDOM_FLOAT(4.0f, 12.0f);
 	m_painSoundAt = 0.0f;
 	m_flinchUntil = 0.0f;
+	m_skipTarget = nullptr;
+	m_skipUntil = 0.0f;
+	m_cantReachSince = 0.0f;
 	m_animMoving = false;
 	m_attackFramerate = 1.0f;
 	m_attackAnimEnd = 0.0f;
@@ -2191,7 +2447,7 @@ void CLsCreature::UpdateSenses()
 	for (int i = 1; i <= gpGlobals->maxClients; i++)
 	{
 		CBasePlayer *pPlayer = UTIL_PlayerByIndex(i);
-		if (!pPlayer || !IsHostileTo(pPlayer))
+		if (!pPlayer || !IsHostileTo(pPlayer) || SkipsTarget(pPlayer))
 			continue;
 
 		float dist = (pPlayer->pev->origin - pev->origin).Length();
@@ -2263,7 +2519,7 @@ void CLsCreature::UpdateSenses()
 		for (int i = 1; i <= gpGlobals->maxClients; i++)
 		{
 			CBasePlayer *pPlayer = UTIL_PlayerByIndex(i);
-			if (!pPlayer || !IsHostileTo(pPlayer))
+			if (!pPlayer || !IsHostileTo(pPlayer) || SkipsTarget(pPlayer))
 				continue;
 
 			float dist = (pPlayer->pev->origin - pev->origin).Length();
@@ -2866,6 +3122,28 @@ void CLsCreature::UpdateChase()
 		return;
 	}
 
+	// can't get to them (up a ladder it can't climb, on a ledge): close below them and not getting
+	// any higher. A few seconds of that and it leaves them be a while - another target, or back
+	// to its round (it doesn't stand under the ladder for ever)
+	bool onLadder = pTarget->IsPlayer() && static_cast<CBasePlayer *>(pTarget)->IsOnLadder() && !t->canClimb;
+	bool below = dist < 250.0f && pTarget->pev->origin.z - pev->origin.z > 56.0f;
+	if (!(below || onLadder))
+		m_cantReachSince = 0.0f;
+	else if (m_cantReachSince <= 0.0f || pev->origin.z > m_cantReachZ + 16.0f)
+	{
+		// (climbing stairs towards them: still getting there)
+		m_cantReachSince = now;
+		m_cantReachZ = pev->origin.z;
+	}
+	else if (now - m_cantReachSince > 3.0f && m_forcedTarget != pTarget)
+	{
+		m_skipTarget = pTarget;
+		m_skipUntil = now + 8.0f;
+		m_cantReachSince = 0.0f;
+		GoHome();
+		return;
+	}
+
 	m_improv->Run();
 	m_improv->LookAt(m_targetLastSeen);
 	if (now >= m_nextRepath || (m_targetLastSeen - m_lastMoveTo).IsLengthGreaterThan(96.0f))
@@ -3084,6 +3362,13 @@ void CLsCreature::UpdateFlee()
 
 void CLsCreature::CreatureThink()
 {
+	LsMark("creature think", entindex());
+	CreatureThinkBody();
+	LsMark("creature think end", entindex());
+}
+
+void CLsCreature::CreatureThinkBody()
+{
 	const float upkeepRate = 1.0f / 30.0f;
 	float now = gpGlobals->time;
 
@@ -3228,6 +3513,7 @@ static int LsForEachMatching(const char *arg, Functor func)
 
 void LsCreature_f()
 {
+	LsMark("ls_creature command");
 	const char *cmd = CMD_ARGV(1);
 
 	if (!Q_stricmp(cmd, "spawn"))

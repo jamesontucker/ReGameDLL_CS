@@ -279,15 +279,17 @@ int CMD_ARGC_()
 	return i;
 }
 
+// (Loner-Strike: never a null pointer - a bot's command, or one a plugin fakes, has nothing
+// behind its last argument, and "drop" with a null name crashed in DropPlayerItem)
 const char *CMD_ARGV_(int i)
 {
+	const char *arg = nullptr;
 	if (!UseBotArgs)
-		return CMD_ARGV(i);
+		arg = CMD_ARGV(i);
+	else if (i >= 0 && i < 4)
+		arg = BotArgs[i];
 
-	if (i < 4)
-		return BotArgs[i];
-
-	return nullptr;
+	return arg ? arg : "";
 }
 
 NOXREF void set_suicide_frame(entvars_t *pev)
@@ -3738,11 +3740,17 @@ void EXT_FUNC ClientCommand_(edict_t *pEntity)
 	if (!pEntity->pvPrivateData)
 		return;
 
-	static char command[128] = "";
-	Q_strncpy(command, CMD_ARGV_(0), sizeof command - 1);
-	command[sizeof command - 1] = '\0';
+	// (Loner-Strike: CMD_ARGV_ never gives a null pointer now - see there)
+	const char *arg0 = CMD_ARGV_(0);
+	const char *arg1 = CMD_ARGV_(1);
 
-	g_ReGameHookchains.m_InternalCommand.callChain(InternalCommand, pEntity, command, CMD_ARGV_(1));
+	static char command[128] = "";
+	Q_strncpy(command, arg0, sizeof command - 1);
+	command[sizeof command - 1] = '\0';
+	LsMark("client command", ENTINDEX(pEntity));	// Loner-Strike: the watchdog's marks (and which command: LsMarkText)
+	LsMarkText(command);
+
+	g_ReGameHookchains.m_InternalCommand.callChain(InternalCommand, pEntity, command, arg1);
 }
 
 // called after the player changes userinfo - gives dll a chance to modify it before it gets sent into the rest of the engine.
@@ -3819,6 +3827,7 @@ void EXT_FUNC ServerDeactivate()
 
 void EXT_FUNC ServerActivate(edict_t *pEdictList, int edictCount, int clientMax)
 {
+	LsMark("server activate");	// Loner-Strike: the watchdog's marks
 	g_pEdicts = pEdictList;
 
 #ifdef REGAMEDLL_ADD
@@ -3889,6 +3898,7 @@ void EXT_FUNC ServerActivate(edict_t *pEdictList, int edictCount, int clientMax)
 
 	// Loner-Strike: creatures can be spawned by command from now on
 	LsCreaturesServerActivate();
+	LsMark("server activate end");
 
 #ifdef REGAMEDLL_ADD
 	CSGameRules()->ServerActivate();
@@ -3935,8 +3945,11 @@ void EXT_FUNC ParmsChangeLevel()
 
 void EXT_FUNC StartFrame()
 {
+	LsWatchdogFrame();	// Loner-Strike: a frame came (the watchdog, creature/creature.cpp)
+
 	if (g_pGameRules)
 	{
+		LsMark("rules think");
 		g_pGameRules->Think();
 		if (g_pGameRules->IsGameOver())
 			return;
@@ -3948,6 +3961,7 @@ void EXT_FUNC StartFrame()
 	g_iSkillLevel = g_pskill ? (int)g_pskill->value : 0;
 
 	if (TheBots) {
+		LsMark("bots frame");
 		TheBots->StartFrame();
 	}
 
@@ -3956,6 +3970,7 @@ void EXT_FUNC StartFrame()
 	}
 
 	EndFrame();
+	LsMark("frame end");
 }
 
 void EndFrame()
