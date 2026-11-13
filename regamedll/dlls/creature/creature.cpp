@@ -2344,7 +2344,19 @@ void CLsCreature::KeyValue(KeyValueData *pkvd)
 	else if (FStrEq(key, "persist"))
 		m_persist = Q_atoi(value) != 0;
 	else if (FStrEq(key, "tier"))
+	{
+		// (0 or 1 = normal; also takes effect on one already spawned: a plugin's DispatchKeyValue after the spawn)
+		int before = Tier();
 		m_tier = clamp(Q_atoi(value), 1, 3);
+		if (m_improv && IsAlive() && Tier() != before)
+		{
+			const LsCreatureType *t = GetType();
+			float ratio = (before >= 2 ? 1.0f / t->tierHealth[before - 2] : 1.0f) * (Tier() >= 2 ? t->tierHealth[Tier() - 2] : 1.0f);
+			pev->max_health *= ratio;
+			pev->health *= ratio;
+			ApplyLook();
+		}
+	}
 	else
 	{
 		CBaseMonster::KeyValue(pkvd);
