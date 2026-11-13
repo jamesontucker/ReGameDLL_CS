@@ -4565,11 +4565,13 @@ void CNavArea::ComputeApproachAreas()
 	enum { MAX_PATH_LENGTH = 256 };
 	CNavArea *path[MAX_PATH_LENGTH];
 
-	// Loner-Strike: a time budget per area. On big deathrun navs (deathrun_dojo, ~20000 learn nodes) one
-	// area's search over every far area took minutes and the learn never finished; the approach areas
-	// found so far are kept.
+	// Loner-Strike: a time budget per area, on course-learning (deathrun) maps only. On big deathrun navs
+	// (deathrun_dojo, ~20000 learn nodes) one area's search over every far area took minutes and the
+	// learn never finished; the approach areas found so far are kept. Other maps learn exactly as before
+	// (a wall-clock cap would make shipped stock navs depend on how busy the machine was).
+	extern bool LsNavCourse();
 	const float budgetStart = g_engfuncs.pfnTime();
-	const float budget = 0.5f;
+	const float budget = LsNavCourse() ? 0.5f : 1e9f;
 
 	enum SearchType
 	{
