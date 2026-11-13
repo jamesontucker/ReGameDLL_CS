@@ -521,5 +521,6 @@ extern cvar_t ls_creature_debug;
 // game folder. A last mark that's an "end" means the time went outside the game DLL (the engine
 // or a plugin).
 void LsMark(const char *where, int ent = 0);
+void LsMarkText(const char *text);				// a short copy kept beside the newest mark (a command's name)
 void LsWatchdogFrame();						// StartFrame: a frame came
 void LsWatchdogStart();						// GameDLLInit

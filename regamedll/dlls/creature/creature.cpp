@@ -58,6 +58,12 @@ static LsWatchMark s_watchMarks[LS_WATCH_MARKS];
 static volatile unsigned s_watchNext = 0;
 static volatile unsigned s_watchFrames = 0;
 static char s_watchPath[260] = "";
+static char s_watchText[64] = "";		// the newest LsMarkText
+
+void LsMarkText(const char *text)
+{
+	Q_strlcpy(s_watchText, text ? text : "");
+}
 
 void LsMark(const char *where, int ent)
 {
@@ -96,9 +102,90 @@ static void LsWatchdogWrite(unsigned frames, int secs, bool resumed)
 		const LsWatchMark &m = s_watchMarks[k % LS_WATCH_MARKS];
 		fprintf(f, "  %10.2f  %-28s %d\n", m.time, m.where ? m.where : "?", m.ent);
 	}
-	fprintf(f, "\n");
+	fprintf(f, "  (last text: %s)\n\n", s_watchText);
 	fclose(f);
 }
+
+#ifdef _WIN32
+// A crash on Windows: the faulting address and every return address on the stack that points
+// into a loaded module (module+offset, for llvm-symbolizer with the CI's mp.pdb), with the
+// watchdog's marks, to ls_crash.log beside ls_watchdog.log. Vectored, so it runs before the
+// engine's own handler; access violations and the like only, the first few.
+static void LsCrashModule(FILE *f, DWORD addr)
+{
+	MEMORY_BASIC_INFORMATION mbi;
+	char name[MAX_PATH] = "?";
+	if (VirtualQuery((LPCVOID)(size_t)addr, &mbi, sizeof(mbi)) && mbi.AllocationBase
+		&& GetModuleFileNameA((HMODULE)mbi.AllocationBase, name, sizeof(name)))
+	{
+		const char *base = Q_strrchr(name, '\\');
+		fprintf(f, "  0x%08lx  %s+0x%lx\n", (unsigned long)addr, base ? base + 1 : name, (unsigned long)(addr - (DWORD)(size_t)mbi.AllocationBase));
+	}
+}
+
+static bool LsCrashIsCode(DWORD addr)
+{
+	MEMORY_BASIC_INFORMATION mbi;
+	if (!VirtualQuery((LPCVOID)(size_t)addr, &mbi, sizeof(mbi)) || mbi.State != MEM_COMMIT || mbi.Type != MEM_IMAGE)
+		return false;
+	return (mbi.Protect & (PAGE_EXECUTE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY)) != 0;
+}
+
+static LONG WINAPI LsCrashHandler(EXCEPTION_POINTERS *ep)
+{
+	static volatile LONG s_written = 0;
+	DWORD code = ep->ExceptionRecord->ExceptionCode;
+	if (code != EXCEPTION_ACCESS_VIOLATION && code != EXCEPTION_ILLEGAL_INSTRUCTION && code != EXCEPTION_STACK_OVERFLOW
+		&& code != EXCEPTION_INT_DIVIDE_BY_ZERO && code != EXCEPTION_PRIV_INSTRUCTION)
+		return EXCEPTION_CONTINUE_SEARCH;
+
+	if (InterlockedIncrement(&s_written) > 3 || !s_watchPath[0])
+		return EXCEPTION_CONTINUE_SEARCH;
+
+	char path[260];
+	Q_strlcpy(path, s_watchPath);
+	char *slash = Q_strrchr(path, '/');
+	Q_strlcpy(slash ? slash + 1 : path, "ls_crash.log", sizeof(path) - (slash ? (slash + 1 - path) : 0));
+
+	FILE *f = fopen(path, "a");
+	if (!f)
+		return EXCEPTION_CONTINUE_SEARCH;
+
+	time_t now = time(nullptr);
+	DWORD eip = ep->ContextRecord->Eip, esp = ep->ContextRecord->Esp;
+	fprintf(f, "%sexception 0x%08lx at 0x%08lx (first-chance; the game may still handle it)\n", ctime(&now), (unsigned long)code, (unsigned long)eip);
+	if (code == EXCEPTION_ACCESS_VIOLATION && ep->ExceptionRecord->NumberParameters >= 2)
+		fprintf(f, "  %s 0x%08lx\n", ep->ExceptionRecord->ExceptionInformation[0] ? "writing" : "reading", (unsigned long)ep->ExceptionRecord->ExceptionInformation[1]);
+
+	fprintf(f, "where:\n");
+	LsCrashModule(f, eip);
+	fprintf(f, "return addresses on the stack (newest first):\n");
+	int found = 0;
+	for (DWORD *p = (DWORD *)(size_t)esp; found < 40 && p < (DWORD *)(size_t)esp + 4096; p++)
+	{
+		MEMORY_BASIC_INFORMATION mbi;
+		if (!VirtualQuery(p, &mbi, sizeof(mbi)) || mbi.State != MEM_COMMIT)
+			break;
+		if (LsCrashIsCode(*p))
+		{
+			LsCrashModule(f, *p);
+			found++;
+		}
+	}
+
+	fprintf(f, "last marks:\n");
+	unsigned next = s_watchNext;
+	unsigned count = (next < LS_WATCH_MARKS) ? next : LS_WATCH_MARKS;
+	for (unsigned k = next - count; k != next; k++)
+	{
+		const LsWatchMark &m = s_watchMarks[k % LS_WATCH_MARKS];
+		fprintf(f, "  %10.2f  %-28s %d\n", m.time, m.where ? m.where : "?", m.ent);
+	}
+	fprintf(f, "  (last text: %s)\n\n", s_watchText);
+	fclose(f);
+	return EXCEPTION_CONTINUE_SEARCH;
+}
+#endif
 
 // The second thread: once a second, did a frame come? (only reads; writes nothing the game uses)
 static void LsWatchdogLoop()
@@ -159,6 +246,7 @@ void LsWatchdogStart()
 	Q_snprintf(s_watchPath, sizeof(s_watchPath), "%s/ls_watchdog.log", dir);
 
 #ifdef _WIN32
+	AddVectoredExceptionHandler(1, LsCrashHandler);
 	HANDLE h = CreateThread(nullptr, 64 * 1024, LsWatchdogThread, nullptr, 0, nullptr);
 	if (h)
 		CloseHandle(h);

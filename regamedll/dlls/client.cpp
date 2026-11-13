@@ -3738,6 +3738,8 @@ void EXT_FUNC ClientCommand_(edict_t *pEntity)
 	static char command[128] = "";
 	Q_strncpy(command, CMD_ARGV_(0), sizeof command - 1);
 	command[sizeof command - 1] = '\0';
+	LsMark("client command", ENTINDEX(pEntity));	// Loner-Strike: the watchdog's marks (and which command: LsMarkText)
+	LsMarkText(command);
 
 	g_ReGameHookchains.m_InternalCommand.callChain(InternalCommand, pEntity, command, CMD_ARGV_(1));
 }
