@@ -1311,8 +1311,16 @@ bool CCSBot::LsDrTick()
 		return false;
 	}
 
-	// a fight (the terrorist in sight) is the brain's
-	if (IsAttacking() || m_isEnemyVisible || IsOnLadder() || !LsFree())
+	// a fight (the terrorist in sight) is the brain's - when he's near enough to fight. One seen far
+	// across the course (open maps: from the start, over the pit) doesn't take a runner off the course:
+	// the stock hunt walks straight at him, off the edge
+	bool fightNear = false;
+	if (IsAttacking() || m_isEnemyVisible)
+	{
+		CBasePlayer *pEnemy = static_cast<CBasePlayer *>(GetEnemy());
+		fightNear = !pEnemy || (pEnemy->pev->origin - pev->origin).IsLengthLessThan(600.0f);
+	}
+	if (fightNear || IsOnLadder() || !LsFree())
 		return false;
 
 	// waiting short of a trap (or for the floor ahead)
