@@ -68,6 +68,7 @@ void CBot::BotThink()
 	{
 		m_flNextBotThink = gpGlobals->time + g_flBotCommandInterval;
 
+		LsMark("bot upkeep", entindex());	// Loner-Strike: the watchdog's marks
 		Upkeep();
 
 		if (gpGlobals->time >= m_flNextFullBotThink)
@@ -75,9 +76,12 @@ void CBot::BotThink()
 			m_flNextFullBotThink = gpGlobals->time + g_flBotFullThinkInterval;
 
 			ResetCommand();
+			LsMark("bot update", entindex());
 			Update();
 		}
+		LsMark("bot command", entindex());
 		ExecuteCommand();
+		LsMark("bot think end", entindex());
 	}
 }
 

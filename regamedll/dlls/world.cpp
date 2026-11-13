@@ -449,6 +449,9 @@ void CWorld::Precache()
 	}
 	else
 		gDisplayTitle = FALSE;
+
+	// Loner-Strike: the creature types a mode asked for (ls_creature_precache; none by default)
+	LsCreaturesPrecache();
 }
 
 void CWorld::KeyValue(KeyValueData *pkvd)

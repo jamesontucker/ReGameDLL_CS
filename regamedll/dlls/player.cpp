@@ -8366,7 +8366,8 @@ LINK_HOOK_CLASS_CHAIN(CBaseEntity *, CBasePlayer, DropPlayerItem, (const char *p
 // DropPlayerItem - drop the named item, or if no name, the active item.
 CBaseEntity *EXT_FUNC CBasePlayer::__API_HOOK(DropPlayerItem)(const char *pszItemName)
 {
-	if (!Q_strlen(pszItemName))
+	// (Loner-Strike: a null name - a plugin's call, or a faked command without one - is "no name")
+	if (!pszItemName || !Q_strlen(pszItemName))
 	{
 		// if this string has no length, the client didn't type a name!
 		// assume player wants to drop the active item.
