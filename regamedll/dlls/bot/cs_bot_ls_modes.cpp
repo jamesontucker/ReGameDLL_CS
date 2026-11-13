@@ -488,8 +488,12 @@ bool CCSBot::LsModeShootTick()
 			int k = order[n];
 			CBaseEntity *pEntity = s_lsTarget[k];
 			Vector seen;
-			// (one it's already shooting doesn't have to be in front of it to stay its target)
-			if (!LsModeSees(pEntity, pEntity != pTarget, &seen, &traces))
+			// (one it's already shooting doesn't have to be in front of it to stay its target;
+			// nor one close by - its steps, its snarl - or one coming for this bot: it turns to them)
+			CBaseMonster *pMonster = pEntity->MyMonsterPointer();
+			bool comingForMe = pMonster && pMonster->m_hEnemy == this;
+			bool sensed = pEntity == pTarget || ranges[n] < 400.0f || (comingForMe && ranges[n] < 900.0f);
+			if (!LsModeSees(pEntity, !sensed, &seen, &traces))
 				continue;
 			float score = s_lsTargetThreat[k] / Q_max(ranges[n], 100.0f);
 			if (score > bestScore)
@@ -514,11 +518,33 @@ bool CCSBot::LsModeShootTick()
 		return false;
 	}
 
+	m_lsModeSawAt = now;
+
 	// a gun up (not the knife or a grenade, if it has one)
 	if ((IsUsingKnife() || IsUsingGrenade()) && !LsKnifeOnly())
 		EquipBestWeapon(true);
 
 	SetLookAt("Loner-Strike: mode enemy", &pos, PRIORITY_HIGH, 0.5f, false, 3.0f);
+
+	// moving while it fights: hurt and with it close, to cover (once in a while); one close up
+	// with a gun out, a step or two back (the bolder hold their ground); a knife closes in
+	float gap = (pTarget->pev->origin - pev->origin).Make2D().Length();
+	if (LsHealth() < 35.0f && gap < 500.0f && now >= m_lsModeCoverAt)
+	{
+		m_lsModeCoverAt = now + 4.0f;
+		if (LsTakeCoverFrom(pTarget->pev->origin, 300.0f, true))
+			LsWhy("mode enemy: hurt, to cover");
+	}
+	else if (!IsUsingKnife() && gap < 220.0f && LsAggro() < 0.75f)
+	{
+		m_lsModeBackFrom = pTarget->pev->origin;
+		m_lsModeBackUntil = now + 0.35f;
+	}
+	else if (IsUsingKnife() && gap > 60.0f)
+	{
+		m_lsModeStepTo = pTarget->pev->origin;
+		m_lsModeStepUntil = now + 0.35f;
+	}
 
 	// the trigger once the view's on it (the stock fire's tolerance: a body's width at that range)
 	Vector to = pos - GetGunPosition();
@@ -809,14 +835,193 @@ void CCSBot::LsModeTick()
 
 	if (best < 0)
 	{
-		if (!shooting)
+		// (a creature mode's free players: roam like one)
+		if (!shooting && !(s_lsClassCount > 0 && LsFree() && !m_isEnemyVisible && !IsOnLadder() && LsModeRoamTick()))
 			LsModeAttractTick();
 		return;
 	}
 	// (a fight, a person's order, a plugin's habit, the bomb: the goal waits)
 	if (!LsFree() || m_isEnemyVisible || IsOnLadder())
 		return;
+	if (LsModePushTick(m_lsModeGoal[best]))
+		return;
 	LsModeGoalTick(m_lsModeGoal[best]);
+}
+
+// Where its side is based: the middle of the spots its teammates hold for the mode, or else of
+// its living teammates (false: alone)
+bool CCSBot::LsModeHome(Vector *home)
+{
+	Vector held(0, 0, 0), all(0, 0, 0);
+	int nHeld = 0, nAll = 0;
+	LsForTeammates(this, [&](CBasePlayer *pPlayer) {
+		all = all + pPlayer->pev->origin;
+		nAll++;
+		if (!pPlayer->IsBot())
+			return;
+		CCSBot *pMate = static_cast<CCSBot *>(pPlayer);
+		if (pMate->m_lsModeGoalOn >= 0)
+		{
+			const LsModeGoal &mg = pMate->m_lsModeGoal[pMate->m_lsModeGoalOn];
+			if (mg.kind == LS_GOAL_DEFEND || mg.kind == LS_GOAL_HOLD)
+			{
+				held = held + mg.at;
+				nHeld++;
+			}
+		}
+	});
+	if (nHeld)
+		*home = held / float(nHeld);
+	else if (nAll)
+		*home = all / float(nAll);
+	return nHeld || nAll;
+}
+
+// A free player in a creature mode (no goal of its own - the mode's holders have theirs) plays
+// like a roaming person: back to the others when hurt, over to a teammate in a fight, out after
+// the creatures (the bolder, the more), and with nothing on, round the area its side holds rather
+// than across the map; between waves now and then it tags along with a person (true: sent)
+bool CCSBot::LsModeRoamTick()
+{
+	float now = gpGlobals->time;
+	if (now < m_lsModeRoamAt || now < m_lsModePushUntil || IsFollowing())
+		return false;
+	m_lsModeRoamAt = now + RANDOM_FLOAT(2.0f, 4.0f);
+	// (on an errand of its own already)
+	if (LsModeHeadedTo(m_lsModeMoveTo))
+		return false;
+
+	Vector home;
+	bool hasHome = LsModeHome(&home);
+	float homeDist = hasHome ? LsModeDist2D(home, pev->origin) : 0.0f;
+	bool quiet = s_lsTargetCount == 0;
+	float aggro = LsAggro();
+
+	// hurt and away from the others: back
+	if (LsHealth() < 45.0f && hasHome && homeDist > 600.0f && !m_lsModeTarget.IsValid())
+	{
+		LsModeMove(LsModeOnMesh(home), true);
+		m_lsModePushUntil = now + 8.0f;
+		LsWhy("mode roam: hurt, back to the others");
+		return true;
+	}
+
+	// a teammate fighting creatures a way off: over to help (the team players more often)
+	CCSBot *pHelp = nullptr;
+	float helpDist = 2500.0f;
+	LsForTeammates(this, [&](CBasePlayer *pPlayer) {
+		if (!pPlayer->IsBot())
+			return;
+		CCSBot *pMate = static_cast<CCSBot *>(pPlayer);
+		float d = (pMate->pev->origin - pev->origin).Length();
+		if (now - pMate->m_lsModeSawAt < 1.5f && d > 700.0f && d < helpDist)
+		{
+			helpDist = d;
+			pHelp = pMate;
+		}
+	});
+	if (pHelp && now - m_lsModeSawAt > 3.0f && RANDOM_FLOAT(0.0f, 1.0f) < 0.3f + 0.5f * LsTeamwork())
+	{
+		LsModeMove(LsModeOnMesh(pHelp->pev->origin), true);
+		m_lsModePushUntil = now + 10.0f;
+		LsWhy("mode roam: helping a teammate");
+		return true;
+	}
+
+	// creatures about, none in sight: after the nearest (its own way there: the safest route
+	// goes round, often from the side)
+	if (!quiet && now - m_lsModeSawAt > 3.0f && LsHealth() >= 50.0f && RANDOM_FLOAT(0.0f, 1.0f) < 0.2f + 0.6f * aggro)
+	{
+		CBaseEntity *pNearest = nullptr;
+		float nearest = 2500.0f;
+		for (int k = 0; k < s_lsTargetCount; k++)
+		{
+			CBaseEntity *pEntity = s_lsTarget[k];
+			if (!LsModeTargetOk(pEntity) || (hasHome && LsModeDist2D(pEntity->pev->origin, home) > 3000.0f))
+				continue;
+			float d = (pEntity->pev->origin - pev->origin).Length();
+			if (d < nearest)
+			{
+				nearest = d;
+				pNearest = pEntity;
+			}
+		}
+		if (pNearest)
+		{
+			m_lsModeMoveTo = LsModeOnMesh(pNearest->pev->origin);
+			MoveTo(&m_lsModeMoveTo, SAFEST_ROUTE);
+			m_lsModeMoveAt = m_stateTimestamp;
+			m_lsModePushUntil = now + 10.0f;
+			LsWhy("mode roam: hunting");
+			return true;
+		}
+	}
+
+	// between waves, now and then: with a person for a bit
+	if (quiet && RANDOM_FLOAT(0.0f, 1.0f) < 0.1f * LsTeamwork())
+	{
+		CBasePlayer *pHuman = nullptr;
+		LsForTeammates(this, [&](CBasePlayer *pPlayer) {
+			if (!pHuman && !pPlayer->IsBot() && (pPlayer->pev->origin - pev->origin).IsLengthLessThan(1200.0f))
+				pHuman = pPlayer;
+		});
+		if (pHuman)
+		{
+			Follow(pHuman);
+			m_lsModePushUntil = now + RANDOM_FLOAT(12.0f, 25.0f);
+			LsWhy("mode roam: tagging along");
+			return true;
+		}
+	}
+
+	// nothing on: round the area its side holds (a hunt would take it across the map), the
+	// restless ones further and more often
+	if (hasHome && (IsHunting() || m_state == &m_idleState) && (homeDist > 1600.0f || RANDOM_FLOAT(0.0f, 1.0f) < 0.35f + 0.4f * aggro))
+	{
+		Vector spot;
+		if (LsModePickSpot(home, 700.0f + 800.0f * aggro, &spot))
+		{
+			LsModeMove(spot, false);
+			LsWhy("mode roam: patrol");
+			return true;
+		}
+	}
+	return false;
+}
+
+// Defending with nothing in sight for a while but creatures about: the bolder, healthy ones now
+// and then go out to the nearest one rather than wait for it (not off a capture or an extract,
+// not far from what they're defending)
+bool CCSBot::LsModePushTick(const LsModeGoal &g)
+{
+	float now = gpGlobals->time;
+	if (now < m_lsModePushAt || (g.kind != LS_GOAL_DEFEND && g.kind != LS_GOAL_HOLD) || s_lsTargetCount == 0
+		|| m_lsModeTarget.IsValid() || now - m_lsModeSawAt < 4.0f || LsHealth() < 70.0f || IsFollowing())
+		return false;
+	m_lsModePushAt = now + RANDOM_FLOAT(5.0f, 9.0f);
+	if (RANDOM_FLOAT(0.0f, 1.0f) >= 0.1f + 0.35f * LsAggro())
+		return false;
+	float leash = 2.0f * g.radius + 1200.0f;
+	CBaseEntity *pNearest = nullptr;
+	float nearest = 1800.0f;
+	for (int k = 0; k < s_lsTargetCount; k++)
+	{
+		CBaseEntity *pEntity = s_lsTarget[k];
+		if (!LsModeTargetOk(pEntity) || LsModeDist2D(pEntity->pev->origin, g.at) > leash)
+			continue;
+		float d = (pEntity->pev->origin - pev->origin).Length();
+		if (d < nearest)
+		{
+			nearest = d;
+			pNearest = pEntity;
+		}
+	}
+	if (!pNearest)
+		return false;
+	LsModeMove(LsModeOnMesh(pNearest->pev->origin), false);
+	m_lsModePushUntil = now + 12.0f;
+	LsWhy("mode push out");
+	return true;
 }
 
 // Acting on one goal: on its way there (sent back on its way if something else took it off),
@@ -885,9 +1090,12 @@ void CCSBot::LsModeGoalTick(LsModeGoal &g)
 		// (no platform named: just go there)
 	}
 
-	// a crate to open, a button to press: close, it edges up to it (the path ends against it),
-	// looks at it and holds use a few seconds (the mode clears the goal sooner once it's open)
-	if (g.kind == LS_GOAL_LOOT || g.kind == LS_GOAL_USE)
+	// a crate to open, a button to press, a downed teammate to revive (a hold on a player): close,
+	// it edges up to it (the path ends against it), looks at it and holds use (the mode clears
+	// the goal once it's open, or they're up)
+	CBaseEntity *pGoalThing = g.ent > 0 ? (CBaseEntity *)g.thing : nullptr;
+	bool revive = g.kind == LS_GOAL_HOLD && pGoalThing && pGoalThing->IsPlayer();
+	if (g.kind == LS_GOAL_LOOT || g.kind == LS_GOAL_USE || revive)
 	{
 		Vector at = g.at;
 		CBaseEntity *pThing = g.ent > 0 ? (CBaseEntity *)g.thing : nullptr;
@@ -917,7 +1125,11 @@ void CCSBot::LsModeGoalTick(LsModeGoal &g)
 		if (handy)
 		{
 			g.phase = 1;
-			g.phaseUntil = now + 6.0f;
+			// (a revive or a crate as long as the goal lasts, at most 15 s; a plain use - a shop, a
+			// button - a few seconds)
+			g.phaseUntil = now + (g.ent > 0 ? 15.0f : 6.0f);
+			if (g.ent > 0 && g.until > 0.0f)
+				g.phaseUntil = Q_min(g.phaseUntil, g.until);
 			g.tries = 0;
 			LsWhy("mode use");
 			return;
@@ -925,55 +1137,19 @@ void CCSBot::LsModeGoalTick(LsModeGoal &g)
 		// (far: on its way, below)
 	}
 
-	if (g.phase == 1)
+	// a spot to stand in an area, picked again now and then (hold, defend, capture, extract,
+	// a meeting)
+	if (g.kind == LS_GOAL_HOLD || g.kind == LS_GOAL_DEFEND || g.kind == LS_GOAL_CAPTURE || g.kind == LS_GOAL_EXTRACT
+		|| g.kind == LS_GOAL_MEETING)
 	{
-		// there, doing what the kind does there: a hold or a stand lasts as long as the hide,
-		// then it's looked at again (still there: another spot, another while)
-		if (g.kind == LS_GOAL_INVESTIGATE && now >= g.phaseUntil)
-		{
-			LsModeClearGoals(g.kind, 0);
-			return;
-		}
-		if (IsHiding() && now < g.phaseUntil)
-			return;
-		g.phase = 0;
+		LsModeStationTick(g, dist);
+		return;
 	}
 
+	// a look at a spot: there is done (the hunt it goes back to looks round)
 	if (there)
 	{
-		g.tries = 0;
-		g.phase = 1;
-		float aggro = LsAggro();
-		float hold = 15.0f * (0.6f + 0.8f * (1.0f - aggro));
-		if (LsStyle() == LS_STYLE_CAMPER)
-			hold *= 1.5f;
-		switch (g.kind)
-		{
-		case LS_GOAL_HOLD:
-		case LS_GOAL_DEFEND:
-		{
-			// a spot with cover near the point, each bot its own (a hide that ended early - no
-			// spot found - and it stands where it is instead)
-			CNavArea *pArea = TheNavAreaGrid.GetNearestNavArea(&g.at);
-			if (pArea && now >= g.phaseUntil)
-				Hide(pArea, hold, 0.7f * g.radius, true);
-			else
-				Hide(&pev->origin, hold, true);
-			break;
-		}
-		case LS_GOAL_INVESTIGATE:
-			// a look round where the noise was
-			hold = 3.0f + 3.0f * (1.0f - aggro);
-			Hide(&pev->origin, hold, true);
-			break;
-		default:
-			// capture, extract, a meeting, the end of a ride: stood in it
-			hold = 8.0f;
-			Hide(&pev->origin, hold, true);
-			break;
-		}
-		g.phaseUntil = now + hold;
-		LsWhy("mode goal there");
+		LsModeClearGoals(g.kind, 0);
 		return;
 	}
 
@@ -994,6 +1170,149 @@ void CCSBot::LsModeGoalTick(LsModeGoal &g)
 	LsWhy("mode goal");
 }
 
+// The hide it's in is the one a station gave it (nothing since has changed its state)
+bool CCSBot::LsModeOursHiding() const
+{
+	return IsHiding() && m_lsModeHideState >= 0.0f && Q_fabs(m_stateTimestamp - m_lsModeHideState) < 0.05f;
+}
+
+// The spot it's standing at for a station, for its teammates picking theirs (null: none)
+const Vector *CCSBot::LsModeSpot() const
+{
+	return (m_lsModeSpotOn && IsAlive() && LsModeOursHiding()) ? &m_lsModeSpot : nullptr;
+}
+
+// Somewhere to stand in an area: a hiding spot (or a nav area's middle) inside it, away from the
+// spots teammates have and where they stand, not the one it was just at, somewhat at random, a
+// covered one a little likelier, a near one a little likelier (false: nothing in the area)
+bool CCSBot::LsModePickSpot(const Vector &center, float radius, Vector *out)
+{
+	Vector taken[MAX_CLIENTS];
+	int nTaken = 0;
+	LsForTeammates(this, [&](CBasePlayer *pPlayer) {
+		const Vector *spot = pPlayer->IsBot() ? static_cast<CCSBot *>(pPlayer)->LsModeSpot() : nullptr;
+		if (nTaken < MAX_CLIENTS)
+			taken[nTaken++] = spot ? *spot : pPlayer->pev->origin;
+	});
+
+	float bestScore = -1.0f;
+	auto consider = [&](const Vector &pos, bool cover) {
+		if (LsModeDist2D(pos, center) > radius || Q_fabs(pos.z - center.z) > 250.0f)
+			return;
+		if (LsModeDist2D(pos, pev->origin) < 96.0f || (m_lsModeSpotOn && LsModeDist2D(pos, m_lsModeSpot) < 64.0f))
+			return;
+		float apart = 500.0f;
+		for (int i = 0; i < nTaken; i++)
+			apart = Q_min(apart, LsModeDist2D(pos, taken[i]));
+		float score = apart / 500.0f + (cover ? 0.35f : 0.0f) + RANDOM_FLOAT(0.0f, 0.5f) - LsModeDist2D(pos, pev->origin) / 3000.0f;
+		if (score > bestScore)
+		{
+			bestScore = score;
+			*out = pos;
+		}
+	};
+	for (auto area : TheNavAreaList)
+	{
+		const Vector *c = area->GetCenter();
+		if (LsModeDist2D(*c, center) > radius + 150.0f || Q_fabs(c->z - center.z) > 300.0f)
+			continue;
+		const HidingSpotList *spots = area->GetHidingSpotList();
+		for (auto spot : *spots)
+			consider(*spot->GetPosition(), spot->HasGoodCover());
+		// (open floor counts too, the bigger areas: a defence isn't only corners)
+		if (area->GetSizeX() > 48.0f && area->GetSizeY() > 48.0f)
+			consider(*c, false);
+	}
+	return bestScore >= 0.0f;
+}
+
+// Standing guard in an area like a person would: a spot of its own (not a teammate's), held a
+// while (crouched, looking round the ways in, reacting to noises - the hide state), then another
+// spot. Something of its own nearby (a noise to look into, a teammate's fight, following someone,
+// pushing out) goes on while it's within the leash; a capture or extract keeps it in the area.
+// Between waves (nothing to shoot alive) it moves round more and sometimes tags along with a
+// person
+void CCSBot::LsModeStationTick(LsModeGoal &g, float dist)
+{
+	float now = gpGlobals->time;
+	bool tight = g.kind == LS_GOAL_CAPTURE || g.kind == LS_GOAL_EXTRACT || g.kind == LS_GOAL_MEETING;
+	float leash = tight ? g.radius : 2.0f * g.radius + 300.0f;
+	bool ours = LsModeOursHiding();
+	bool quiet = s_lsClassCount > 0 && s_lsTargetCount == 0;
+	g.phase = dist < g.radius ? 1 : 0;
+
+	if (dist < leash)
+	{
+		// (its own business nearby - a noise, a fight to join, cover after being hurt: let it)
+		if (now < m_lsModePushUntil || IsFollowing() || (!ours && !IsHunting() && m_state != &m_idleState))
+			return;
+		// (holding its spot: the hide state does the rest)
+		if (ours && now < g.phaseUntil)
+			return;
+	}
+	if (now < g.nextTry)
+		return;
+
+	float aggro = LsAggro();
+	float hold = quiet ? RANDOM_FLOAT(5.0f, 10.0f) : RANDOM_FLOAT(8.0f, 12.0f) * (0.7f + 0.6f * (1.0f - aggro));
+	if (LsStyle() == LS_STYLE_CAMPER && !quiet)
+		hold *= 1.5f;
+
+	// between waves, now and then: off with a person on its side for a bit
+	if (quiet && !tight && dist < leash && RANDOM_FLOAT(0.0f, 1.0f) < 0.25f * LsTeamwork())
+	{
+		CBasePlayer *pHuman = nullptr;
+		LsForTeammates(this, [&](CBasePlayer *pPlayer) {
+			if (!pHuman && !pPlayer->IsBot() && (pPlayer->pev->origin - pev->origin).IsLengthLessThan(1200.0f))
+				pHuman = pPlayer;
+		});
+		if (pHuman)
+		{
+			Follow(pHuman);
+			m_lsModePushUntil = now + RANDOM_FLOAT(12.0f, 25.0f);
+			LsWhy("mode station: tagging along");
+			return;
+		}
+	}
+
+	Vector spot;
+	bool found = LsModePickSpot(g.at, tight ? 0.8f * g.radius : g.radius, &spot);
+	if (found)
+	{
+		// (the walk there counts against the hide's time: added on)
+		Hide(&spot, hold + dist / 180.0f, tight);
+		if (IsHiding())
+		{
+			m_lsModeSpot = spot;
+			m_lsModeSpotOn = true;
+		}
+	}
+	else
+	{
+		CNavArea *pArea = TheNavAreaGrid.GetNearestNavArea(&g.at);
+		if (pArea)
+			Hide(pArea, hold + dist / 180.0f, tight ? 0.8f * g.radius : g.radius, tight);
+		m_lsModeSpotOn = false;
+	}
+
+	if (IsHiding())
+	{
+		m_lsModeHideState = m_stateTimestamp;
+		g.phaseUntil = now + hold + dist / 180.0f;
+		g.tries = 0;
+		LsWhy("mode station");
+		return;
+	}
+	// (no way there now: the plain brain carries on a few seconds before another try)
+	g.nextTry = now + 3.0f;
+	if (++g.tries > 3)
+	{
+		g.tries = 0;
+		g.nextTry = now + 15.0f;
+	}
+	LsWhy("mode station: no spot");
+}
+
 // After the state machine each think: a stand-still or a step the mode's goal asked for this
 // moment (on a moving platform the hide's spot would walk it off)
 void CCSBot::LsModePostUpdate()
@@ -1008,6 +1327,12 @@ void CCSBot::LsModePostUpdate()
 	{
 		ClearMovement();
 		MoveTowardsPosition(&m_lsModeStepTo);
+		ResetStuckMonitor();
+	}
+	else if (now < m_lsModeBackUntil && !IsAttacking() && !IsOnLadder())
+	{
+		ClearMovement();
+		MoveAwayFromPosition(&m_lsModeBackFrom);
 		ResetStuckMonitor();
 	}
 }

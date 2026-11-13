@@ -1719,6 +1719,8 @@ public:
 	void LsModeTick();								// each think after a person's order (cs_bot_update.cpp)
 	void LsModeInside(unsigned int *avoidMask) const;	// the avoid zones it's standing in (paths may leave them)
 	void LsModePostUpdate();						// after the state machine: a stand-still or step a goal asked for
+	const Vector *LsModeSpot() const;				// the spot it holds for a station (teammates pick others)
+	int LsModeGoalNow() const { return m_lsModeGoalOn >= 0 ? m_lsModeGoal[m_lsModeGoalOn].kind : 0; }	// what it's on (trace)
 	const LsModeGoal &LsModeGoalAt(int i) const { return m_lsModeGoal[i]; }
 private:
 	LsModeGoal m_lsModeGoal[LS_MODE_GOALS];
@@ -1739,6 +1741,22 @@ private:
 	bool LsModeAttractTick();						// hunting: off to somewhere a mode says is worth going (true: sent)
 	float m_lsModeAttractAt = 0.0f;					// next roll for that
 	bool LsModeSees(CBaseEntity *pEntity, bool testFOV, Vector *at, int *traces);	// a point on a mode enemy in sight
+	bool LsModeOursHiding() const;					// the hide it's in is a station's
+	bool LsModePickSpot(const Vector &center, float radius, Vector *out);	// a spot of its own in an area
+	void LsModeStationTick(LsModeGoal &g, float dist);	// hold, defend, capture, extract, meeting
+	bool LsModePushTick(const LsModeGoal &g);		// defending: out to a creature now and then
+	bool LsModeRoamTick();							// a creature mode's free players: roam like a person
+	bool LsModeHome(Vector *home);					// where its side is based (teammates' held spots)
+	float m_lsModeRoamAt = 0.0f;					// next roam decision
+	float m_lsModeHideState = -1.0f;				// the station's hide began then (its state time)
+	Vector m_lsModeSpot;							// ...at this spot
+	bool m_lsModeSpotOn = false;
+	float m_lsModeSawAt = -100.0f;					// a mode enemy last in sight then
+	float m_lsModeCoverAt = 0.0f;					// next "hurt: to cover" allowed
+	Vector m_lsModeBackFrom;						// backing off from a creature close up...
+	float m_lsModeBackUntil = 0.0f;					// ...till then
+	float m_lsModePushUntil = 0.0f;					// out pushing (or tagging along) till then: the station waits
+	float m_lsModePushAt = 0.0f;					// next push roll
 	bool LsModeShootTick();							// a mode enemy (a creature) in sight: shoot it (true: it is)
 	float LsModeGreed();							// 0-1: how much loot and pickups pull it
 	bool LsModeCares(int kind, int prio);			// a goal's taken up or not (once, by its persona)
