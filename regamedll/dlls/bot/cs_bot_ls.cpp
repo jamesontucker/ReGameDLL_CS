@@ -1074,6 +1074,14 @@ void CCSBot::LsOrderTick()
 		// (in cover for a moment - from a rush, a shot - it waits: no try spent)
 		if (!IsMovingTo() && !IsHiding() && now >= o.nextTry)
 		{
+			// (a long way - down to a cellar, across the map - takes more than three goes; it's
+			// given up only after three that got it no closer)
+			float dist = (o.at - pev->origin).Length();
+			if (dist < o.bestDist - 250.0f)
+			{
+				o.bestDist = dist;
+				o.tries = 0;
+			}
 			if (++o.tries > 2)
 			{
 				o = LsOrder();

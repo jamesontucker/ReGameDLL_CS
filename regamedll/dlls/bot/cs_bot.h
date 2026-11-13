@@ -1415,7 +1415,8 @@ private:
 		float until = 0.0f;
 		float holdSecs = 0.0f;						// a go: then hold the spot that long
 		float nextTry = 0.0f;
-		int tries = 0;								// times sent back on its way
+		int tries = 0;								// times sent back on its way (without getting closer)
+		float bestDist = 1e9f;						// the closest it's been to where it was sent
 	};
 	LsOrder m_lsOrder;
 	bool m_lsOrderFields = false;					// fuser4/vuser1 hold this code's order marks (cleared on respawn)
@@ -1723,6 +1724,7 @@ public:
 	bool LsModePeace();								// a mode's peace (a loot-up), or the moment after it: no player enemies
 	bool LsModeGearing();							// just after the peace: gearing up before hunting
 	bool LsModeKitted();							// armor, a pistol and a spare magazine beside a main gun
+	int LsModeLayerWant();							// the layer it would rather loot on (-1 anywhere: a hot dropper)
 	bool LsModeLetsBe(CBasePlayer *pPlayer);		// ...someone in sight left be (not right on it, nor coming at it)
 	const Vector *LsModeSpot() const;				// the spot it holds for a station (teammates pick others)
 	int LsModeGoalNow() const { return m_lsModeGoalOn >= 0 ? m_lsModeGoal[m_lsModeGoalOn].kind : 0; }	// what it's on (trace)
