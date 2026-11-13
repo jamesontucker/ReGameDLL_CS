@@ -30,6 +30,8 @@
 // ls_creature entity and its behaviours, and the ls_creature server command. See creature.h.
 
 #include "precompiled.h"
+#include <chrono>
+#include <climits>
 
 cvar_t ls_creature_file      = { "ls_creature_file", "addons/amxmodx/configs/gamemodes/creatures.ini", 0, 0.0f, nullptr };
 cvar_t ls_creature_precache  = { "ls_creature_precache", "", 0, 0.0f, nullptr };	// "" none, "all", or type names
@@ -46,6 +48,7 @@ cvar_t ls_creature_precache_late = { "ls_creature_precache_late", "1", 0, 1.0f, 
 cvar_t ls_creature_frags     = { "ls_creature_frags", "0", 0, 0.0f, nullptr };		// 1 = kills add the type's frags to the score (counts toward mp_fraglimit)
 
 cvar_t ls_watchdog           = { "ls_watchdog", "10", 0, 10.0f, nullptr };
+cvar_t ls_perf               = { "ls_perf", "0", 0, 0.0f, nullptr };		// seconds between performance lines in the log (0 = off)
 cvar_t ls_crash_quiet        = { "ls_crash_quiet", "1", 0, 1.0f, nullptr };		// a dedicated server's crash: log and end, no dialog (Windows/Wine)		// seconds without a frame before the marks are written (0 = off)
 
 // ---------------------------------------------------------------------------------------------
@@ -83,6 +86,141 @@ void LsWatchdogFrame()
 {
 	s_watchFrames = s_watchFrames + 1;
 	LsMark("frame");
+	LsPerfFrame();
+}
+
+// ---- ls_perf: server frame rate, creature and bot think time, edicts, what a player would see ----
+
+static double LsPerfNow()
+{
+	return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
+static struct
+{
+	double windowStart, lastFrame, secondStart;
+	int frames, secondFrames, minSecondFrames;
+	double worstFrame;
+	double creatureFrame, botsFrame;		// this frame's time so far
+	double creatureSum, creatureMax, botsSum, botsMax;
+	int thinks, thinksMax, thinksFrame;
+} s_perf;
+
+void LsPerfAddCreature(double seconds)
+{
+	s_perf.creatureFrame += seconds;
+	s_perf.thinksFrame++;
+}
+
+void LsPerfAddBots(double seconds)
+{
+	s_perf.botsFrame += seconds;
+}
+
+double LsPerfClock()
+{
+	return ls_perf.value > 0.0f ? LsPerfNow() : 0.0;
+}
+
+// entities a player standing where this one is would be sent (AddToFullPack's tests, before the
+// engine's 256 a frame)
+static int LsPerfViewCount(edict_t *host)
+{
+	unsigned char *pvs = ENGINE_SET_PVS(host->v.origin + host->v.view_ofs);
+	int n = 0;
+	for (int e = 1; e < gpGlobals->maxEntities; e++)
+	{
+		edict_t *ent = INDEXENT(e);
+		if (!ent || ent->free || ent == host)
+			continue;
+		if (!ent->v.modelindex || !STRING(ent->v.model) || !STRING(ent->v.model)[0])
+			continue;
+		if (ent->v.effects & EF_NODRAW)
+			continue;
+		bool player = e <= gpGlobals->maxClients;
+		if (player && !(ent->v.flags & (FL_CLIENT | FL_FAKECLIENT)))
+			continue;
+		if (!ENGINE_CHECK_VISIBILITY(ent, pvs))
+			continue;
+		n++;
+	}
+	return n;
+}
+
+static void LsPerfReport(double now, double span)
+{
+	int alive = 0, edicts = 0;
+	for (int e = 1; e < gpGlobals->maxEntities; e++)
+	{
+		edict_t *ent = INDEXENT(e);
+		if (!ent || ent->free)
+			continue;
+		edicts++;
+		if (ent->v.deadflag == DEAD_NO && (ent->v.flags & FL_MONSTER) && ent->v.health > 0.0f)
+			alive++;
+	}
+	int bots = 0, viewMax = 0, viewSum = 0, viewFull = 0;
+	for (int i = 1; i <= gpGlobals->maxClients; i++)
+	{
+		edict_t *p = INDEXENT(i);
+		if (!p || p->free || !(p->v.flags & (FL_CLIENT | FL_FAKECLIENT)) || p->v.deadflag != DEAD_NO || p->v.health <= 0.0f)
+			continue;
+		int v = LsPerfViewCount(p);
+		bots++;
+		viewSum += v;
+		viewMax = Q_max(viewMax, v);
+		if (v >= 256)
+			viewFull++;
+	}
+	int frames = Q_max(s_perf.frames, 1);
+	UTIL_LogPrintf("ls_perf: %.0fs fps avg %.1f min %d (worst frame %.1f ms) | monsters alive %d, thinks %.1f/frame (max %d), think %.3f ms/frame avg %.2f max | bots %.3f ms/frame avg %.2f max | edicts %d of %d | view ents avg %.0f max %d over %d players, %d at 256+\n",
+		span, s_perf.frames / span, s_perf.minSecondFrames == INT_MAX ? s_perf.frames : s_perf.minSecondFrames, s_perf.worstFrame * 1000.0,
+		alive, double(s_perf.thinks) / frames, s_perf.thinksMax, s_perf.creatureSum * 1000.0 / frames, s_perf.creatureMax * 1000.0,
+		s_perf.botsSum * 1000.0 / frames, s_perf.botsMax * 1000.0, edicts, gpGlobals->maxEntities,
+		bots ? double(viewSum) / bots : 0.0, viewMax, bots, viewFull);
+}
+
+void LsPerfFrame()
+{
+	if (ls_perf.value <= 0.0f)
+	{
+		s_perf.windowStart = 0.0;
+		return;
+	}
+	double now = LsPerfNow();
+	if (s_perf.windowStart == 0.0)
+	{
+		memset(&s_perf, 0, sizeof(s_perf));
+		s_perf.windowStart = s_perf.lastFrame = s_perf.secondStart = now;
+		s_perf.minSecondFrames = INT_MAX;
+		return;
+	}
+	// the frame that just ended
+	s_perf.frames++;
+	s_perf.secondFrames++;
+	s_perf.worstFrame = Q_max(s_perf.worstFrame, now - s_perf.lastFrame);
+	s_perf.lastFrame = now;
+	s_perf.creatureSum += s_perf.creatureFrame;
+	s_perf.creatureMax = Q_max(s_perf.creatureMax, s_perf.creatureFrame);
+	s_perf.botsSum += s_perf.botsFrame;
+	s_perf.botsMax = Q_max(s_perf.botsMax, s_perf.botsFrame);
+	s_perf.thinks += s_perf.thinksFrame;
+	s_perf.thinksMax = Q_max(s_perf.thinksMax, s_perf.thinksFrame);
+	s_perf.creatureFrame = s_perf.botsFrame = 0.0;
+	s_perf.thinksFrame = 0;
+	if (now - s_perf.secondStart >= 1.0)
+	{
+		s_perf.minSecondFrames = Q_min(s_perf.minSecondFrames, s_perf.secondFrames);
+		s_perf.secondFrames = 0;
+		s_perf.secondStart = now;
+	}
+	if (now - s_perf.windowStart >= ls_perf.value)
+	{
+		LsPerfReport(now, now - s_perf.windowStart);
+		memset(&s_perf, 0, sizeof(s_perf));
+		s_perf.windowStart = s_perf.lastFrame = s_perf.secondStart = LsPerfNow();
+		s_perf.minSecondFrames = INT_MAX;
+	}
 }
 
 static void LsWatchdogWrite(unsigned frames, int secs, bool resumed)
@@ -297,6 +435,7 @@ void LsCreatures_RegisterCVars()
 {
 	CVAR_REGISTER(&ls_watchdog);
 	CVAR_REGISTER(&ls_crash_quiet);
+	CVAR_REGISTER(&ls_perf);
 	LsWatchdogStart();
 	CVAR_REGISTER(&ls_creature_file);
 	CVAR_REGISTER(&ls_creature_precache);
@@ -3801,7 +3940,10 @@ void CLsCreature::UpdateFlee()
 void CLsCreature::CreatureThink()
 {
 	LsMark("creature think", entindex());
+	double t0 = LsPerfClock();
 	CreatureThinkBody();
+	if (t0 > 0.0)
+		LsPerfAddCreature(LsPerfClock() - t0);
 	LsMark("creature think end", entindex());
 }
 

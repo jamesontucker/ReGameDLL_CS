@@ -3959,7 +3959,10 @@ void EXT_FUNC StartFrame()
 
 	if (TheBots) {
 		LsMark("bots frame");
+		double t0 = LsPerfClock();
 		TheBots->StartFrame();
+		if (t0 > 0.0)
+			LsPerfAddBots(LsPerfClock() - t0);
 	}
 
 	if (TheTutor) {
