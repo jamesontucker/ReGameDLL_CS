@@ -585,6 +585,11 @@ static std::vector<std::vector<int>> s_children;
 static std::map<long long, Cell> s_cells;
 static std::vector<Vector> s_roots;			// start points: spawn areas, teleport destinations
 static int s_rootsDone = 0;
+// (where bots really were when no line was near: the explorer starts from there too)
+static std::vector<Player> s_seeds;
+static int s_seedsTaken = 0;
+static std::vector<int> s_forced;			// seed nodes to explore from first (not left to the weighted pick)
+static std::map<long long, bool> s_seeded;	// cells already seeded (once each)
 static int s_iters = 0;
 static float s_floorZ = -4096.0f;
 static char s_map[64] = "";
@@ -752,6 +757,7 @@ static void Reset()
 {
 	s_nodes.clear(); s_acts.clear(); s_samples.clear(); s_children.clear(); s_cells.clear(); s_roots.clear();
 	s_rootsDone = 0; s_iters = 0;
+	s_seeds.clear(); s_seedsTaken = 0; s_forced.clear(); s_seeded.clear();
 	s_roll.active = false; s_roll.rolloutsLeft = 0;
 	for (int i = 0; i < 33; i++)
 		s_bots[i] = SurfBot();
@@ -945,12 +951,31 @@ static void Explore(double budgetMs)
 		if (NowMs() - start > budgetMs)
 			return;
 	}
+	// then where bots have been with no line near (lines grow where they really go)
+	while (!s_seeds.empty())
+	{
+		Player st = s_seeds.back();
+		s_seeds.pop_back();
+		int id = AddNode(-1, 0, 0, 0.0f, st, false);
+		long long k = Key(st.o);
+		if (s_cells.find(k) == s_cells.end())
+			s_cells[k] = { id, 0 };
+		s_forced.push_back(id);
+	}
 	if (s_cells.empty())
 		return;
 	while (NowMs() - start < budgetMs)
 	{
 		if (!s_roll.active)
 		{
+			if (s_roll.rolloutsLeft <= 0 && !s_forced.empty() && (int)s_nodes.size() < MAX_NODES)
+			{
+				// (a seed from where a bot really was: explored from first, a good few tries)
+				s_roll.from = s_forced.back();
+				s_forced.pop_back();
+				s_roll.rolloutsLeft = 8;
+				s_iters++;
+			}
 			if (s_roll.rolloutsLeft <= 0)
 			{
 				if (s_iters >= MAX_ITERS || (int)s_nodes.size() >= MAX_NODES)
@@ -1141,9 +1166,22 @@ static Vector PredictLanding(const SurfBot &b, const Player &me, int from, int c
 // Air control to come down where the line does: a small beam search over air moves, each line
 // judged where it first touches a ramp - how far from the line's landing, and how its speed
 // matches there (landing on the right ramp, going the right way, is what keeps a run going)
-static void LandPlan(SurfBot &b, const Player &me, const Sample &land, int depth)
+static void LandPlan(SurfBot &b, const Player &me, int landIdx, int depth)
 {
 	static const int MOVES[6] = { 10, 11, 13, 15, 16, MOVE_FREE };
+	const Sample &land = b.path[landIdx];
+	// (after touching down, flown on with the line's own moves: still on it a few moves later?)
+	const int after = Q_min(4, (int)b.path.size() - 1 - landIdx);
+	auto onAfter = [&](const Player &p, float yaw) -> float {
+		Player q = p;
+		for (int k = 0; k < after; k++)
+		{
+			if (!StepChunk(q, b.path[landIdx + k].move, &yaw, 0.0f))
+				return 2000.0f;
+		}
+		const Sample &t = b.path[landIdx + after];
+		return (q.o - t.o).Length() + 0.3f * (q.v - t.v).Length();
+	};
 	struct Beam { Player p; float yaw; unsigned char moves[10]; int n; float score; bool down; };
 	depth = Q_max(1, Q_min(depth, 10));
 	std::vector<Beam> beams(1);
@@ -1167,6 +1205,7 @@ static void LandPlan(SurfBot &b, const Player &me, const Sample &land, int depth
 				if (x.p.Ramp(&n))
 				{
 					x.down = true;
+					x.score = 0.5f * x.score + onAfter(x.p, x.yaw);
 					done.push_back(x);
 				}
 				else
@@ -1349,7 +1388,24 @@ static bool LsSurfSteer(CBasePlayer *bot, LsSurf::SurfBot &b, float msec, float 
 		int from = NearestNode(me.o, me.v);
 		s_nPick++;
 		if (from < 0)
+		{
 			s_nNoNear++;
+			// (somewhere no line goes yet: the explorer starts from here too, a few at a time)
+			// (once exploring's mostly done - early on it's going everywhere anyway - and once a place)
+			long long seedKey = Key(me.o);
+			if (!me.onground && Under(me) && s_iters >= MAX_ITERS * 3 / 4 && s_seeds.size() < 8 && s_seedsTaken < 200
+				&& (int)s_nodes.size() < LsSurf::MAX_NODES && s_seeded.find(seedKey) == s_seeded.end())
+			{
+				s_seeded[seedKey] = true;
+				Player seed = me;
+				seed.c = s_consts;
+				seed.dt = s_cmdDt;
+				seed.numTouched = 0;
+				s_seeds.push_back(seed);
+				s_seedsTaken++;
+
+			}
+		}
 		if (from >= 0)
 		{
 			// chasing, half the time: the nearest enemy alive within reach
@@ -1417,7 +1473,7 @@ static bool LsSurfSteer(CBasePlayer *bot, LsSurf::SurfBot &b, float msec, float 
 					{
 						s_replansLeft--;
 						s_nLand++;
-						LandPlan(b, me, b.path[land], land - b.idx + 2);
+						LandPlan(b, me, land, land - b.idx + 2);
 					}
 				}
 			}
