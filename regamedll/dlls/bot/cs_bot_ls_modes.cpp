@@ -1252,6 +1252,10 @@ void CCSBot::LsModeStationTick(LsModeGoal &g, float dist)
 	}
 	if (now < g.nextTry)
 		return;
+	// (the brain paths at most every half second; a hide asked for sooner fails its path and
+	// drops the bot to idle - which paths again: the freeze. Next think, then)
+	if (!m_repathTimer.IsElapsed())
+		return;
 
 	float aggro = LsAggro();
 	float hold = quiet ? RANDOM_FLOAT(5.0f, 10.0f) : RANDOM_FLOAT(8.0f, 12.0f) * (0.7f + 0.6f * (1.0f - aggro));
