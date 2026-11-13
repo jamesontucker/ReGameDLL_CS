@@ -1,0 +1,2708 @@
+/*
+*
+*   This program is free software; you can redistribute it and/or modify it
+*   under the terms of the GNU General Public License as published by the
+*   Free Software Foundation; either version 2 of the License, or (at
+*   your option) any later version.
+*
+*   This program is distributed in the hope that it will be useful, but
+*   WITHOUT ANY WARRANTY; without even the implied warranty of
+*   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+*   General Public License for more details.
+*
+*   You should have received a copy of the GNU General Public License
+*   along with this program; if not, write to the Free Software Foundation,
+*   Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+*
+*   In addition, as a special exception, the author gives permission to
+*   link the code of this program with the Half-Life Game Engine ("HL
+*   Engine") and Modified Game Libraries ("MODs") developed by Valve,
+*   L.L.C ("Valve").  You must obey the GNU General Public License in all
+*   respects for all of the code used other than the HL Engine and MODs
+*   from Valve.  If you modify this file, you may extend this exception
+*   to your version of the file, but you are not obligated to do so.  If
+*   you do not wish to do so, delete this exception statement from your
+*   version.
+*
+*/
+
+// Loner-Strike creatures: the types (creatures.ini), the registry, the providers, our own
+// ls_creature entity and its behaviours, and the ls_creature server command. See creature.h.
+
+#include "precompiled.h"
+
+cvar_t ls_creature_file      = { "ls_creature_file", "addons/amxmodx/configs/gamemodes/creatures.ini", 0, 0.0f, nullptr };
+cvar_t ls_creature_precache  = { "ls_creature_precache", "", 0, 0.0f, nullptr };	// "" none, "all", or type names
+cvar_t ls_creature_max       = { "ls_creature_max", "48", 0, 48.0f, nullptr };
+cvar_t ls_creature_budget    = { "ls_creature_budget", "40", 0, 40.0f, nullptr };	// warn past this many models + sounds of ours
+cvar_t ls_creature_debug     = { "ls_creature_debug", "0", 0, 0.0f, nullptr };
+cvar_t ls_creature_last      = { "ls_creature_last", "0", 0, 0.0f, nullptr };		// the last one spawned (entity index), for plugins
+cvar_t ls_creature_alive     = { "ls_creature_alive", "0", 0, 0.0f, nullptr };		// how many are alive (all providers)
+cvar_t ls_creature_ver       = { "ls_creature_ver", "1", 0, 1.0f, nullptr };
+
+void LsCreatures_RegisterCVars()
+{
+	CVAR_REGISTER(&ls_creature_file);
+	CVAR_REGISTER(&ls_creature_precache);
+	CVAR_REGISTER(&ls_creature_max);
+	CVAR_REGISTER(&ls_creature_budget);
+	CVAR_REGISTER(&ls_creature_debug);
+	CVAR_REGISTER(&ls_creature_last);
+	CVAR_REGISTER(&ls_creature_alive);
+	CVAR_REGISTER(&ls_creature_ver);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Types
+
+static LsCreatureType s_types[LS_CREATURE_MAX_TYPES];
+static int s_typeCount = 0;
+static bool s_typesLoaded = false;
+static int s_precachedModels = 0;
+static int s_precachedSounds = 0;
+
+static const char *s_categoryNames[LSC_CATEGORY_COUNT] = { "infected", "alien", "wildlife", "mechanical", "boss", "special" };
+static const char *s_behaviourNames[LSB_COUNT] = { "idle", "wander", "patrol", "guard", "chase", "flee" };
+static const char *s_attackNames[] = { "none", "melee", "ranged" };
+static const char *s_targetingNames[] = { "nearest", "weakest", "attacker", "random" };
+static const char *s_animKeys[LSAN_COUNT] = { "anim_idle", "anim_walk", "anim_run", "anim_attack", "anim_flinch", "anim_die" };
+static const char *s_soundKeys[LSS_COUNT] = { "snd_idle", "snd_alert", "snd_attack", "snd_hit", "snd_miss", "snd_pain", "snd_die" };
+
+static int LsNameIndex(const char *value, const char **names, int count, int fallback)
+{
+	for (int i = 0; i < count; i++)
+	{
+		if (!Q_stricmp(value, names[i]))
+			return i;
+	}
+
+	// (a number works too)
+	if (value[0] >= '0' && value[0] <= '9')
+	{
+		int n = Q_atoi(value);
+		if (n >= 0 && n < count)
+			return n;
+	}
+
+	return fallback;
+}
+
+static int LsHatesFromString(const char *value)
+{
+	if (!Q_stricmp(value, "t") || !Q_stricmp(value, "terrorist") || !Q_stricmp(value, "1"))
+		return 1;
+
+	if (!Q_stricmp(value, "ct") || !Q_stricmp(value, "2"))
+		return 2;
+
+	return 0;
+}
+
+static Vector LsParseVector(const char *value)
+{
+	Vector v(0, 0, 0);
+	sscanf(value, "%f %f %f", &v.x, &v.y, &v.z);
+	return v;
+}
+
+// Neutral starting values for a type the file names without a base
+static void LsTypeDefaults(LsCreatureType *t, const char *name)
+{
+	Q_memset(t, 0, sizeof(*t));
+	Q_strlcpy(t->name, name);
+	Q_strlcpy(t->display, name);
+	t->category = LSC_INFECTED;
+	t->health = 100.0f;
+	t->speed = 230.0f;
+	t->walkSpeed = 80.0f;
+	t->aggression = 1.0f;
+	t->detectRadius = 1200.0f;
+	t->detectFov = 160.0f;
+	t->hearScale = 1.0f;
+	t->attack = LSA_MELEE;
+	t->damage = 20.0f;
+	t->attackRange = 64.0f;
+	t->attackRate = 1.0f;
+	t->attackDelay = 0.4f;
+	t->spread = 3.0f;
+	t->fleeHealth = 0.0f;
+	t->behaviour = LSB_WANDER;
+	t->guardRadius = 400.0f;
+	t->targeting = LST_NEAREST;
+	t->hates = 0;
+	t->respawn = 0.0f;
+	t->corpseTime = 8.0f;
+	t->moves = true;
+	t->frags = 1;
+	t->money = 0;
+	Q_strlcpy(t->models, "models/zombie.mdl models/hostage.mdl");
+	t->scale = 1.0f;
+	t->hullMin = Vector(-16, -16, 0);
+	t->hullMax = Vector(16, 16, 72);
+	t->fallbackGlow = true;
+	t->fallbackGlowColor = Vector(40, 140, 20);
+	t->bloodColor = BLOOD_COLOR_RED;
+	Q_strlcpy(t->sound[LSS_IDLE], "zombie/zo_idle1.wav zombie/zo_idle2.wav zombie/zo_idle3.wav zombie/zo_idle4.wav");
+	Q_strlcpy(t->sound[LSS_ALERT], "zombie/zo_alert10.wav zombie/zo_alert20.wav zombie/zo_alert30.wav");
+	Q_strlcpy(t->sound[LSS_ATTACK], "zombie/zo_attack1.wav zombie/zo_attack2.wav");
+	Q_strlcpy(t->sound[LSS_HIT], "zombie/claw_strike1.wav zombie/claw_strike2.wav zombie/claw_strike3.wav | weapons/knife_hit1.wav weapons/knife_hit2.wav");
+	Q_strlcpy(t->sound[LSS_MISS], "zombie/claw_miss1.wav zombie/claw_miss2.wav | weapons/knife_slash1.wav weapons/knife_slash2.wav");
+	Q_strlcpy(t->sound[LSS_PAIN], "zombie/zo_pain1.wav zombie/zo_pain2.wav | player/pl_pain2.wav player/pl_pain4.wav");
+	Q_strlcpy(t->sound[LSS_DIE], "zombie/zo_pain2.wav | player/die1.wav player/die3.wav");
+}
+
+static LsCreatureType *LsAddType(const char *name)
+{
+	for (int i = 0; i < s_typeCount; i++)
+	{
+		if (!Q_stricmp(s_types[i].name, name))
+			return &s_types[i];
+	}
+
+	if (s_typeCount >= LS_CREATURE_MAX_TYPES)
+		return nullptr;
+
+	LsCreatureType *t = &s_types[s_typeCount++];
+	LsTypeDefaults(t, name);
+	return t;
+}
+
+// The first set: works on any CS install (player/hostage models tinted), better with
+// Half-Life's own models when valve/models has them (most installs: the shared depot)
+static void LsBuiltinTypes()
+{
+	LsCreatureType *t;
+
+	t = LsAddType("zombie");
+	Q_strlcpy(t->display, "Zombie");
+
+	t = LsAddType("runner");
+	Q_strlcpy(t->display, "Runner");
+	t->health = 60.0f;
+	t->speed = 300.0f;
+	t->walkSpeed = 110.0f;
+	t->damage = 10.0f;
+	t->attackRate = 1.6f;
+	t->attackDelay = 0.25f;
+	t->behaviour = LSB_CHASE;
+	t->fallbackGlowColor = Vector(160, 160, 20);
+
+	t = LsAddType("brute");
+	Q_strlcpy(t->display, "Brute");
+	t->health = 450.0f;
+	t->speed = 170.0f;
+	t->walkSpeed = 70.0f;
+	t->damage = 40.0f;
+	t->attackRange = 72.0f;
+	t->attackRate = 0.7f;
+	t->attackDelay = 0.6f;
+	t->scale = 1.25f;
+	t->frags = 3;
+	t->glow = true;
+	t->glowColor = Vector(120, 20, 20);
+
+	t = LsAddType("spitter");
+	Q_strlcpy(t->display, "Spitter");
+	t->category = LSC_ALIEN;
+	t->health = 80.0f;
+	t->speed = 220.0f;
+	t->attack = LSA_RANGED;
+	t->damage = 8.0f;
+	t->attackRange = 900.0f;
+	t->attackRate = 0.8f;
+	t->attackDelay = 0.5f;
+	t->spread = 4.0f;
+	t->fleeHealth = 0.3f;
+	t->bloodColor = BLOOD_COLOR_YELLOW;
+	Q_strlcpy(t->models, "models/bullsquid.mdl models/hostage.mdl");
+	t->hullMin = Vector(-24, -24, 0);
+	t->hullMax = Vector(24, 24, 40);
+	t->fallbackGlowColor = Vector(120, 200, 40);
+	Q_strlcpy(t->sound[LSS_IDLE], "bullchicken/bc_idle1.wav bullchicken/bc_idle2.wav bullchicken/bc_idle3.wav");
+	Q_strlcpy(t->sound[LSS_ALERT], "bullchicken/bc_idle4.wav bullchicken/bc_idle5.wav");
+	Q_strlcpy(t->sound[LSS_ATTACK], "bullchicken/bc_attack2.wav bullchicken/bc_attack3.wav | weapons/sg550-1.wav");
+	Q_strlcpy(t->sound[LSS_HIT], "bullchicken/bc_spithit1.wav bullchicken/bc_spithit2.wav");
+	t->sound[LSS_MISS][0] = '\0';
+	Q_strlcpy(t->sound[LSS_PAIN], "bullchicken/bc_pain1.wav bullchicken/bc_pain2.wav | player/pl_pain2.wav");
+	Q_strlcpy(t->sound[LSS_DIE], "bullchicken/bc_die1.wav bullchicken/bc_die2.wav | player/die1.wav");
+
+	t = LsAddType("hound");
+	Q_strlcpy(t->display, "Hound");
+	t->category = LSC_WILDLIFE;
+	t->health = 70.0f;
+	t->speed = 280.0f;
+	t->walkSpeed = 90.0f;
+	t->aggression = 0.35f;				// territorial: only what comes close to its spot
+	t->behaviour = LSB_GUARD;
+	t->guardRadius = 350.0f;
+	t->damage = 12.0f;
+	t->fleeHealth = 0.35f;
+	t->bloodColor = BLOOD_COLOR_YELLOW;
+	Q_strlcpy(t->models, "models/houndeye.mdl models/hostage.mdl");
+	t->hullMin = Vector(-16, -16, 0);
+	t->hullMax = Vector(16, 16, 36);
+	t->fallbackGlowColor = Vector(200, 120, 20);
+	Q_strlcpy(t->sound[LSS_IDLE], "houndeye/he_idle1.wav houndeye/he_idle2.wav houndeye/he_idle3.wav");
+	Q_strlcpy(t->sound[LSS_ALERT], "houndeye/he_alert1.wav houndeye/he_alert2.wav houndeye/he_alert3.wav");
+	Q_strlcpy(t->sound[LSS_ATTACK], "houndeye/he_attack1.wav houndeye/he_attack3.wav");
+	Q_strlcpy(t->sound[LSS_PAIN], "houndeye/he_pain1.wav houndeye/he_pain3.wav | player/pl_pain2.wav");
+	Q_strlcpy(t->sound[LSS_DIE], "houndeye/he_die1.wav houndeye/he_die2.wav | player/die1.wav");
+
+	t = LsAddType("turret");
+	Q_strlcpy(t->display, "Sentry");
+	t->category = LSC_MECHANICAL;
+	t->health = 150.0f;
+	t->moves = false;
+	t->speed = 0.0f;
+	t->walkSpeed = 0.0f;
+	t->attack = LSA_RANGED;
+	t->damage = 6.0f;
+	t->attackRange = 1200.0f;
+	t->attackRate = 4.0f;
+	t->attackDelay = 0.05f;
+	t->spread = 3.0f;
+	t->detectFov = 360.0f;
+	t->hearScale = 0.0f;
+	t->behaviour = LSB_GUARD;
+	t->bloodColor = DONT_BLEED;
+	t->corpseTime = 15.0f;
+	Q_strlcpy(t->models, "models/sentry.mdl models/hostage.mdl");
+	t->hullMin = Vector(-16, -16, 0);
+	t->hullMax = Vector(16, 16, 48);
+	t->fallbackGlowColor = Vector(40, 80, 200);
+	for (int s = 0; s < LSS_COUNT; s++)
+		t->sound[s][0] = '\0';
+	Q_strlcpy(t->sound[LSS_ALERT], "turret/tu_deploy.wav | weapons/zoom.wav");
+	Q_strlcpy(t->sound[LSS_ATTACK], "turret/tu_fire1.wav | weapons/m249-1.wav");
+	Q_strlcpy(t->sound[LSS_DIE], "turret/tu_die.wav turret/tu_die2.wav | weapons/debris1.wav");
+
+	t = LsAddType("boss");
+	Q_strlcpy(t->display, "Abomination");
+	t->category = LSC_BOSS;
+	t->health = 3000.0f;
+	t->speed = 200.0f;
+	t->damage = 60.0f;
+	t->attackRange = 80.0f;
+	t->attackRate = 0.6f;
+	t->attackDelay = 0.7f;
+	t->detectRadius = 2000.0f;
+	t->behaviour = LSB_CHASE;
+	t->scale = 1.6f;
+	t->frags = 10;
+	t->glow = true;
+	t->glowColor = Vector(160, 0, 160);
+}
+
+// Picks the first group of a "a b | c d" list that has a file present (sounds), keeps up to max
+static int LsPickFiles(const char *list, const char *prefix, char out[][64], int max)
+{
+	char buf[256];
+	Q_strlcpy(buf, list);
+
+	int count = 0;
+	char *group = buf;
+	while (group && *group && count == 0)
+	{
+		char *next = Q_strchr(group, '|');
+		if (next)
+			*next++ = '\0';
+
+		char *save = group;
+		while (*save && count < max)
+		{
+			while (*save == ' ' || *save == '\t')
+				save++;
+
+			char *end = save;
+			while (*end && *end != ' ' && *end != '\t')
+				end++;
+
+			if (end == save)
+				break;
+
+			char one[64];
+			int len = Q_min(int(end - save), int(sizeof(one) - 1));
+			Q_strncpy(one, save, len);
+			one[len] = '\0';
+
+			char path[96];
+			Q_snprintf(path, sizeof(path), "%s%s", prefix, one);
+			if (g_pFileSystem->FileExists(path))
+				Q_strlcpy(out[count++], one);
+
+			save = end;
+		}
+
+		group = next;
+	}
+
+	return count;
+}
+
+static void LsSetTypeKey(LsCreatureType *t, const char *key, const char *value)
+{
+	if (!Q_stricmp(key, "base"))
+	{
+		// inherit everything from a type above (keeps the name)
+		int b = LsCreatureTypeIndex(value);
+		if (b >= 0 && &s_types[b] != t)
+		{
+			char name[32];
+			Q_strlcpy(name, t->name);
+			*t = s_types[b];
+			Q_strlcpy(t->name, name);
+			t->precached = false;
+		}
+	}
+	else if (!Q_stricmp(key, "name") || !Q_stricmp(key, "display")) Q_strlcpy(t->display, value);
+	else if (!Q_stricmp(key, "category")) t->category = LsNameIndex(value, s_categoryNames, LSC_CATEGORY_COUNT, t->category);
+	else if (!Q_stricmp(key, "hp") || !Q_stricmp(key, "health")) t->health = Q_max(1.0f, float(Q_atof(value)));
+	else if (!Q_stricmp(key, "speed")) t->speed = Q_max(0.0f, float(Q_atof(value)));
+	else if (!Q_stricmp(key, "walk_speed")) t->walkSpeed = Q_max(0.0f, float(Q_atof(value)));
+	else if (!Q_stricmp(key, "aggression")) t->aggression = clamp(float(Q_atof(value)), 0.0f, 1.0f);
+	else if (!Q_stricmp(key, "detect_radius") || !Q_stricmp(key, "detect")) t->detectRadius = Q_max(0.0f, float(Q_atof(value)));
+	else if (!Q_stricmp(key, "detect_fov") || !Q_stricmp(key, "fov")) t->detectFov = clamp(float(Q_atof(value)), 10.0f, 360.0f);
+	else if (!Q_stricmp(key, "hearing")) t->hearScale = Q_max(0.0f, float(Q_atof(value)));
+	else if (!Q_stricmp(key, "attack")) t->attack = LsNameIndex(value, s_attackNames, ARRAYSIZE(s_attackNames), t->attack);
+	else if (!Q_stricmp(key, "damage")) t->damage = Q_max(0.0f, float(Q_atof(value)));
+	else if (!Q_stricmp(key, "attack_range")) t->attackRange = Q_max(16.0f, float(Q_atof(value)));
+	else if (!Q_stricmp(key, "attack_rate")) t->attackRate = clamp(float(Q_atof(value)), 0.1f, 20.0f);
+	else if (!Q_stricmp(key, "attack_delay")) t->attackDelay = clamp(float(Q_atof(value)), 0.0f, 3.0f);
+	else if (!Q_stricmp(key, "spread")) t->spread = clamp(float(Q_atof(value)), 0.0f, 45.0f);
+	else if (!Q_stricmp(key, "flee_hp")) t->fleeHealth = clamp(float(Q_atof(value)), 0.0f, 1.0f);
+	else if (!Q_stricmp(key, "behaviour") || !Q_stricmp(key, "behavior")) t->behaviour = LsNameIndex(value, s_behaviourNames, LSB_COUNT, t->behaviour);
+	else if (!Q_stricmp(key, "radius") || !Q_stricmp(key, "guard_radius")) t->guardRadius = Q_max(32.0f, float(Q_atof(value)));
+	else if (!Q_stricmp(key, "target")) t->targeting = LsNameIndex(value, s_targetingNames, ARRAYSIZE(s_targetingNames), t->targeting);
+	else if (!Q_stricmp(key, "hates")) t->hates = LsHatesFromString(value);
+	else if (!Q_stricmp(key, "respawn")) t->respawn = Q_max(0.0f, float(Q_atof(value)));
+	else if (!Q_stricmp(key, "corpse_time")) t->corpseTime = clamp(float(Q_atof(value)), 0.0f, 120.0f);
+	else if (!Q_stricmp(key, "moves")) t->moves = Q_atoi(value) != 0;
+	else if (!Q_stricmp(key, "frags")) t->frags = Q_atoi(value);
+	else if (!Q_stricmp(key, "money")) t->money = Q_atoi(value);
+	else if (!Q_stricmp(key, "model") || !Q_stricmp(key, "models")) Q_strlcpy(t->models, value);
+	else if (!Q_stricmp(key, "skin")) t->skin = Q_atoi(value);
+	else if (!Q_stricmp(key, "body")) t->body = Q_atoi(value);
+	else if (!Q_stricmp(key, "scale")) t->scale = clamp(float(Q_atof(value)), 0.1f, 4.0f);
+	else if (!Q_stricmp(key, "hull_min")) t->hullMin = LsParseVector(value);
+	else if (!Q_stricmp(key, "hull_max")) t->hullMax = LsParseVector(value);
+	else if (!Q_stricmp(key, "glow"))
+	{
+		t->glowColor = LsParseVector(value);
+		t->glow = !t->glowColor.IsZero();
+	}
+	else if (!Q_stricmp(key, "fallback_glow"))
+	{
+		t->fallbackGlowColor = LsParseVector(value);
+		t->fallbackGlow = !t->fallbackGlowColor.IsZero();
+	}
+	else if (!Q_stricmp(key, "blood")) t->bloodColor = !Q_stricmp(value, "yellow") ? BLOOD_COLOR_YELLOW : !Q_stricmp(value, "none") ? DONT_BLEED : BLOOD_COLOR_RED;
+	else if (!Q_stricmp(key, "sounds"))
+	{
+		// (the plan's short form: one list of everything; the idle/attack split is by file name)
+		for (int s = 0; s < LSS_COUNT; s++)
+			t->sound[s][0] = '\0';
+		Q_strlcpy(t->sound[LSS_IDLE], value);
+	}
+	else if (!Q_stricmp(key, "ls"))
+	{
+		// the plan's backend block: ls = model=<path> anims=<walk> <run> <attack> <die>
+		char buf[256];
+		Q_strlcpy(buf, value);
+		const int animOrder[] = { LSAN_WALK, LSAN_RUN, LSAN_ATTACK, LSAN_DIE };
+		int animNext = -1;
+		char *tok = strtok(buf, " \t");
+		while (tok)
+		{
+			if (!Q_strnicmp(tok, "model=", 6))
+			{
+				Q_strlcpy(t->models, tok + 6);
+				animNext = -1;
+			}
+			else if (!Q_strnicmp(tok, "anims=", 6))
+			{
+				animNext = 0;
+				if (tok[6])
+					Q_strlcpy(t->anim[animOrder[animNext++]], tok + 6);
+			}
+			else if (animNext >= 0 && animNext < int(ARRAYSIZE(animOrder)))
+			{
+				Q_strlcpy(t->anim[animOrder[animNext++]], tok);
+			}
+			tok = strtok(nullptr, " \t");
+		}
+	}
+	else
+	{
+		for (int a = 0; a < LSAN_COUNT; a++)
+		{
+			if (!Q_stricmp(key, s_animKeys[a]))
+			{
+				Q_strlcpy(t->anim[a], value);
+				return;
+			}
+		}
+		for (int s = 0; s < LSS_COUNT; s++)
+		{
+			if (!Q_stricmp(key, s_soundKeys[s]))
+			{
+				Q_strlcpy(t->sound[s], value);
+				return;
+			}
+		}
+		// (mm = ..., bot = ...: the kit's backends, not ours)
+	}
+}
+
+static char *LsTrim(char *s)
+{
+	while (*s == ' ' || *s == '\t')
+		s++;
+
+	char *end = s + Q_strlen(s);
+	while (end > s && (end[-1] == ' ' || end[-1] == '\t' || end[-1] == '\r' || end[-1] == '\n'))
+		*--end = '\0';
+
+	return s;
+}
+
+static void LsLoadTypes()
+{
+	// (precache state survives a reload: a type that was precached keeps its files)
+	LsCreatureType saved[LS_CREATURE_MAX_TYPES];
+	int savedCount = s_typeCount;
+	Q_memcpy(saved, s_types, sizeof(saved));
+
+	s_typeCount = 0;
+	s_typesLoaded = true;
+	LsBuiltinTypes();
+
+	int length = 0;
+	char *data = (char *)LOAD_FILE_FOR_ME(ls_creature_file.string, &length);
+	if (data)
+	{
+		LsCreatureType *cur = nullptr;
+		char *p = data;
+		char *end = data + length;
+		while (p < end)
+		{
+			char line[512];
+			int n = 0;
+			while (p < end && *p != '\n' && n < int(sizeof(line)) - 1)
+				line[n++] = *p++;
+			while (p < end && *p != '\n')
+				p++;
+			p++;
+			line[n] = '\0';
+
+			// (comments: ; # //)
+			for (char *c = line; *c; c++)
+			{
+				if (*c == ';' || *c == '#' || (c[0] == '/' && c[1] == '/'))
+				{
+					*c = '\0';
+					break;
+				}
+			}
+
+			char *s = LsTrim(line);
+			if (!*s)
+				continue;
+
+			if (*s == '[')
+			{
+				char *close = Q_strchr(s, ']');
+				if (close)
+					*close = '\0';
+				cur = LsAddType(LsTrim(s + 1));
+				if (!cur)
+					CONSOLE_ECHO("ls_creature: too many types (max %d), '%s' skipped\n", LS_CREATURE_MAX_TYPES, s + 1);
+				continue;
+			}
+
+			char *eq = Q_strchr(s, '=');
+			if (!eq || !cur)
+				continue;
+
+			*eq = '\0';
+			LsSetTypeKey(cur, LsTrim(s), LsTrim(eq + 1));
+		}
+
+		FREE_FILE(data);
+	}
+
+	for (int i = 0; i < s_typeCount; i++)
+	{
+		LsCreatureType *t = &s_types[i];
+		if (t->walkSpeed > t->speed)
+			t->walkSpeed = t->speed;
+
+		for (int j = 0; j < savedCount; j++)
+		{
+			if (saved[j].precached && !Q_stricmp(saved[j].name, t->name))
+			{
+				// (only the files can't change after the map loaded)
+				t->precached = true;
+				t->usingFallback = saved[j].usingFallback;
+				t->iszName = saved[j].iszName;
+				Q_strlcpy(t->model, saved[j].model);
+				Q_memcpy(t->soundCount, saved[j].soundCount, sizeof(t->soundCount));
+				Q_memcpy(t->soundFile, saved[j].soundFile, sizeof(t->soundFile));
+			}
+		}
+	}
+}
+
+int LsCreatureTypeIndex(const char *name)
+{
+	if (!s_typesLoaded)
+		LsLoadTypes();
+
+	if (!name || !*name)
+		return -1;
+
+	for (int i = 0; i < s_typeCount; i++)
+	{
+		if (!Q_stricmp(s_types[i].name, name))
+			return i;
+	}
+
+	return -1;
+}
+
+LsCreatureType *LsCreatureTypeAt(int index)
+{
+	if (!s_typesLoaded)
+		LsLoadTypes();
+
+	return (index >= 0 && index < s_typeCount) ? &s_types[index] : nullptr;
+}
+
+// Precache one type's model and sounds: only while the map loads (the engine refuses later)
+bool LsCreaturePrecacheType(int index)
+{
+	LsCreatureType *t = LsCreatureTypeAt(index);
+	if (!t)
+		return false;
+
+	if (t->precached)
+		return true;
+
+	if (g_bServerActive)
+		return false;
+
+	// the first model that's there (Half-Life's own when the install has them)
+	char buf[256];
+	Q_strlcpy(buf, t->models);
+	t->model[0] = '\0';
+	t->usingFallback = false;
+	int candidate = 0;
+	for (char *tok = strtok(buf, " \t"); tok; tok = strtok(nullptr, " \t"), candidate++)
+	{
+		if (g_pFileSystem->FileExists(tok))
+		{
+			Q_strlcpy(t->model, tok);
+			t->usingFallback = (candidate > 0);
+			break;
+		}
+	}
+
+	if (!t->model[0])
+	{
+		CONSOLE_ECHO("ls_creature: no model found for '%s' (%s)\n", t->name, t->models);
+		return false;
+	}
+
+	PRECACHE_MODEL(t->model);
+	s_precachedModels++;
+
+	for (int s = 0; s < LSS_COUNT; s++)
+	{
+		t->soundCount[s] = LsPickFiles(t->sound[s], "sound/", t->soundFile[s], LS_CREATURE_MAX_SOUNDS);
+		for (int i = 0; i < t->soundCount[s]; i++)
+		{
+			PRECACHE_SOUND(t->soundFile[s][i]);
+			s_precachedSounds++;
+		}
+	}
+
+	t->iszName = ALLOC_STRING(t->name);
+	t->precached = true;
+
+	if (ls_creature_debug.value > 0.0f)
+		CONSOLE_ECHO("ls_creature: precached '%s' (%s%s)\n", t->name, t->model, t->usingFallback ? ", stand-in" : "");
+
+	if (ls_creature_budget.value > 0.0f && s_precachedModels + s_precachedSounds > int(ls_creature_budget.value))
+	{
+		CONSOLE_ECHO("ls_creature: warning: creatures now take %d models and %d sounds of the 512/512 precache limit (ls_creature_budget %d)\n",
+			s_precachedModels, s_precachedSounds, int(ls_creature_budget.value));
+	}
+
+	return true;
+}
+
+// The map loads: precache the types the mode asked for (ls_creature_precache), nothing otherwise
+void LsCreaturesPrecache()
+{
+	s_precachedModels = 0;
+	s_precachedSounds = 0;
+
+	// (a fresh read each map: the file may have changed, and the engine forgot the files)
+	for (int i = 0; i < s_typeCount; i++)
+		s_types[i].precached = false;
+
+	s_typesLoaded = false;
+
+	const char *want = ls_creature_precache.string;
+	if (!want || !*want)
+		return;
+
+	LsLoadTypes();
+
+	if (!Q_stricmp(want, "all"))
+	{
+		for (int i = 0; i < s_typeCount; i++)
+			LsCreaturePrecacheType(i);
+	}
+	else
+	{
+		char buf[256];
+		Q_strlcpy(buf, want);
+		for (char *tok = strtok(buf, " ,\t"); tok; tok = strtok(nullptr, " ,\t"))
+		{
+			int index = LsCreatureTypeIndex(tok);
+			if (index < 0)
+				CONSOLE_ECHO("ls_creature: ls_creature_precache names unknown type '%s'\n", tok);
+			else
+				LsCreaturePrecacheType(index);
+		}
+	}
+
+	CONSOLE_ECHO("ls_creature: %d models and %d sounds precached for creatures\n", s_precachedModels, s_precachedSounds);
+}
+
+// ---------------------------------------------------------------------------------------------
+// The registry
+
+static ILsCreature *s_list[LS_CREATURE_MAX_LIST];
+static int s_listCount = 0;		// high-water mark (gone ones leave a null)
+static int s_listLive = 0;		// non-null entries
+
+// Adopted classnames (ls_creature adopt): entities other code made, wrapped
+struct LsAdoptRule
+{
+	char classname[32];
+	int type;
+};
+
+static LsAdoptRule s_adopt[8];
+static int s_adoptCount = 0;
+static float s_nextAdoptScan = 0.0f;
+static float s_nextAliveCount = 0.0f;
+
+bool LsCreaturesExist()
+{
+	return s_listLive > 0 || s_adoptCount > 0;
+}
+
+void LsCreatureRegister(ILsCreature *pCreature)
+{
+	for (int i = 0; i < s_listCount; i++)
+	{
+		if (!s_list[i])
+		{
+			s_list[i] = pCreature;
+			s_listLive++;
+			return;
+		}
+	}
+
+	if (s_listCount >= LS_CREATURE_MAX_LIST)
+	{
+		delete pCreature;
+		return;
+	}
+
+	s_list[s_listCount++] = pCreature;
+	s_listLive++;
+}
+
+void LsCreatureUnregister(CBaseEntity *pEntity)
+{
+	for (int i = 0; i < s_listCount; i++)
+	{
+		if (s_list[i] && s_list[i]->Entity() == pEntity)
+		{
+			delete s_list[i];
+			s_list[i] = nullptr;
+			s_listLive--;
+		}
+	}
+
+	while (s_listCount > 0 && !s_list[s_listCount - 1])
+		s_listCount--;
+}
+
+int LsCreatureCount()
+{
+	return s_listCount;
+}
+
+ILsCreature *LsCreatureAt(int i)
+{
+	if (i < 0 || i >= s_listCount || !s_list[i])
+		return nullptr;
+
+	// (an entity freed behind our back - removed by other code - drops out here)
+	if (!s_list[i]->Entity())
+	{
+		delete s_list[i];
+		s_list[i] = nullptr;
+		s_listLive--;
+		return nullptr;
+	}
+
+	return s_list[i];
+}
+
+ILsCreature *LsCreatureOf(CBaseEntity *pEntity)
+{
+	if (!pEntity || !s_listLive)
+		return nullptr;
+
+	for (int i = 0; i < s_listCount; i++)
+	{
+		ILsCreature *c = LsCreatureAt(i);
+		if (c && c->Entity() == pEntity)
+			return c;
+	}
+
+	return nullptr;
+}
+
+static void LsUpdateAliveCount()
+{
+	int alive = 0;
+	for (int i = 0; i < s_listCount; i++)
+	{
+		ILsCreature *c = LsCreatureAt(i);
+		if (c && c->IsAlive())
+			alive++;
+	}
+
+	if (int(ls_creature_alive.value) != alive)
+		CVAR_SET_FLOAT("ls_creature_alive", alive);
+}
+
+static bool LsIsHostilePlayer(CBaseEntity *pOther, int hates)
+{
+	if (!pOther || !pOther->IsPlayer() || !pOther->IsAlive())
+		return false;
+
+	CBasePlayer *pPlayer = static_cast<CBasePlayer *>(pOther);
+	if (pPlayer->GetObserverMode() != OBS_NONE || (pPlayer->m_iTeam != TERRORIST && pPlayer->m_iTeam != CT))
+		return false;
+
+	if (hates == 1 && pPlayer->m_iTeam != TERRORIST)
+		return false;
+
+	if (hates == 2 && pPlayer->m_iTeam != CT)
+		return false;
+
+	return true;
+}
+
+// The native provider's creatures, seen through the interface
+class LsNativeCreature: public ILsCreature
+{
+public:
+	LsNativeCreature(CLsCreature *pCreature) { m_handle = pCreature; }
+
+	virtual CBaseEntity *Entity() const { return const_cast<EHANDLE &>(m_handle); }
+	virtual const char *Provider() const { return "ls"; }
+	virtual const LsCreatureType *Type() const { CLsCreature *c = Get(); return c ? c->GetType() : nullptr; }
+	virtual int Category() const { const LsCreatureType *t = Type(); return t ? t->category : LSC_INFECTED; }
+	virtual bool IsAlive() const { CLsCreature *c = Get(); return c && c->IsAlive(); }
+	virtual float Health() const { CLsCreature *c = Get(); return c ? c->pev->health : 0.0f; }
+	virtual void SetTarget(CBaseEntity *pTarget) { CLsCreature *c = Get(); if (c) c->SetTarget(pTarget); }
+	virtual CBaseEntity *GetTarget() const { CLsCreature *c = Get(); return c ? c->GetTarget() : nullptr; }
+	virtual void SetBehaviour(int behaviour, const Vector *spot) { CLsCreature *c = Get(); if (c) c->SetBehaviour(behaviour, spot); }
+	virtual int GetBehaviour() const { CLsCreature *c = Get(); return c ? c->GetBehaviour() : LSB_IDLE; }
+	virtual float Threat() const
+	{
+		const LsCreatureType *t = Type();
+		if (!t)
+			return 0.5f;
+
+		float dps = t->damage * t->attackRate;
+		float threat = dps / 40.0f + (t->attack == LSA_RANGED ? 0.2f : 0.0f) + (t->category == LSC_BOSS ? 0.4f : 0.0f);
+		return clamp(threat, 0.1f, 1.0f);
+	}
+	virtual bool IsHostileTo(CBaseEntity *pOther) const { CLsCreature *c = Get(); return c && c->IsHostileTo(pOther); }
+	virtual bool LastNoise(Vector *pos, float *when, float *range) const { CLsCreature *c = Get(); return c && c->LastNoise(pos, when, range); }
+	virtual void Kill() { CLsCreature *c = Get(); if (c) c->KillQuietly(); }
+
+private:
+	CLsCreature *Get() const
+	{
+		CBaseEntity *pEntity = const_cast<EHANDLE &>(m_handle);
+		return static_cast<CLsCreature *>(pEntity);
+	}
+
+	EHANDLE m_handle;
+};
+
+// Anyone else's monster (MonsterMod's monster_*), wrapped by classname: the list, the bots and
+// the events see it; its own code still runs it (target and behaviour are only hints it can't take)
+class LsAdoptedCreature: public ILsCreature
+{
+public:
+	LsAdoptedCreature(CBaseEntity *pEntity, int type) { m_handle = pEntity; m_type = type; }
+
+	virtual CBaseEntity *Entity() const { return const_cast<EHANDLE &>(m_handle); }
+	virtual const char *Provider() const { return "adopted"; }
+	virtual const LsCreatureType *Type() const { return LsCreatureTypeAt(m_type); }
+	virtual int Category() const { const LsCreatureType *t = Type(); return t ? t->category : LSC_ALIEN; }
+	virtual bool IsAlive() const
+	{
+		CBaseEntity *pEntity = Entity();
+		return pEntity && pEntity->pev->deadflag == DEAD_NO && pEntity->pev->health > 0.0f && pEntity->pev->takedamage != DAMAGE_NO;
+	}
+	virtual float Health() const { CBaseEntity *pEntity = Entity(); return pEntity ? pEntity->pev->health : 0.0f; }
+	virtual void SetTarget(CBaseEntity *pTarget) {}
+	virtual CBaseEntity *GetTarget() const { return nullptr; }
+	virtual void SetBehaviour(int behaviour, const Vector *spot) {}
+	virtual int GetBehaviour() const { return LSB_CHASE; }
+	virtual float Threat() const { return clamp(0.4f + Health() / 600.0f, 0.4f, 1.0f); }
+	virtual bool IsHostileTo(CBaseEntity *pOther) const { const LsCreatureType *t = Type(); return IsAlive() && LsIsHostilePlayer(pOther, t ? t->hates : 0); }
+	virtual bool LastNoise(Vector *pos, float *when, float *range) const { return false; }
+	virtual void Kill()
+	{
+		CBaseEntity *pEntity = Entity();
+		if (pEntity && IsAlive())
+			pEntity->TakeDamage(VARS(INDEXENT(0)), VARS(INDEXENT(0)), pEntity->pev->health + 1000.0f, DMG_GENERIC);
+	}
+
+private:
+	EHANDLE m_handle;
+	int m_type;
+};
+
+static void LsAdoptScan()
+{
+	for (int r = 0; r < s_adoptCount; r++)
+	{
+		CBaseEntity *pEntity = nullptr;
+		while ((pEntity = UTIL_FindEntityByClassname(pEntity, s_adopt[r].classname)))
+		{
+			if (pEntity->pev->deadflag != DEAD_NO || LsCreatureOf(pEntity))
+				continue;
+
+			LsCreatureRegister(new LsAdoptedCreature(pEntity, s_adopt[r].type));
+		}
+	}
+}
+
+// The native provider
+class LsNativeProvider: public ILsCreatureProvider
+{
+public:
+	virtual const char *Name() const { return "ls"; }
+	virtual bool Available() const { return true; }
+	virtual CBaseEntity *Spawn(int typeIndex, const Vector &origin, float yaw, const char *keys)
+	{
+		LsCreatureType *t = LsCreatureTypeAt(typeIndex);
+		if (!t)
+			return nullptr;
+
+		if (!t->precached && !LsCreaturePrecacheType(typeIndex))
+		{
+			CONSOLE_ECHO("ls_creature: type '%s' wasn't precached when the map loaded - add it to ls_creature_precache (or place one in the map)\n", t->name);
+			return nullptr;
+		}
+
+		int alive = 0;
+		for (int i = 0; i < LsCreatureCount(); i++)
+		{
+			ILsCreature *c = LsCreatureAt(i);
+			if (c && c->IsAlive())
+				alive++;
+		}
+
+		if (alive >= int(ls_creature_max.value))
+		{
+			CONSOLE_ECHO("ls_creature: %d alive already (ls_creature_max)\n", alive);
+			return nullptr;
+		}
+
+		// (keep a margin of free edicts for players' items and effects)
+		if (NUMBER_OF_ENTITIES() > gpGlobals->maxEntities - 100)
+		{
+			CONSOLE_ECHO("ls_creature: too few free edicts left (%d of %d used)\n", NUMBER_OF_ENTITIES(), gpGlobals->maxEntities);
+			return nullptr;
+		}
+
+		edict_t *pEdict = CREATE_NAMED_ENTITY(MAKE_STRING("ls_creature"));
+		if (FNullEnt(pEdict))
+			return nullptr;
+
+		CLsCreature *pCreature = GET_PRIVATE<CLsCreature>(pEdict);
+		if (!pCreature)
+		{
+			REMOVE_ENTITY(pEdict);
+			return nullptr;
+		}
+
+		pCreature->pev->origin = origin;
+		pCreature->pev->angles = Vector(0, yaw, 0);
+
+		KeyValueData kvd;
+		char kvType[32];
+		Q_strlcpy(kvType, t->name);
+		kvd.szClassName = (char *)"ls_creature";
+		kvd.szKeyName = (char *)"type";
+		kvd.szValue = kvType;
+		kvd.fHandled = FALSE;
+		pCreature->KeyValue(&kvd);
+
+		// key=value pairs after the position (same keys as the map entity)
+		if (keys && *keys)
+		{
+			char buf[256];
+			Q_strlcpy(buf, keys);
+			for (char *tok = strtok(buf, " \t"); tok; tok = strtok(nullptr, " \t"))
+			{
+				char *eq = Q_strchr(tok, '=');
+				if (!eq)
+					continue;
+
+				*eq = '\0';
+				kvd.szKeyName = tok;
+				kvd.szValue = eq + 1;
+				kvd.fHandled = FALSE;
+				pCreature->KeyValue(&kvd);
+			}
+		}
+
+		if (DispatchSpawn(pEdict) == -1 || (pCreature->pev->flags & FL_KILLME))
+		{
+			REMOVE_ENTITY(pEdict);
+			return nullptr;
+		}
+
+		CVAR_SET_FLOAT("ls_creature_last", ENTINDEX(pEdict));
+		LsUpdateAliveCount();
+		return pCreature;
+	}
+};
+
+static LsNativeProvider s_nativeProvider;
+
+CBaseEntity *LsCreatureSpawn(const char *type, const Vector &origin, float yaw, const char *keys)
+{
+	int index = LsCreatureTypeIndex(type);
+	if (index < 0)
+	{
+		CONSOLE_ECHO("ls_creature: unknown type '%s' (ls_creature types)\n", type ? type : "");
+		return nullptr;
+	}
+
+	return s_nativeProvider.Spawn(index, origin, yaw, keys);
+}
+
+void LsCreaturesServerDeactivate()
+{
+	for (int i = 0; i < s_listCount; i++)
+	{
+		delete s_list[i];
+		s_list[i] = nullptr;
+	}
+
+	s_listCount = 0;
+	s_listLive = 0;
+	s_adoptCount = 0;
+	s_nextAdoptScan = 0.0f;
+	s_nextAliveCount = 0.0f;
+
+	// (the engine's string pool is emptied with the map)
+	for (int i = 0; i < s_typeCount; i++)
+	{
+		s_types[i].iszName = 0;
+		s_types[i].precached = false;
+	}
+}
+
+// Every game event the bots hear: creatures hear the same (shots, steps, breaking glass)
+void LsCreaturesOnEvent(GameEventType event, CBaseEntity *pEntity, CBaseEntity *pOther)
+{
+	if (s_adoptCount > 0 && gpGlobals->time >= s_nextAdoptScan)
+	{
+		s_nextAdoptScan = gpGlobals->time + 1.0f;
+		LsAdoptScan();
+	}
+
+	if (gpGlobals->time >= s_nextAliveCount || event == EVENT_ROUND_START)
+	{
+		s_nextAliveCount = gpGlobals->time + 1.0f;
+		LsUpdateAliveCount();
+	}
+
+	for (int i = 0; i < s_listCount; i++)
+	{
+		ILsCreature *c = LsCreatureAt(i);
+		if (!c || !c->IsAlive() || Q_strcmp(c->Provider(), "ls"))
+			continue;
+
+		static_cast<CLsCreature *>(c->Entity())->OnGameEvent(event, pEntity, pOther);
+	}
+}
+
+// ---------------------------------------------------------------------------------------------
+// The ls_creature entity
+
+LINK_ENTITY_TO_CLASS(ls_creature, CLsCreature, CCSMonster)
+
+const LsCreatureType *CLsCreature::GetType() const
+{
+	return LsCreatureTypeAt(m_type);
+}
+
+void CLsCreature::KeyValue(KeyValueData *pkvd)
+{
+	const char *key = pkvd->szKeyName;
+	const char *value = pkvd->szValue;
+
+	if (FStrEq(key, "type"))
+	{
+		m_type = LsCreatureTypeIndex(value);
+		if (m_type < 0)
+			CONSOLE_ECHO("ls_creature: unknown type '%s'\n", value);
+	}
+	else if (FStrEq(key, "behaviour") || FStrEq(key, "behavior"))
+		m_homeBehaviour = LsNameIndex(value, s_behaviourNames, LSB_COUNT, -1) + 1;
+	else if (FStrEq(key, "path") || FStrEq(key, "patrol"))
+		m_patrolStart = ALLOC_STRING(value);
+	else if (FStrEq(key, "radius"))
+		m_guardRadius = Q_atof(value);
+	else if (FStrEq(key, "respawn"))
+		m_respawn = Q_atof(value);
+	else if (FStrEq(key, "health") || FStrEq(key, "hp"))
+		m_keyHealth = Q_atof(value);
+	else if (FStrEq(key, "speed"))
+		m_keySpeed = Q_atof(value);
+	else if (FStrEq(key, "damage"))
+		m_keyDamage = Q_atof(value);
+	else if (FStrEq(key, "aggression"))
+		m_keyAggression = Q_atof(value) + 0.001f;		// (0 stays "set": passive)
+	else if (FStrEq(key, "detect"))
+		m_keyDetect = Q_atof(value);
+	else if (FStrEq(key, "hates"))
+		m_keyHates = LsHatesFromString(value) + 1;
+	else if (FStrEq(key, "persist"))
+		m_persist = Q_atoi(value) != 0;
+	else
+	{
+		CBaseMonster::KeyValue(pkvd);
+		return;
+	}
+
+	pkvd->fHandled = TRUE;
+}
+
+void CLsCreature::Precache()
+{
+	if (m_type >= 0)
+		LsCreaturePrecacheType(m_type);
+}
+
+void CLsCreature::Spawn()
+{
+	// (the engine zero-fills a new entity's data: the keys set what they name before this)
+	if (!m_improv)
+	{
+		// first spawn: a map entity is spawned before ServerActivate; one made by a command after
+		m_fromMap = !g_bServerActive;
+		m_spawnOrigin = pev->origin;
+		m_spawnAngles = pev->angles;
+	}
+
+	if (m_type < 0 || !LsCreatureTypeAt(m_type))
+	{
+		pev->flags |= FL_KILLME;
+		return;
+	}
+
+	Precache();
+
+	const LsCreatureType *t = GetType();
+	if (!t->precached)
+	{
+		CONSOLE_ECHO("ls_creature: '%s' can't be spawned: its model isn't precached\n", t->name);
+		pev->flags |= FL_KILLME;
+		return;
+	}
+
+	MAKE_STRING_CLASS("ls_creature", pev);
+
+	if (!m_improv)
+	{
+		m_improv = new CCreatureImprov(this);
+		LsCreatureRegister(new LsNativeCreature(this));
+	}
+
+	Setup();
+}
+
+// Everything that a spawn and a respawn share
+void CLsCreature::Setup()
+{
+	const LsCreatureType *t = GetType();
+
+	pev->origin = m_spawnOrigin;
+	pev->angles = m_spawnAngles;
+	pev->movetype = t->moves ? MOVETYPE_STEP : MOVETYPE_TOSS;
+	pev->solid = SOLID_SLIDEBOX;
+	pev->takedamage = DAMAGE_AIM;
+	pev->flags |= FL_MONSTER;
+	pev->deadflag = DEAD_NO;
+	pev->effects &= ~EF_NODRAW;
+	pev->max_health = (m_keyHealth > 0.0f) ? m_keyHealth : t->health;
+	pev->health = pev->max_health;
+	pev->gravity = 1.0f;
+	pev->friction = 1.0f;
+	pev->velocity = Vector(0, 0, 0);
+	pev->view_ofs = Vector(0, 0, t->hullMax.z - 8.0f);
+	pev->netname = t->iszName;
+	pev->skin = t->skin;
+	pev->body = t->body;
+	pev->scale = t->scale;
+	pev->frame = 0;
+	pev->framerate = 1.0f;
+
+	SET_MODEL(edict(), t->model);
+	UTIL_SetSize(pev, t->hullMin, t->hullMax);
+	UTIL_SetOrigin(pev, pev->origin);
+
+	// a tint: the type's own, or the stand-in's (a hostage tinted green reads as "zombie")
+	pev->renderfx = kRenderFxNone;
+	pev->rendermode = kRenderNormal;
+	pev->renderamt = 0;
+	if (t->glow || (t->fallbackGlow && t->usingFallback))
+	{
+		pev->renderfx = kRenderFxGlowShell;
+		pev->rendercolor = t->glow ? t->glowColor : t->fallbackGlowColor;
+		pev->renderamt = 12;
+	}
+
+	m_bloodColor = t->bloodColor;
+	m_runSpeed = (m_keySpeed > 0.0f) ? m_keySpeed : t->speed;
+	m_walkSpeed = Q_min(t->walkSpeed, m_runSpeed);
+	if (m_walkSpeed <= 0.0f)
+		m_walkSpeed = m_runSpeed * 0.4f;
+	m_damage = (m_keyDamage > 0.0f) ? m_keyDamage : t->damage;
+	m_aggression = (m_keyAggression > 0.0f) ? clamp(m_keyAggression - 0.001f, 0.0f, 1.0f) : t->aggression;
+	m_detect = (m_keyDetect > 0.0f) ? m_keyDetect : t->detectRadius;
+	m_hates = (m_keyHates > 0) ? m_keyHates - 1 : t->hates;
+	if (m_guardRadius <= 0.0f)
+		m_guardRadius = t->guardRadius;
+	if (m_respawn <= 0.0f)
+		m_respawn = t->respawn;
+
+	// (m_homeBehaviour is the key's behaviour + 1: 0 = not given, the type's, or a patrol when a path was)
+	m_behaviour = (m_homeBehaviour > 0) ? m_homeBehaviour - 1 : m_patrolStart ? LSB_PATROL : t->behaviour;
+	if (!t->moves)
+		m_behaviour = LSB_GUARD;
+
+	m_home = m_spawnOrigin;
+	m_homeAngles = m_spawnAngles;
+	m_mode = MODE_HOME;
+	m_target = nullptr;
+	m_forcedTarget = nullptr;
+	m_lastAttacker = nullptr;
+	m_noticing = nullptr;
+	m_hEnemy = nullptr;
+	m_targetSeenAt = -1000.0f;
+	m_searchUntil = 0.0f;
+	m_fleeUntil = 0.0f;
+	m_fleeCooldown = 0.0f;
+	m_patrolCorner = nullptr;
+	m_waitUntil = gpGlobals->time + RANDOM_FLOAT(0.5f, 2.0f);
+	m_nextSense = gpGlobals->time + RANDOM_FLOAT(0.1f, 0.4f);
+	m_nextFullThink = 0.0f;
+	m_nextRepath = 0.0f;
+	m_attackStart = 0.0f;
+	m_attackLanded = false;
+	m_nextAttack = 0.0f;
+	m_nextIdleSound = gpGlobals->time + RANDOM_FLOAT(4.0f, 12.0f);
+	m_painSoundAt = 0.0f;
+	m_flinchUntil = 0.0f;
+	m_deadAt = 0.0f;
+	m_anim = -1;
+	m_noiseAt = -1000.0f;
+	m_noiseRange = 0.0f;
+
+	m_improv->OnReset();
+	m_improv->SetSpeeds(m_walkSpeed, m_runSpeed);
+
+	if (t->moves)
+		DROP_TO_FLOOR(edict());
+
+	SetAnim(LSAN_IDLE);
+
+	SetThink(&CLsCreature::CreatureThink);
+	SetTouch(nullptr);
+	pev->nextthink = gpGlobals->time + RANDOM_FLOAT(0.05f, 0.2f);
+}
+
+void CLsCreature::ComeBack()
+{
+	// (somebody standing on the spot: wait a moment rather than spawn inside them)
+	TraceResult tr;
+	const LsCreatureType *t = GetType();
+	UTIL_TraceHull(m_spawnOrigin + Vector(0, 0, 2), m_spawnOrigin + Vector(0, 0, 3), dont_ignore_monsters,
+		(t->hullMax.z > 40.0f) ? human_hull : head_hull, edict(), &tr);
+	if (tr.fStartSolid || tr.fAllSolid)
+	{
+		m_deadAt = gpGlobals->time - m_respawn + 1.0f;
+		return;
+	}
+
+	Setup();
+}
+
+// Map-placed creatures (and persistent ones) come back each round; the rest are released
+int CLsCreature::ObjectCaps()
+{
+	return (CBaseMonster::ObjectCaps() & ~FCAP_ACROSS_TRANSITION) | ((m_fromMap || m_persist) ? FCAP_MUST_RESET : FCAP_MUST_RELEASE);
+}
+
+void CLsCreature::Restart()
+{
+	if (m_type < 0 || !m_improv)
+		return;
+
+	Setup();
+}
+
+#ifdef REGAMEDLL_API
+void CLsCreature::OnDestroy()
+{
+	LsCreatureUnregister(this);
+	delete m_improv;
+	m_improv = nullptr;
+	CBaseMonster::OnDestroy();
+}
+#endif
+
+void CLsCreature::Touch(CBaseEntity *pOther)
+{
+	if (m_improv && IsAlive())
+		m_improv->OnTouch(pOther);
+}
+
+bool CLsCreature::IsHostileTo(CBaseEntity *pOther) const
+{
+	return const_cast<CLsCreature *>(this)->IsAlive() && LsIsHostilePlayer(pOther, m_hates);
+}
+
+bool CLsCreature::LastNoise(Vector *pos, float *when, float *range) const
+{
+	if (m_noiseAt < 0.0f)
+		return false;
+
+	if (pos) *pos = m_noisePos;
+	if (when) *when = m_noiseAt;
+	if (range) *range = m_noiseRange;
+	return true;
+}
+
+void CLsCreature::MakeNoise(float range)
+{
+	m_noisePos = pev->origin;
+	m_noiseAt = gpGlobals->time;
+	m_noiseRange = range;
+}
+
+void CLsCreature::PlaySound(int kind, float volume)
+{
+	const LsCreatureType *t = GetType();
+	if (!t || t->soundCount[kind] <= 0)
+		return;
+
+	const char *file = t->soundFile[kind][RANDOM_LONG(0, t->soundCount[kind] - 1)];
+	int channel = (kind == LSS_ATTACK || kind == LSS_HIT || kind == LSS_MISS) ? CHAN_WEAPON : CHAN_VOICE;
+	EMIT_SOUND_DYN(edict(), channel, file, volume, ATTN_NORM, 0, PITCH_NORM + RANDOM_LONG(-5, 5));
+
+	// (what it says is heard: idle grunts not far, an attack or a death cry further)
+	MakeNoise((kind == LSS_IDLE) ? 600.0f : (kind == LSS_ATTACK && t->attack == LSA_RANGED) ? 1500.0f : 1000.0f);
+}
+
+void CLsCreature::SetAnim(int anim)
+{
+	const LsCreatureType *t = GetType();
+	if (!t)
+		return;
+
+	// (a looping one already playing stays; a one-shot replays when asked again after it ended)
+	if (anim == m_anim && (m_fSequenceLoops || !m_fSequenceFinished) && anim != LSAN_ATTACK)
+		return;
+
+	int seq = t->anim[anim][0] ? LookupSequence(t->anim[anim]) : -1;
+	if (seq < 0)
+	{
+		// by activity, with fallbacks (the HL models and hostage.mdl have them)
+		static const int acts[LSAN_COUNT][3] =
+		{
+			{ ACT_IDLE, ACT_IDLE, ACT_IDLE },
+			{ ACT_WALK, ACT_RUN, ACT_IDLE },
+			{ ACT_RUN, ACT_WALK, ACT_IDLE },
+			{ ACT_MELEE_ATTACK1, ACT_RANGE_ATTACK1, ACT_MELEE_ATTACK2 },
+			{ ACT_SMALL_FLINCH, ACT_BIG_FLINCH, ACT_FLINCH_CHEST },
+			{ ACT_DIESIMPLE, ACT_DIEFORWARD, ACT_DIEBACKWARD },
+		};
+
+		for (int i = 0; i < 3 && seq < 0; i++)
+			seq = LookupActivity(acts[anim][i]);
+
+		// (player models: sequences by name)
+		if (seq < 0)
+		{
+			static const char *names[LSAN_COUNT] = { "idle1", "walk", "run", "ref_shoot_knife", "gutshot", "death1" };
+			seq = LookupSequence(names[anim]);
+		}
+	}
+
+	if (seq < 0)
+	{
+		m_anim = anim;
+		return;
+	}
+
+	if (pev->sequence != seq || anim != m_anim || m_fSequenceFinished)
+	{
+		pev->sequence = seq;
+		pev->frame = 0;
+		ResetSequenceInfo();
+	}
+
+	m_anim = anim;
+}
+
+void CLsCreature::UpdateAnimation()
+{
+	if (m_mode == MODE_DEAD)
+		return;
+
+	float speed = m_improv->GetActualVelocity().Make2D().Length();
+
+	if (m_attackStart > 0.0f && gpGlobals->time < m_attackStart + Q_max(0.5f, 1.0f / GetType()->attackRate))
+	{
+		if (m_anim != LSAN_ATTACK)
+			SetAnim(LSAN_ATTACK);
+		pev->framerate = 1.0f;
+		return;
+	}
+
+	if (gpGlobals->time < m_flinchUntil)
+	{
+		if (m_anim != LSAN_FLINCH)
+			SetAnim(LSAN_FLINCH);
+		pev->framerate = 1.0f;
+		return;
+	}
+
+	int anim = (speed > m_walkSpeed * 1.25f && speed > 60.0f) ? LSAN_RUN : (speed > 15.0f) ? LSAN_WALK : LSAN_IDLE;
+	SetAnim(anim);
+
+	// (feet keep up with the ground: the sequence's own speed scaled to ours)
+	if (anim != LSAN_IDLE && m_flGroundSpeed > 1.0f)
+		pev->framerate = clamp(speed / m_flGroundSpeed, 0.4f, 2.5f);
+	else
+		pev->framerate = 1.0f;
+}
+
+void CLsCreature::SetTarget(CBaseEntity *pTarget)
+{
+	m_forcedTarget = pTarget;
+	if (pTarget && IsHostileTo(pTarget))
+	{
+		m_target = pTarget;
+		m_hEnemy = pTarget;
+		m_targetLastSeen = pTarget->pev->origin;
+		m_targetSeenAt = gpGlobals->time;
+		if (m_mode != MODE_ATTACK)
+			m_mode = MODE_CHASE;
+	}
+	else if (!pTarget)
+	{
+		m_target = nullptr;
+		m_hEnemy = nullptr;
+		if (m_mode == MODE_CHASE || m_mode == MODE_ATTACK)
+			GoHome();
+	}
+}
+
+void CLsCreature::SetBehaviour(int behaviour, const Vector *spot)
+{
+	if (behaviour < 0 || behaviour >= LSB_COUNT)
+		return;
+
+	const LsCreatureType *t = GetType();
+	if (t && !t->moves && behaviour != LSB_GUARD && behaviour != LSB_IDLE)
+		return;
+
+	if (spot)
+		m_home = *spot;
+
+	if (behaviour == LSB_FLEE)
+	{
+		StartFlee(spot ? *spot : pev->origin + Vector(RANDOM_FLOAT(-1, 1), RANDOM_FLOAT(-1, 1), 0) * 100.0f);
+		return;
+	}
+
+	m_behaviour = behaviour;
+	m_patrolCorner = nullptr;
+	if (m_mode == MODE_HOME || m_mode == MODE_SEARCH)
+		GoHome();
+}
+
+void CLsCreature::KillQuietly()
+{
+	if (IsAlive())
+		Killed(VARS(INDEXENT(0)), GIB_NEVER);
+}
+
+// What it sees: a hostile player inside its sight radius, in its view cone (all round when
+// it's already alert), not behind a wall
+bool CLsCreature::CanSee(CBaseEntity *pOther, bool alert) const
+{
+	Vector eyes = pev->origin + pev->view_ofs;
+	Vector body = pOther->pev->origin + pOther->pev->view_ofs * 0.5f;
+	Vector to = body - eyes;
+	float dist = to.Length();
+
+	float radius = m_detect * (alert ? 1.5f : 1.0f);
+	if (dist > radius)
+		return false;
+
+	const LsCreatureType *t = GetType();
+	if (!alert && t->detectFov < 359.0f && dist > 64.0f)
+	{
+		UTIL_MakeVectors(Vector(0, pev->angles.y, 0));
+		Vector2D dir = to.Make2D();
+		dir.NormalizeInPlace();
+		float cosHalf = BotCOS(t->detectFov * 0.5f);
+		if (DotProduct(dir, gpGlobals->v_forward.Make2D()) < cosHalf)
+			return false;
+	}
+
+	// (a smoke cloud between hides them as it does from the bots)
+	if (TheCSBots() && TheCSBots()->IsLineBlockedBySmoke(&eyes, &body))
+		return false;
+
+	TraceResult tr;
+	UTIL_TraceLine(eyes, pOther->pev->origin + pOther->pev->view_ofs, ignore_monsters, ignore_glass, ENT(pev), &tr);
+	if (tr.flFraction == 1.0f)
+		return true;
+
+	UTIL_TraceLine(eyes, body, ignore_monsters, ignore_glass, ENT(pev), &tr);
+	return tr.flFraction == 1.0f;
+}
+
+bool CLsCreature::WantsToFight(CBaseEntity *pOther, float dist) const
+{
+	if (pOther == m_forcedTarget || pOther == m_lastAttacker)
+		return m_aggression > 0.0f;
+
+	if (m_aggression >= 0.7f)
+		return true;
+
+	if (m_aggression <= 0.0f)
+		return false;
+
+	// guards and territorial animals: whoever comes near the spot
+	if (m_behaviour == LSB_GUARD)
+		return (pOther->pev->origin - m_home).Length() < m_guardRadius;
+
+	return dist < m_detect * m_aggression;
+}
+
+void CLsCreature::Notice(CBaseEntity *pOther, bool alert)
+{
+	m_target = pOther;
+	m_hEnemy = pOther;
+	m_targetLastSeen = pOther->pev->origin;
+	m_targetSeenAt = gpGlobals->time;
+	m_noticing = nullptr;
+
+	if (m_mode != MODE_ATTACK && m_mode != MODE_FLEE)
+		m_mode = MODE_CHASE;
+
+	if (!alert)
+		PlaySound(LSS_ALERT);
+}
+
+void CLsCreature::UpdateSenses()
+{
+	const LsCreatureType *t = GetType();
+	// (alert: after someone, searching, or hurt a moment ago - it looks all round then)
+	bool alert = m_target || gpGlobals->time < m_searchUntil || (m_painSoundAt > 0.0f && gpGlobals->time < m_painSoundAt + 5.0f);
+
+	// told whom to attack: it knows where they are
+	CBaseEntity *pForced = m_forcedTarget;
+	if (pForced && !IsHostileTo(pForced))
+	{
+		m_forcedTarget = nullptr;
+		pForced = nullptr;
+	}
+
+	if (pForced)
+	{
+		if (m_target != pForced)
+			Notice(pForced, true);
+
+		m_targetLastSeen = pForced->pev->origin;
+		m_targetSeenAt = gpGlobals->time;
+		return;
+	}
+
+	CBaseEntity *pCurrent = m_target;
+	if (pCurrent && !IsHostileTo(pCurrent))
+	{
+		m_target = nullptr;
+		m_hEnemy = nullptr;
+		pCurrent = nullptr;
+	}
+
+	// everyone it can see now, the pick by its targeting
+	CBaseEntity *pBest = nullptr;
+	float bestScore = 1e9f;
+	float bestDist = 0.0f;
+	bool currentSeen = false;
+
+	for (int i = 1; i <= gpGlobals->maxClients; i++)
+	{
+		CBasePlayer *pPlayer = UTIL_PlayerByIndex(i);
+		if (!pPlayer || !IsHostileTo(pPlayer))
+			continue;
+
+		if (!CanSee(pPlayer, alert || pPlayer == pCurrent))
+			continue;
+
+		float dist = (pPlayer->pev->origin - pev->origin).Length();
+		if (pPlayer == pCurrent)
+		{
+			currentSeen = true;
+			m_targetLastSeen = pPlayer->pev->origin;
+			m_targetSeenAt = gpGlobals->time;
+		}
+
+		float score = dist;
+		switch (t->targeting)
+		{
+		case LST_WEAKEST: score = pPlayer->pev->health * 10.0f + dist * 0.1f; break;
+		case LST_ATTACKER: if (pPlayer == m_lastAttacker) score = -1.0f; break;
+		case LST_RANDOM: score = RANDOM_FLOAT(0.0f, 1000.0f); break;
+		default: break;
+		}
+
+		if (score < bestScore)
+		{
+			bestScore = score;
+			pBest = pPlayer;
+			bestDist = dist;
+		}
+	}
+
+	// a hunter knows where everyone is (zombie hordes): the nearest, seen or not
+	if (!pBest && m_behaviour == LSB_CHASE && !pCurrent)
+	{
+		float closest = 1e9f;
+		for (int i = 1; i <= gpGlobals->maxClients; i++)
+		{
+			CBasePlayer *pPlayer = UTIL_PlayerByIndex(i);
+			if (!pPlayer || !IsHostileTo(pPlayer))
+				continue;
+
+			float dist = (pPlayer->pev->origin - pev->origin).Length();
+			if (dist < closest)
+			{
+				closest = dist;
+				pBest = pPlayer;
+			}
+		}
+
+		if (pBest)
+		{
+			Notice(pBest, true);
+			return;
+		}
+	}
+
+	if (pCurrent)
+	{
+		// (keeps whom it's after unless one much closer shows up)
+		if (pBest && pBest != pCurrent && (!currentSeen || bestDist < 0.5f * (pCurrent->pev->origin - pev->origin).Length())
+			&& WantsToFight(pBest, bestDist))
+			Notice(pBest, true);
+
+		if (m_behaviour == LSB_CHASE && pCurrent == m_target)
+		{
+			m_targetLastSeen = pCurrent->pev->origin;
+			m_targetSeenAt = gpGlobals->time;
+		}
+		return;
+	}
+
+	if (!pBest)
+	{
+		m_noticing = nullptr;
+		return;
+	}
+
+	// a passive one runs from whoever comes close
+	if (m_aggression <= 0.0f || m_behaviour == LSB_FLEE)
+	{
+		if (bestDist < m_detect * 0.5f && m_mode != MODE_FLEE && gpGlobals->time >= m_fleeCooldown && t->moves)
+			StartFlee(pBest->pev->origin);
+		return;
+	}
+
+	if (!WantsToFight(pBest, bestDist))
+		return;
+
+	// noticing takes a moment at range (instant up close or when alert)
+	if (alert || bestDist < m_detect * 0.35f)
+	{
+		Notice(pBest, alert);
+		return;
+	}
+
+	if (m_noticing != pBest)
+	{
+		m_noticing = pBest;
+		m_noticeStart = gpGlobals->time;
+		m_improv->FaceTo(pBest->pev->origin);
+		return;
+	}
+
+	float needed = 0.15f + 0.85f * (bestDist / Q_max(m_detect, 1.0f));
+	if (gpGlobals->time - m_noticeStart >= needed)
+		Notice(pBest, false);
+}
+
+void CLsCreature::OnGameEvent(GameEventType event, CBaseEntity *pEntity, CBaseEntity *pOther)
+{
+	const LsCreatureType *t = GetType();
+	if (!t || t->hearScale <= 0.0f || m_mode == MODE_DEAD || m_mode == MODE_ATTACK)
+		return;
+
+	// a bullet landing close: someone's shooting this way
+	if (event == EVENT_BULLET_IMPACT && pOther && pEntity && IsHostileTo(pEntity))
+	{
+		const Vector *impact = (const Vector *)pOther;
+		if ((*impact - pev->origin).IsLengthLessThan(150.0f) && !m_target)
+		{
+			if (m_aggression > 0.0f && m_behaviour != LSB_FLEE)
+			{
+				m_searchSpot = pEntity->pev->origin;
+				m_searchUntil = gpGlobals->time + 10.0f;
+				m_mode = MODE_SEARCH;
+			}
+			else if (t->moves && gpGlobals->time >= m_fleeCooldown)
+				StartFlee(pEntity->pev->origin);
+		}
+		return;
+	}
+
+	if (!pEntity || !pEntity->IsPlayer() || !IsHostileTo(pEntity))
+		return;
+
+	// (EVENT_WEAPON_FIRED needs the player's gun; the bots' table is the same one)
+	float range;
+	PriorityType priority;
+	bool isHostile;
+	if (!IsGameEventAudible(event, pEntity, pOther, &range, &priority, &isHostile))
+		return;
+
+	float dist = (pEntity->pev->origin - pev->origin).Length();
+	if (dist > range * t->hearScale)
+		return;
+
+	if (m_target && m_target != pEntity)
+		return;
+
+	if (m_target == pEntity)
+	{
+		// (heard whom it's after: fresher idea where they are, not a sighting)
+		if (m_mode == MODE_CHASE && gpGlobals->time - m_targetSeenAt > 1.0f)
+			m_targetLastSeen = pEntity->pev->origin;
+		return;
+	}
+
+	if (m_aggression <= 0.0f || m_behaviour == LSB_FLEE)
+	{
+		if (priority != PRIORITY_LOW && dist < 600.0f && t->moves && m_mode != MODE_FLEE && gpGlobals->time >= m_fleeCooldown)
+			StartFlee(pEntity->pev->origin);
+		return;
+	}
+
+	// go and look (a guard only near its spot)
+	if (!t->moves)
+	{
+		m_improv->FaceTo(pEntity->pev->origin);
+		return;
+	}
+
+	if (m_behaviour == LSB_GUARD && (pEntity->pev->origin - m_home).Length() > m_guardRadius * 1.5f)
+	{
+		m_improv->FaceTo(pEntity->pev->origin);
+		return;
+	}
+
+	if (m_mode == MODE_HOME || m_mode == MODE_SEARCH)
+	{
+		// (where it came from, roughly: further away, rougher)
+		float err = Q_min(dist * 0.15f, 250.0f);
+		m_searchSpot = pEntity->pev->origin + Vector(RANDOM_FLOAT(-err, err), RANDOM_FLOAT(-err, err), 0.0f);
+		m_searchUntil = gpGlobals->time + 12.0f;
+		m_mode = MODE_SEARCH;
+		m_nextRepath = 0.0f;
+	}
+}
+
+void CLsCreature::TraceAttack(entvars_t *pevAttacker, float flDamage, Vector vecDir, TraceResult *ptr, int bitsDamageType)
+{
+	if (pev->takedamage == DAMAGE_NO)
+		return;
+
+	// (the base does hit groups - head x3 - and the blood)
+	CBaseMonster::TraceAttack(pevAttacker, flDamage, vecDir, ptr, bitsDamageType);
+}
+
+BOOL CLsCreature::TakeDamage(entvars_t *pevInflictor, entvars_t *pevAttacker, float flDamage, int bitsDamageType)
+{
+	if (pev->takedamage == DAMAGE_NO || !IsAlive() || flDamage <= 0.0f)
+		return FALSE;
+
+	CBaseEntity *pAttacker = pevAttacker ? CBaseEntity::Instance(pevAttacker) : nullptr;
+
+	// creatures don't hurt each other (a brute's swing past a runner)
+	if (pAttacker && pAttacker != this && LsCreatureOf(pAttacker))
+		return FALSE;
+
+	pev->health -= flDamage;
+	m_bitsDamageType |= bitsDamageType;
+
+	if (pev->health <= 0.0f)
+	{
+		pev->health = 0.0f;
+		Killed(pevAttacker, GIB_NORMAL);
+		return TRUE;
+	}
+
+	const LsCreatureType *t = GetType();
+
+	if (gpGlobals->time > m_painSoundAt + 0.6f)
+	{
+		m_painSoundAt = gpGlobals->time;
+		PlaySound(LSS_PAIN);
+	}
+
+	// a big hit makes it flinch (not mid-swing)
+	if (flDamage > pev->max_health * 0.15f && !m_attackStart && t->moves)
+		m_flinchUntil = gpGlobals->time + 0.4f;
+
+	if (pAttacker && pAttacker->IsPlayer() && IsHostileTo(pAttacker))
+	{
+		m_lastAttacker = pAttacker;
+
+		// hurt badly: run (once in a while)
+		if (t->fleeHealth > 0.0f && pev->health < pev->max_health * t->fleeHealth && t->moves
+			&& m_mode != MODE_FLEE && gpGlobals->time >= m_fleeCooldown)
+		{
+			StartFlee(pAttacker->pev->origin);
+		}
+		// passive: run from whoever hurt it
+		else if (m_aggression <= 0.0f && t->moves)
+		{
+			if (m_mode != MODE_FLEE)
+				StartFlee(pAttacker->pev->origin);
+		}
+		// otherwise fight back: it knows where the shot came from
+		else if (m_mode != MODE_FLEE && (!m_target || (t->targeting == LST_ATTACKER && m_target != pAttacker)))
+		{
+			Notice(pAttacker, true);
+		}
+	}
+
+	return TRUE;
+}
+
+void CLsCreature::Killed(entvars_t *pevAttacker, int iGib)
+{
+	if (pev->deadflag != DEAD_NO)
+		return;
+
+	const LsCreatureType *t = GetType();
+
+	pev->deadflag = DEAD_DYING;
+	pev->takedamage = DAMAGE_NO;
+	pev->solid = SOLID_NOT;
+	pev->health = 0.0f;
+	pev->velocity.x = pev->velocity.y = 0.0f;
+	UTIL_SetOrigin(pev, pev->origin);	// (relinked as not solid: bullets and players pass the body)
+	m_mode = MODE_DEAD;
+	m_deadAt = gpGlobals->time;
+	m_attackStart = 0.0f;
+	m_target = nullptr;
+	m_hEnemy = nullptr;
+	m_forcedTarget = nullptr;
+	if (m_improv)
+		m_improv->Stop();
+
+	SetAnim(LSAN_DIE);
+	pev->framerate = 1.0f;
+	PlaySound(LSS_DIE);
+
+	// the killer's reward and the log line plugins can read (register_logevent)
+	CBaseEntity *pKiller = pevAttacker ? CBaseEntity::Instance(pevAttacker) : nullptr;
+	if (pKiller && pKiller->IsPlayer() && pKiller != this)
+	{
+		CBasePlayer *pPlayer = static_cast<CBasePlayer *>(pKiller);
+		if (t && t->frags)
+			pPlayer->AddPoints(t->frags, FALSE);
+		if (t && t->money)
+			pPlayer->AddAccount(t->money, RT_ENEMY_KILLED);
+
+		UTIL_LogPrintf("\"%s<%i><%s><%s>\" triggered \"ls_creature_killed\" (creature \"%s\") (entity \"%d\")\n",
+			STRING(pPlayer->pev->netname), GETPLAYERUSERID(pPlayer->edict()), GETPLAYERAUTHID(pPlayer->edict()),
+			GetTeam(pPlayer->m_iTeam), t ? t->name : "", entindex());
+	}
+	else
+	{
+		UTIL_LogPrintf("World triggered \"ls_creature_killed\" (creature \"%s\") (entity \"%d\")\n", t ? t->name : "", entindex());
+	}
+
+	LsUpdateAliveCount();
+	pev->nextthink = gpGlobals->time + 0.1f;
+}
+
+void CLsCreature::GoHome()
+{
+	m_mode = MODE_HOME;
+	m_target = nullptr;
+	m_hEnemy = nullptr;
+	m_attackStart = 0.0f;
+	m_waitUntil = gpGlobals->time + RANDOM_FLOAT(0.5f, 2.0f);
+	m_nextRepath = 0.0f;
+	m_improv->Stop();
+}
+
+void CLsCreature::StartFlee(const Vector &from)
+{
+	const LsCreatureType *t = GetType();
+	if (!t->moves)
+		return;
+
+	m_fleeFrom = from;
+	m_fleeUntil = gpGlobals->time + RANDOM_FLOAT(5.0f, 9.0f);
+	m_mode = MODE_FLEE;
+	m_attackStart = 0.0f;
+
+	Vector spot;
+	if (PickFleeSpot(&spot, from))
+	{
+		m_improv->Run();
+		m_improv->MoveTo(spot);
+	}
+}
+
+bool CLsCreature::PickWanderSpot(Vector *spot, float radius) const
+{
+	if (!TheNavAreaList.empty())
+	{
+		// (a random area near home: reservoir pick over the list, one pass)
+		CNavArea *pick = nullptr;
+		int seen = 0;
+		for (auto area : TheNavAreaList)
+		{
+			if ((*area->GetCenter() - m_home).Make2D().IsLengthGreaterThan(radius))
+				continue;
+
+			if (RANDOM_LONG(0, seen++) == 0)
+				pick = area;
+		}
+
+		if (pick)
+		{
+			*spot = *pick->GetCenter();
+			return true;
+		}
+	}
+
+	// no mesh: a random direction from home, as far as the walls let it
+	float yaw = RANDOM_FLOAT(0.0f, 360.0f);
+	Vector dir(BotCOS(yaw), BotSIN(yaw), 0.0f);
+	Vector start = m_home + Vector(0, 0, 36);
+	TraceResult tr;
+	UTIL_TraceLine(start, start + dir * RANDOM_FLOAT(radius * 0.3f, radius), ignore_monsters, ENT(pev), &tr);
+	*spot = tr.vecEndPos - dir * 24.0f - Vector(0, 0, 36);
+	return true;
+}
+
+bool CLsCreature::PickFleeSpot(Vector *spot, const Vector &from) const
+{
+	if (!TheNavAreaList.empty())
+	{
+		// the area that best puts distance between it and the threat, among some nearby
+		CNavArea *best = nullptr;
+		float bestScore = -1e9f;
+		int tries = 0;
+		for (auto area : TheNavAreaList)
+		{
+			float mine = (*area->GetCenter() - pev->origin).Make2D().Length();
+			if (mine < 250.0f || mine > 1400.0f)
+				continue;
+
+			// (only some of them, at random: a busy map has thousands)
+			if (RANDOM_LONG(0, 3) != 0)
+				continue;
+
+			float theirs = (*area->GetCenter() - from).Make2D().Length();
+			float score = theirs - mine * 0.5f + RANDOM_FLOAT(0.0f, 150.0f);
+			if (score > bestScore)
+			{
+				bestScore = score;
+				best = area;
+			}
+
+			if (++tries > 60)
+				break;
+		}
+
+		if (best)
+		{
+			*spot = *best->GetCenter();
+			return true;
+		}
+	}
+
+	Vector away = pev->origin - from;
+	away.z = 0;
+	if (away.IsZero())
+		away = Vector(1, 0, 0);
+	away.NormalizeInPlace();
+
+	Vector start = pev->origin + Vector(0, 0, 36);
+	TraceResult tr;
+	UTIL_TraceLine(start, start + away * 700.0f, ignore_monsters, ENT(pev), &tr);
+	*spot = tr.vecEndPos - away * 24.0f - Vector(0, 0, 36);
+	return true;
+}
+
+CBaseEntity *CLsCreature::NextPatrolCorner(CBaseEntity *pFrom) const
+{
+	if (!pFrom)
+		return m_patrolStart ? UTIL_FindEntityByTargetname(nullptr, STRING(m_patrolStart)) : nullptr;
+
+	if (!pFrom->pev->target)
+		return nullptr;
+
+	return UTIL_FindEntityByTargetname(nullptr, STRING(pFrom->pev->target));
+}
+
+void CLsCreature::OnMoveToSuccess(const Vector &goal)
+{
+	switch (m_mode)
+	{
+	case MODE_HOME:
+		if (m_behaviour == LSB_PATROL && m_patrolCorner)
+		{
+			CBaseEntity *pCorner = m_patrolCorner;
+			float wait = 0.0f;
+			if (FClassnameIs(pCorner->pev, "path_corner"))
+				wait = static_cast<CPathCorner *>(pCorner)->GetDelay();
+
+			m_waitUntil = gpGlobals->time + Q_max(wait, 0.5f);
+			m_patrolCorner = NextPatrolCorner(pCorner);
+		}
+		else
+			m_waitUntil = gpGlobals->time + RANDOM_FLOAT(2.0f, 6.0f);
+		break;
+
+	case MODE_SEARCH:
+		// (got there: a look around, then home)
+		m_waitUntil = gpGlobals->time + RANDOM_FLOAT(2.0f, 4.0f);
+		m_searchUntil = Q_min(m_searchUntil, gpGlobals->time + 4.0f);
+		break;
+
+	case MODE_FLEE:
+		m_fleeUntil = Q_min(m_fleeUntil, gpGlobals->time + RANDOM_FLOAT(1.0f, 3.0f));
+		break;
+
+	default:
+		break;
+	}
+}
+
+void CLsCreature::OnMoveToFailure(const Vector &goal, int reason)
+{
+	switch (m_mode)
+	{
+	case MODE_HOME:
+		if (m_behaviour == LSB_PATROL && m_patrolCorner)
+			m_patrolCorner = NextPatrolCorner(m_patrolCorner);
+		m_waitUntil = gpGlobals->time + RANDOM_FLOAT(0.5f, 1.5f);
+		break;
+
+	case MODE_SEARCH:
+		m_searchUntil = gpGlobals->time;
+		break;
+
+	case MODE_FLEE:
+	{
+		Vector spot;
+		if (PickFleeSpot(&spot, m_fleeFrom))
+			m_improv->MoveTo(spot);
+		break;
+	}
+
+	default:
+		// chase: try again shortly (the follower already wiggled)
+		m_nextRepath = gpGlobals->time + 0.3f;
+		break;
+	}
+}
+
+void CLsCreature::UpdateHome()
+{
+	const LsCreatureType *t = GetType();
+	float now = gpGlobals->time;
+
+	if (!t->moves)
+	{
+		// a turret sweeps slowly
+		if (!m_improv->HasFaceTo() && now >= m_waitUntil)
+		{
+			float yaw = m_homeAngles.y + RANDOM_FLOAT(-90.0f, 90.0f);
+			m_improv->FaceTo(pev->origin + Vector(BotCOS(yaw), BotSIN(yaw), 0) * 100.0f);
+			m_waitUntil = now + RANDOM_FLOAT(2.0f, 4.0f);
+		}
+		return;
+	}
+
+	switch (m_behaviour)
+	{
+	case LSB_IDLE:
+	case LSB_FLEE:
+	case LSB_CHASE:		// (a hunter with nobody left to hunt)
+		if (m_improv->HasGoal())
+			m_improv->Stop();
+		break;
+
+	case LSB_GUARD:
+		if ((pev->origin - m_home).Make2D().IsLengthGreaterThan(40.0f))
+		{
+			if (!m_improv->HasGoal() && now >= m_waitUntil)
+			{
+				m_improv->Walk();
+				m_improv->MoveTo(m_home);
+			}
+		}
+		else if (m_improv->HasGoal())
+		{
+			m_improv->Stop();
+			m_improv->FaceTo(pev->origin + Vector(BotCOS(m_homeAngles.y), BotSIN(m_homeAngles.y), 0) * 100.0f);
+		}
+		break;
+
+	case LSB_PATROL:
+		if (!m_patrolCorner && m_patrolStart)
+			m_patrolCorner = NextPatrolCorner(nullptr);
+
+		if (m_patrolCorner)
+		{
+			if (!m_improv->HasGoal() && now >= m_waitUntil)
+			{
+				CBaseEntity *pCorner = m_patrolCorner;
+				m_improv->Walk();
+				m_improv->MoveTo(pCorner->pev->origin);
+			}
+			break;
+		}
+		// (no path_corner chain: walk the nav areas around home, which is a wander)
+
+	case LSB_WANDER:
+	default:
+		if (!m_improv->HasGoal() && now >= m_waitUntil)
+		{
+			Vector spot;
+			if (PickWanderSpot(&spot, m_guardRadius))
+			{
+				m_improv->Walk();
+				m_improv->MoveTo(spot);
+			}
+			m_waitUntil = now + RANDOM_FLOAT(8.0f, 14.0f);		// (if it never arrives)
+		}
+		break;
+	}
+
+	if (now >= m_nextIdleSound)
+	{
+		m_nextIdleSound = now + RANDOM_FLOAT(6.0f, 15.0f);
+		PlaySound(LSS_IDLE, 0.8f);
+	}
+}
+
+void CLsCreature::UpdateChase()
+{
+	const LsCreatureType *t = GetType();
+	CBaseEntity *pTarget = m_target;
+	float now = gpGlobals->time;
+
+	if (!pTarget || !IsHostileTo(pTarget))
+	{
+		m_target = nullptr;
+		m_hEnemy = nullptr;
+
+		// lost them: look where they were last
+		if (t->moves && now - m_targetSeenAt < 10.0f)
+		{
+			m_searchSpot = m_targetLastSeen;
+			m_searchUntil = now + 10.0f;
+			m_mode = MODE_SEARCH;
+		}
+		else
+			GoHome();
+		return;
+	}
+
+	float sinceSeen = now - m_targetSeenAt;
+
+	// out of sight too long: go look where they were
+	if (sinceSeen > 6.0f && m_behaviour != LSB_CHASE && m_forcedTarget != pTarget)
+	{
+		m_target = nullptr;
+		m_hEnemy = nullptr;
+		m_searchSpot = m_targetLastSeen;
+		m_searchUntil = now + 10.0f;
+		m_mode = t->moves ? MODE_SEARCH : MODE_HOME;
+		return;
+	}
+
+	// a guard doesn't follow far from its spot
+	if (m_behaviour == LSB_GUARD && m_forcedTarget != pTarget && (m_targetLastSeen - m_home).Length() > m_guardRadius * 1.6f)
+	{
+		GoHome();
+		return;
+	}
+
+	float dist = Dist2D(pTarget);
+	float dz = Q_fabs(pTarget->pev->origin.z - pev->origin.z);
+	bool seenNow = sinceSeen < 0.4f;
+
+	if (t->attack == LSA_MELEE && dist <= t->attackRange && dz < 56.0f && seenNow)
+	{
+		m_mode = MODE_ATTACK;
+		return;
+	}
+
+	if (t->attack == LSA_RANGED && dist <= t->attackRange && seenNow)
+	{
+		m_mode = MODE_ATTACK;
+		return;
+	}
+
+	if (!t->moves)
+	{
+		m_improv->FaceTo(m_targetLastSeen);
+		return;
+	}
+
+	m_improv->Run();
+	m_improv->LookAt(m_targetLastSeen);
+	if (now >= m_nextRepath || (m_targetLastSeen - m_lastMoveTo).IsLengthGreaterThan(96.0f))
+	{
+		m_nextRepath = now + RANDOM_FLOAT(0.4f, 0.7f);
+		m_lastMoveTo = m_targetLastSeen;
+		m_improv->MoveTo(m_targetLastSeen);
+	}
+}
+
+void CLsCreature::StartAttack()
+{
+	m_attackStart = gpGlobals->time;
+	m_attackLanded = false;
+	SetAnim(LSAN_ATTACK);
+	PlaySound(LSS_ATTACK);
+}
+
+void CLsCreature::LandAttack()
+{
+	const LsCreatureType *t = GetType();
+	CBaseEntity *pTarget = m_target;
+	m_attackLanded = true;
+
+	if (!pTarget || !IsHostileTo(pTarget))
+		return;
+
+	Vector eyes = pev->origin + pev->view_ofs;
+	Vector body = pTarget->pev->origin + pTarget->pev->view_ofs * 0.6f;
+
+	if (t->attack == LSA_MELEE)
+	{
+		// (still in reach and in front: a step back in time dodges it)
+		float dist = Dist2D(pTarget);
+		TraceResult tr;
+		UTIL_TraceLine(eyes, body, ignore_monsters, ENT(pev), &tr);
+		if (dist <= t->attackRange * 1.25f && Q_fabs(pTarget->pev->origin.z - pev->origin.z) < 64.0f && tr.flFraction == 1.0f)
+		{
+			pTarget->TakeDamage(pev, pev, m_damage, DMG_SLASH);
+			pTarget->pev->punchangle.x = RANDOM_FLOAT(-6.0f, 6.0f);
+			pTarget->pev->punchangle.z = RANDOM_FLOAT(-6.0f, 6.0f);
+			PlaySound(LSS_HIT);
+		}
+		else
+			PlaySound(LSS_MISS);
+		return;
+	}
+
+	if (t->attack == LSA_RANGED)
+	{
+		// a shot with spread: the trace hits whatever is in the way (another player too)
+		Vector dir = body - eyes;
+		dir.NormalizeInPlace();
+		Vector angles = UTIL_VecToAngles(dir);
+		angles.x = -angles.x;
+		angles.x += RANDOM_FLOAT(-t->spread, t->spread);
+		angles.y += RANDOM_FLOAT(-t->spread, t->spread);
+		UTIL_MakeVectors(angles);
+		dir = gpGlobals->v_forward;
+
+		TraceResult tr;
+		UTIL_TraceLine(eyes, eyes + dir * (t->attackRange * 1.2f), dont_ignore_monsters, ENT(pev), &tr);
+
+		CBaseEntity *pHit = tr.pHit ? CBaseEntity::Instance(tr.pHit) : nullptr;
+		if (pHit && pHit->pev->takedamage != DAMAGE_NO && !LsCreatureOf(pHit))
+		{
+			ClearMultiDamage();
+			pHit->TraceAttack(pev, m_damage, dir, &tr, DMG_BULLET);
+			ApplyMultiDamage(pev, pev);
+			PlaySound(LSS_HIT);
+		}
+
+		MESSAGE_BEGIN(MSG_PAS, SVC_TEMPENTITY, eyes);
+			WRITE_BYTE(TE_TRACER);
+			WRITE_COORD(eyes.x);
+			WRITE_COORD(eyes.y);
+			WRITE_COORD(eyes.z);
+			WRITE_COORD(tr.vecEndPos.x);
+			WRITE_COORD(tr.vecEndPos.y);
+			WRITE_COORD(tr.vecEndPos.z);
+		MESSAGE_END();
+	}
+}
+
+void CLsCreature::UpdateAttack()
+{
+	const LsCreatureType *t = GetType();
+	CBaseEntity *pTarget = m_target;
+	float now = gpGlobals->time;
+
+	if (!pTarget || !IsHostileTo(pTarget))
+	{
+		m_attackStart = 0.0f;
+		m_mode = MODE_CHASE;
+		return;
+	}
+
+	m_improv->FaceTo(pTarget->pev->origin);
+
+	// melee keeps after them through the swing; ranged stands and shoots
+	if (t->attack == LSA_MELEE && t->moves)
+	{
+		m_improv->Run();
+		if (Dist2D(pTarget) > 40.0f)
+			m_improv->MoveTo(pTarget->pev->origin);
+		else
+			m_improv->Stop();
+	}
+	else
+		m_improv->Stop();
+
+	if (m_attackStart <= 0.0f)
+	{
+		// (out of reach or out of sight before the next swing: chase again)
+		float dist = Dist2D(pTarget);
+		bool seenNow = now - m_targetSeenAt < 0.4f;
+		bool inReach = (t->attack == LSA_MELEE) ? (dist <= t->attackRange && Q_fabs(pTarget->pev->origin.z - pev->origin.z) < 56.0f)
+			: (dist <= t->attackRange);
+
+		if (!inReach || !seenNow)
+		{
+			m_mode = MODE_CHASE;
+			return;
+		}
+
+		if (now >= m_nextAttack)
+			StartAttack();
+		return;
+	}
+
+	if (!m_attackLanded && now >= m_attackStart + t->attackDelay)
+	{
+		LandAttack();
+		m_nextAttack = m_attackStart + 1.0f / t->attackRate;
+	}
+
+	if (m_attackLanded && now >= m_nextAttack - 0.05f)
+		m_attackStart = 0.0f;
+}
+
+void CLsCreature::UpdateSearch()
+{
+	float now = gpGlobals->time;
+
+	if (now >= m_searchUntil)
+	{
+		GoHome();
+		return;
+	}
+
+	if (!m_improv->HasGoal() && now >= m_waitUntil && (pev->origin - m_searchSpot).Make2D().IsLengthGreaterThan(48.0f))
+	{
+		m_improv->Run();
+		m_improv->MoveTo(m_searchSpot);
+		m_waitUntil = now + 1.0f;
+	}
+	else if (!m_improv->HasGoal() && !m_improv->HasFaceTo())
+	{
+		// (a look around)
+		float yaw = RANDOM_FLOAT(0.0f, 360.0f);
+		m_improv->FaceTo(pev->origin + Vector(BotCOS(yaw), BotSIN(yaw), 0) * 100.0f);
+	}
+}
+
+void CLsCreature::UpdateFlee()
+{
+	float now = gpGlobals->time;
+
+	if (now >= m_fleeUntil)
+	{
+		m_fleeCooldown = now + RANDOM_FLOAT(6.0f, 10.0f);
+
+		// (still being shot at by whoever hurt it, and it fights back: back at them)
+		CBaseEntity *pAttacker = m_lastAttacker;
+		if (pAttacker && IsHostileTo(pAttacker) && m_aggression > 0.0f && m_behaviour != LSB_FLEE)
+			Notice(pAttacker, true);
+		else
+			GoHome();
+		return;
+	}
+
+	m_improv->Run();
+	if (!m_improv->HasGoal())
+	{
+		Vector spot;
+		if (PickFleeSpot(&spot, m_fleeFrom))
+			m_improv->MoveTo(spot);
+	}
+}
+
+void CLsCreature::CreatureThink()
+{
+	const float upkeepRate = 1.0f / 30.0f;
+	float now = gpGlobals->time;
+
+	pev->nextthink = now + upkeepRate;
+
+	float interval = StudioFrameAdvance();
+	DispatchAnimEvents(interval);
+
+	const LsCreatureType *t = GetType();
+	if (!t || !m_improv)
+		return;
+
+	if (m_mode == MODE_DEAD)
+	{
+		// the death animation ends on its last frame and stays there
+		if (pev->deadflag == DEAD_DYING && (m_fSequenceFinished || now > m_deadAt + 3.0f))
+		{
+			pev->deadflag = DEAD_DEAD;
+			pev->framerate = 0.0f;
+			pev->frame = 255.0f;
+		}
+
+		float corpse = (m_respawn > 0.0f) ? Q_min(t->corpseTime, m_respawn) : t->corpseTime;
+		if (!(pev->effects & EF_NODRAW) && now > m_deadAt + corpse)
+		{
+			// (a command's one is gone for good; a map's waits for its respawn or the next round)
+			if (m_respawn <= 0.0f && !m_fromMap && !m_persist)
+			{
+				UTIL_Remove(this);
+				return;
+			}
+
+			pev->effects |= EF_NODRAW;
+		}
+
+		if (m_respawn > 0.0f && now > m_deadAt + m_respawn)
+			ComeBack();
+
+		pev->nextthink = now + 0.1f;
+		return;
+	}
+
+	m_improv->OnUpkeep(upkeepRate);
+
+	// fell out of the world: gone
+	if (pev->origin.z < -8000.0f)
+	{
+		KillQuietly();
+		return;
+	}
+
+	if (now < m_nextFullThink)
+	{
+		UpdateAnimation();
+		return;
+	}
+
+	m_nextFullThink = now + 0.1f;
+
+	if (now >= m_nextSense)
+	{
+		m_nextSense = now + RANDOM_FLOAT(0.2f, 0.3f);
+		UpdateSenses();
+	}
+
+	switch (m_mode)
+	{
+	case MODE_HOME: UpdateHome(); break;
+	case MODE_CHASE: UpdateChase(); break;
+	case MODE_ATTACK: UpdateAttack(); break;
+	case MODE_SEARCH: UpdateSearch(); break;
+	case MODE_FLEE: UpdateFlee(); break;
+	default: break;
+	}
+
+	UpdateAnimation();
+
+	if (ls_creature_debug.value > 0.0f)
+	{
+		static const char *modes[] = { "home", "chase", "attack", "search", "flee", "dead" };
+		CBaseEntity *pTarget = m_target;
+		UTIL_DrawBeamPoints(pev->origin, pev->origin + Vector(0, 0, 90), 2,
+			m_mode == MODE_ATTACK ? 255 : 0, m_mode == MODE_HOME ? 255 : 0, m_mode == MODE_SEARCH ? 255 : 0);
+		if (pTarget)
+			UTIL_DrawBeamPoints(pev->origin + Vector(0, 0, 60), pTarget->pev->origin, 2, 255, 0, 0);
+		if (ls_creature_debug.value > 2.0f)
+			CONSOLE_ECHO("%s#%d %s hp %.0f\n", t->name, entindex(), modes[m_mode], pev->health);
+	}
+}
+
+// ---------------------------------------------------------------------------------------------
+// The ls_creature server command
+
+static CBaseEntity *LsCreatureEntArg(const char *arg)
+{
+	int index = Q_atoi(arg);
+	if (index <= 0 || index >= gpGlobals->maxEntities)
+		return nullptr;
+
+	edict_t *pEdict = INDEXENT(index);
+	if (FNullEnt(pEdict) || pEdict->free)
+		return nullptr;
+
+	CBaseEntity *pEntity = CBaseEntity::Instance(pEdict);
+	return LsCreatureOf(pEntity) ? pEntity : nullptr;
+}
+
+// "all" / a type name / an entity index: each creature that matches
+template <typename Functor>
+static int LsForEachMatching(const char *arg, Functor func)
+{
+	int n = 0;
+	bool all = !Q_stricmp(arg, "all");
+	CBaseEntity *pOne = all ? nullptr : LsCreatureEntArg(arg);
+
+	for (int i = 0; i < LsCreatureCount(); i++)
+	{
+		ILsCreature *c = LsCreatureAt(i);
+		if (!c)
+			continue;
+
+		const LsCreatureType *t = c->Type();
+		if (all || c->Entity() == pOne || (!pOne && t && !Q_stricmp(t->name, arg)))
+		{
+			func(c);
+			n++;
+		}
+	}
+
+	return n;
+}
+
+void LsCreature_f()
+{
+	const char *cmd = CMD_ARGV(1);
+
+	if (!Q_stricmp(cmd, "spawn"))
+	{
+		// spawn <type> <x> <y> <z> [yaw] [key=value ...]
+		if (CMD_ARGC() < 6)
+		{
+			CONSOLE_ECHO("usage: ls_creature spawn <type> <x> <y> <z> [yaw] [key=value ...]\n");
+			return;
+		}
+
+		Vector origin(Q_atof(CMD_ARGV(3)), Q_atof(CMD_ARGV(4)), Q_atof(CMD_ARGV(5)));
+		int next = 6;
+		float yaw = RANDOM_FLOAT(0.0f, 360.0f);
+		if (CMD_ARGC() > 6 && !Q_strchr(CMD_ARGV(6), '='))
+		{
+			yaw = Q_atof(CMD_ARGV(6));
+			next = 7;
+		}
+
+		char keys[256] = "";
+		for (int i = next; i < CMD_ARGC(); i++)
+		{
+			Q_strlcat(keys, CMD_ARGV(i));
+			Q_strlcat(keys, " ");
+		}
+
+		CBaseEntity *pEntity = LsCreatureSpawn(CMD_ARGV(2), origin, yaw, keys);
+		if (pEntity)
+			CONSOLE_ECHO("ls_creature: %s spawned (entity %d)\n", CMD_ARGV(2), pEntity->entindex());
+		return;
+	}
+
+	if (!Q_stricmp(cmd, "kill"))
+	{
+		int n = LsForEachMatching(CMD_ARGV(2), [](ILsCreature *c) { c->Kill(); });
+		CONSOLE_ECHO("ls_creature: %d killed\n", n);
+		return;
+	}
+
+	if (!Q_stricmp(cmd, "remove"))
+	{
+		CBaseEntity *gone[LS_CREATURE_MAX_LIST];
+		int count = 0;
+		LsForEachMatching(CMD_ARGV(2), [&](ILsCreature *c) { if (count < LS_CREATURE_MAX_LIST) gone[count++] = c->Entity(); });
+		for (int i = 0; i < count; i++)
+		{
+			LsCreatureUnregister(gone[i]);
+			UTIL_Remove(gone[i]);
+		}
+		CONSOLE_ECHO("ls_creature: %d removed\n", count);
+		return;
+	}
+
+	if (!Q_stricmp(cmd, "target"))
+	{
+		// target <ent|all|type> <entity index | 0>
+		int index = Q_atoi(CMD_ARGV(3));
+		CBaseEntity *pTarget = (index > 0 && index < gpGlobals->maxEntities && !FNullEnt(INDEXENT(index))) ? CBaseEntity::Instance(INDEXENT(index)) : nullptr;
+		LsForEachMatching(CMD_ARGV(2), [&](ILsCreature *c) { c->SetTarget(pTarget); });
+		return;
+	}
+
+	if (!Q_stricmp(cmd, "behave") || !Q_stricmp(cmd, "behaviour") || !Q_stricmp(cmd, "behavior"))
+	{
+		// behave <ent|all|type> <idle|wander|patrol|guard|chase|flee> [x y z]
+		int behaviour = LsNameIndex(CMD_ARGV(3), s_behaviourNames, LSB_COUNT, -1);
+		if (behaviour < 0)
+		{
+			CONSOLE_ECHO("usage: ls_creature behave <entity|all|type> <idle|wander|patrol|guard|chase|flee> [x y z]\n");
+			return;
+		}
+
+		bool hasSpot = CMD_ARGC() >= 7;
+		Vector spot(Q_atof(CMD_ARGV(4)), Q_atof(CMD_ARGV(5)), Q_atof(CMD_ARGV(6)));
+		LsForEachMatching(CMD_ARGV(2), [&](ILsCreature *c) { c->SetBehaviour(behaviour, hasSpot ? &spot : nullptr); });
+		return;
+	}
+
+	if (!Q_stricmp(cmd, "adopt"))
+	{
+		// adopt <classname> [type]: someone else's monsters (MonsterMod) join the list
+		const char *classname = CMD_ARGV(2);
+		if (!classname[0])
+		{
+			CONSOLE_ECHO("usage: ls_creature adopt <classname> [type]\n");
+			return;
+		}
+
+		int r = 0;
+		while (r < s_adoptCount && Q_stricmp(s_adopt[r].classname, classname))
+			r++;
+
+		if (r == s_adoptCount)
+		{
+			if (s_adoptCount >= int(ARRAYSIZE(s_adopt)))
+			{
+				CONSOLE_ECHO("ls_creature: too many adopted classnames\n");
+				return;
+			}
+			s_adoptCount++;
+		}
+
+		Q_strlcpy(s_adopt[r].classname, classname);
+		s_adopt[r].type = LsCreatureTypeIndex(CMD_ARGV(3));
+		LsAdoptScan();
+		return;
+	}
+
+	if (!Q_stricmp(cmd, "reload"))
+	{
+		LsLoadTypes();
+		CONSOLE_ECHO("ls_creature: %d types (%s); new models and sounds wait for the next map\n", s_typeCount, ls_creature_file.string);
+		return;
+	}
+
+	if (!Q_stricmp(cmd, "types"))
+	{
+		LsCreatureTypeIndex("");
+		for (int i = 0; i < s_typeCount; i++)
+		{
+			const LsCreatureType *t = &s_types[i];
+			CONSOLE_ECHO("%-12s %-10s hp %4.0f speed %3.0f %s %.0f dmg @ %.0f  %s  %s%s\n", t->name, s_categoryNames[t->category],
+				t->health, t->speed, s_attackNames[t->attack], t->damage, t->attackRange, s_behaviourNames[t->behaviour],
+				t->precached ? t->model : "(not precached)", t->precached && t->usingFallback ? " (stand-in)" : "");
+		}
+		return;
+	}
+
+	if (!Q_stricmp(cmd, "list") || !Q_stricmp(cmd, "status"))
+	{
+		int alive = 0;
+		for (int i = 0; i < LsCreatureCount(); i++)
+		{
+			ILsCreature *c = LsCreatureAt(i);
+			if (!c)
+				continue;
+
+			CBaseEntity *pEntity = c->Entity();
+			const LsCreatureType *t = c->Type();
+			CBaseEntity *pTarget = c->GetTarget();
+			if (c->IsAlive())
+				alive++;
+
+			CONSOLE_ECHO("#%-4d %-8s %-12s %s hp %4.0f  %s  at %.0f %.0f %.0f%s%s\n", pEntity->entindex(), c->Provider(),
+				t ? t->name : STRING(pEntity->pev->classname), c->IsAlive() ? "alive" : "dead ", c->Health(),
+				s_behaviourNames[clamp(c->GetBehaviour(), 0, LSB_COUNT - 1)], pEntity->pev->origin.x, pEntity->pev->origin.y, pEntity->pev->origin.z,
+				pTarget ? " -> " : "", pTarget ? STRING(pTarget->pev->netname) : "");
+		}
+
+		CONSOLE_ECHO("ls_creature: %d alive, %d listed; %d models + %d sounds precached\n", alive, s_listLive, s_precachedModels, s_precachedSounds);
+		return;
+	}
+
+	CONSOLE_ECHO("ls_creature spawn <type> <x> <y> <z> [yaw] [key=value ...]\n"
+		"ls_creature kill|remove <entity|all|type>\n"
+		"ls_creature target <entity|all|type> <entity index|0>\n"
+		"ls_creature behave <entity|all|type> <idle|wander|patrol|guard|chase|flee> [x y z]\n"
+		"ls_creature adopt <classname> [type]\n"
+		"ls_creature list | types | reload\n");
+}
