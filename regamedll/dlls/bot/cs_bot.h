@@ -1724,6 +1724,7 @@ public:
 	bool LsModePeace();								// a mode's peace (a loot-up), or the moment after it: no player enemies
 	bool LsModeGearing();							// just after the peace: gearing up before hunting
 	bool LsModeKitted();							// armor, a pistol and a spare magazine beside a main gun
+	int LsModeLayerWant();							// the layer it would rather loot on (-1 anywhere: a hot dropper)
 	bool LsModeLetsBe(CBasePlayer *pPlayer);		// ...someone in sight left be (not right on it, nor coming at it)
 	const Vector *LsModeSpot() const;				// the spot it holds for a station (teammates pick others)
 	int LsModeGoalNow() const { return m_lsModeGoalOn >= 0 ? m_lsModeGoal[m_lsModeGoalOn].kind : 0; }	// what it's on (trace)

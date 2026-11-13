@@ -39,7 +39,8 @@ bool g_lsModeTies = false;	// any friend / foe set (BotRelationship checks it, b
 
 // ---- what the mode has said (shared by every bot) -------------------------------------------
 
-const int LS_MODE_ZONES = 32;
+const int LS_MODE_ZONES = 32;		// avoids (bits in a path's "inside" mask: 32 at most)
+const int LS_MODE_ATTRACTS = 192;	// attracts: a Battle Royale map's every crate
 const int LS_MODE_CLASSES = 8;
 const int LS_MODE_TARGETS = 64;
 
@@ -47,6 +48,7 @@ const int LS_MODE_TARGETS = 64;
 struct LsModeZone
 {
 	bool used = false;
+	int layer = -1;						// attract: below / surface / high (LsModeLayer), -1 not worked out yet
 	char tag[24] = "";
 	Vector at;
 	float r = 0.0f;
@@ -75,13 +77,14 @@ struct LsModeClass
 	float threat;
 };
 
+static float s_lsNavMidZ = -99999.0f;	// the map's usual floor height (the nav's median), for layers
 static bool s_lsModeOn = false;			// anything at all for the bots to act on (goals, zones, classes)
 static bool s_lsNoBuy = false;			// nothing to buy (ls_mode nobuy 1): no time in the buy state
 static bool s_lsPeace = false;			// a peace phase (ls_mode phase loot): no player is an enemy
 static float s_lsPeaceEndAt = -100.0f;	// ...it ended then (each bot notices the fight is on a moment later)
 static char s_lsModeId[32] = "";
 static LsModeZone s_lsAvoid[LS_MODE_ZONES];		// avoids and blocked doors
-static LsModeZone s_lsAttract[LS_MODE_ZONES];
+static LsModeZone s_lsAttract[LS_MODE_ATTRACTS];
 static LsModeRing s_lsRing;
 static char s_lsRole[MAX_CLIENTS + 1][16];
 static unsigned int s_lsFriend[MAX_CLIENTS + 1];	// bit j-1 set: player i treats player j as a teammate
@@ -190,7 +193,8 @@ static bool LsModeAreaInZone(const LsModeZone &z, const CNavArea *area)
 static LsModeZone *LsModeFindTag(LsModeZone *list, const char *tag, bool make)
 {
 	LsModeZone *spare = nullptr;
-	for (int i = 0; i < LS_MODE_ZONES; i++)
+	int count = list == s_lsAttract ? LS_MODE_ATTRACTS : LS_MODE_ZONES;
+	for (int i = 0; i < count; i++)
 	{
 		if (list[i].used && FStrEq(list[i].tag, tag))
 			return &list[i];
@@ -201,7 +205,7 @@ static LsModeZone *LsModeFindTag(LsModeZone *list, const char *tag, bool make)
 		return nullptr;
 	if (!spare)
 	{
-		CONSOLE_ECHO("ls_mode: no room for '%s' (%d at most)\n", tag, LS_MODE_ZONES);
+		CONSOLE_ECHO("ls_mode: no room for '%s' (%d at most)\n", tag, count);
 		return nullptr;
 	}
 	*spare = LsModeZone();
@@ -256,10 +260,10 @@ static void LsModeClearBotGoals(int kind, int ent)
 static void LsModeReset(bool all, bool bots = true)
 {
 	for (int i = 0; i < LS_MODE_ZONES; i++)
-	{
 		s_lsAvoid[i] = LsModeZone();
+	for (int i = 0; i < LS_MODE_ATTRACTS; i++)
 		s_lsAttract[i] = LsModeZone();
-	}
+	s_lsNavMidZ = -99999.0f;
 	s_lsRing = LsModeRing();
 	s_lsPeace = false;
 	s_lsPeaceEndAt = -100.0f;
@@ -1025,34 +1029,123 @@ bool CCSBot::LsModeEscape()
 
 // Hunting with nothing better to do: now and then off to somewhere the mode says is worth it
 // (a weapon spawner, a crate, a supply drop), the greedier the likelier, the nearer the likelier
+// Which layer a spot is on: 1 below (under the map's usual floor, with a roof over it), 2 high
+// (well above it), 0 the surface. The usual floor is the nav's median height, worked out once a map
+static int LsModeLayer(const Vector &spot)
+{
+	if (s_lsNavMidZ < -99998.0f)
+	{
+		std::vector<float> zs;
+		zs.reserve(TheNavAreaList.size());
+		for (auto area : TheNavAreaList)
+			zs.push_back(area->GetCenter()->z);
+		if (zs.empty())
+			return 0;
+		std::nth_element(zs.begin(), zs.begin() + zs.size() / 2, zs.end());
+		s_lsNavMidZ = zs[zs.size() / 2];
+	}
+	if (spot.z > s_lsNavMidZ + 200.0f)
+		return 2;
+	if (spot.z < s_lsNavMidZ - 60.0f)
+	{
+		TraceResult tr;
+		UTIL_TraceLine(spot + Vector(0, 0, 32), spot + Vector(0, 0, 600), ignore_monsters, nullptr, &tr);
+		if (tr.flFraction < 1.0f && UTIL_PointContents(tr.vecEndPos + Vector(0, 0, 2)) != CONTENTS_SKY)
+			return 1;
+	}
+	return 0;
+}
+
+// The layer this bot would rather loot on: kitted out, high ground for the sightlines; short of
+// a main gun or armor, mostly below (the vaults' rifles); otherwise its own taste - and a few
+// bold ones go where the best loot (and the fights) are (-1: anywhere, the richest)
+int CCSBot::LsModeLayerWant()
+{
+	if (LsModeKitted())
+		return 2;
+	float taste = LsTrait(210);
+	if (LsAggro() > 0.65f && taste < 0.35f)
+		return -1;
+	if ((!m_rgpPlayerItems[PRIMARY_WEAPON_SLOT] || pev->armorvalue < 30.0f) && LsTrait(211) < 0.5f)
+		return 1;
+	return taste < 0.33f ? 2 : (taste < 0.66f ? 1 : 0);
+}
+
+// Off to somewhere a mode says is worth it (a weapon spawner, a crate, a supply drop). Hunting
+// with nothing better to do, now and then (the greedier, the likelier); gearing up or in a loot-up,
+// every time. Spread out as people do: its own layer counts double, a place with others at it or
+// heading to it counts for less, and loot outside the zone (or the next one, closing soon) isn't
+// worth the trip
 bool CCSBot::LsModeAttractTick(bool gearing)
 {
 	float now = gpGlobals->time;
 	if (!IsHunting() || now < m_lsModeAttractAt)
 		return false;
 	m_lsModeAttractAt = now + (gearing ? 1.5f : 3.0f);
+
+	// (where the others are and are headed)
+	Vector others[MAX_CLIENTS * 2];
+	int nOthers = 0;
+	for (int i = 1; i <= gpGlobals->maxClients && nOthers < MAX_CLIENTS * 2 - 1; i++)
+	{
+		CBasePlayer *pPlayer = UTIL_PlayerByIndex(i);
+		if (!UTIL_IsValidPlayer(pPlayer) || pPlayer == this || !pPlayer->IsAlive())
+			continue;
+		others[nOthers++] = pPlayer->pev->origin;
+		if (pPlayer->IsBot())
+		{
+			CCSBot *pBot = static_cast<CCSBot *>(pPlayer);
+			if (pBot->HasPath())
+				others[nOthers++] = pBot->GetPathEndpoint();
+		}
+	}
+	Vector ringAt = s_lsRing.at;
+	float ringR = s_lsRing.on ? s_lsRing.r : 0.0f;
+	if (s_lsRing.on && s_lsRing.next && s_lsRing.shrinkAt > 0.0f && s_lsRing.shrinkAt - now < 30.0f)
+	{
+		ringAt = s_lsRing.nextAt;
+		ringR = s_lsRing.nextR;
+	}
+	int want = gearing ? LsModeLayerWant() : 0;
+
 	const LsModeZone *pBest = nullptr;
 	float bestScore = 0.0f;
-	for (int i = 0; i < LS_MODE_ZONES; i++)
+	for (int i = 0; i < LS_MODE_ATTRACTS; i++)
 	{
-		const LsModeZone &z = s_lsAttract[i];
+		LsModeZone &z = s_lsAttract[i];
 		if (!LsModeLive(z) || (z.team == 1 && m_iTeam != TERRORIST) || (z.team == 2 && m_iTeam != CT))
 			continue;
 		float d = (z.at - pev->origin).Length();
-		if (d < Q_max(z.r, 100.0f))
+		if (d < Q_max(z.r, 100.0f) || (ringR > 0.0f && LsModeDist2D(z.at, ringAt) > ringR - 100.0f))
 			continue;
 		float score = z.value / (1.0f + d / 1500.0f);
+		if (gearing)
+		{
+			if (z.layer < 0)
+				z.layer = LsModeLayer(z.at);
+			if (want >= 0 && z.layer == want)
+				score *= 2.0f;
+			// (the bold ones go where it's richest; everyone else steers clear of the crowd)
+			if (want >= 0)
+			{
+				int near = 0;
+				for (int k = 0; k < nOthers; k++)
+					if ((others[k] - z.at).IsLengthLessThan(700.0f))
+						near++;
+				score /= 1.0f + float(near);
+			}
+		}
 		if (score > bestScore)
 		{
 			bestScore = score;
 			pBest = &z;
 		}
 	}
-	// (gearing up, the nearest worthwhile loot every time; otherwise a roll)
+	// (gearing up, the best worthwhile loot every time; otherwise a roll)
 	if (!pBest || (!gearing && RANDOM_FLOAT(0.0f, 1.0f) >= Q_min(1.0f, bestScore) * LsModeGreed()))
 		return false;
 	LsModeMove(LsModeOnMesh(pBest->at), false);
-	LsWhy("mode attract");
+	LsWhy(gearing ? "mode loot: its own pick" : "mode attract");
 	return true;
 }
 
@@ -1119,7 +1212,7 @@ void CCSBot::LsModeTick()
 	if (best < 0)
 	{
 		// (gearing up: off to loot rather than hunting)
-		if (gearing && !shooting && LsModeAttractTick(true))
+		if ((gearing || s_lsPeace) && !shooting && LsModeAttractTick(true))
 			return;
 		// (a creature mode's free players: roam like one)
 		if (!shooting && !(s_lsClassCount > 0 && LsFree() && !m_isEnemyVisible && !IsOnLadder() && LsModeRoamTick()))
@@ -1649,7 +1742,7 @@ static void LsModeStatus()
 			CONSOLE_ECHO("  %s %s at %.0f %.0f %.0f r %.0f cost %.1f, %.0fs left (0: no end)\n", z.box ? "block" : "avoid", z.tag, z.at.x, z.at.y, z.at.z, z.r, z.value,
 				z.until > 0.0f ? z.until - now : 0.0f);
 	}
-	for (int i = 0; i < LS_MODE_ZONES; i++)
+	for (int i = 0; i < LS_MODE_ATTRACTS; i++)
 	{
 		const LsModeZone &z = s_lsAttract[i];
 		if (LsModeLive(z))
