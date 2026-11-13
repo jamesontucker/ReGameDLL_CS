@@ -501,6 +501,7 @@ void LsSurfCheck_f()
 // enemy it keeps its own aim (it can shoot): the move is turned to match.
 
 cvar_t cv_bot_ls_surf = { "bot_ls_surf", "0", FCVAR_SERVER, 0.0f, nullptr };
+cvar_t cv_bot_ls_surf_land = { "bot_ls_surf_land", "1", FCVAR_SERVER, 0.0f, nullptr };	// landing-aware air control (0: off, for comparing)
 
 static double NowMs()
 {
@@ -1405,7 +1406,7 @@ static bool LsSurfSteer(CBasePlayer *bot, LsSurf::SurfBot &b, float msec, float 
 			}
 			// in the air: will it come down where the line does? If not, steer for that landing
 			// (only while the line's in the air there too)
-			if (b.plan.empty() && !ramp && !me.onground && b.path[b.idx].move >= 10 && s_replansLeft > 0 && now >= b.nextLand && s_driveMs < 1.5)
+			if (cv_bot_ls_surf_land.value > 0.0f && b.plan.empty() && !ramp && !me.onground && b.path[b.idx].move >= 10 && s_replansLeft > 0 && now >= b.nextLand && s_driveMs < 1.5)
 			{
 				b.nextLand = now + 0.3f;
 				int land = LandingAhead(b, b.idx, 12);
