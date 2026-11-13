@@ -1128,11 +1128,11 @@ bool CCSBot::LsModeAttractTick(bool gearing)
 			// (the bold ones go where it's richest; everyone else steers clear of the crowd)
 			if (want >= 0)
 			{
-				int near = 0;
+				int crowd = 0;
 				for (int k = 0; k < nOthers; k++)
 					if ((others[k] - z.at).IsLengthLessThan(700.0f))
-						near++;
-				score /= 1.0f + float(near);
+						crowd++;
+				score /= 1.0f + float(crowd);
 			}
 		}
 		if (score > bestScore)
