@@ -4069,6 +4069,8 @@ void CLsBarnacle::BarnacleThink()
 
 			m_victim = pPlayer;
 			EMIT_SOUND_DYN(edict(), CHAN_WEAPON, "barnacle/bcl_alert2.wav", VOL_NORM, ATTN_NORM, 0, PITCH_NORM);
+			if (ls_creature_debug.value > 0.0f)
+				CONSOLE_ECHO("ls_barnacle#%d caught %s\n", entindex(), STRING(pPlayer->pev->netname));
 			pev->sequence = LookupSequence("attack1");
 			ResetSequenceInfo();
 			break;
