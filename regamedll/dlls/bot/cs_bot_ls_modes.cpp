@@ -87,6 +87,7 @@ static LsModeZone s_lsAvoid[LS_MODE_ZONES];		// avoids and blocked doors
 static LsModeZone s_lsAttract[LS_MODE_ATTRACTS];
 static LsModeRing s_lsRing;
 static char s_lsRole[MAX_CLIENTS + 1][16];
+static int s_lsLayer[MAX_CLIENTS + 1];			// the mode's layer for each player (ls_mode layer): 0 surface, 1 below, 2 high, -1 none
 static unsigned int s_lsFriend[MAX_CLIENTS + 1];	// bit j-1 set: player i treats player j as a teammate
 static unsigned int s_lsFoe[MAX_CLIENTS + 1];		// ...as an enemy
 static LsModeClass s_lsClass[LS_MODE_CLASSES];
@@ -274,6 +275,8 @@ static void LsModeReset(bool all, bool bots = true)
 	{
 		s_lsModeId[0] = '\0';
 		Q_memset(s_lsRole, 0, sizeof(s_lsRole));
+		for (int i = 0; i <= MAX_CLIENTS; i++)
+			s_lsLayer[i] = -1;
 		Q_memset(s_lsFriend, 0, sizeof(s_lsFriend));
 		Q_memset(s_lsFoe, 0, sizeof(s_lsFoe));
 		g_lsModeTies = false;
@@ -465,6 +468,7 @@ void LsModePlayerGone(int index)
 	if (index < 1 || index > MAX_CLIENTS)
 		return;
 	s_lsRole[index][0] = '\0';
+	s_lsLayer[index] = -1;
 	s_lsFriend[index] = s_lsFoe[index] = 0;
 	unsigned int bit = 1u << (index - 1);
 	g_lsModeTies = false;
@@ -1063,6 +1067,10 @@ static int LsModeLayer(const Vector &spot)
 // bold ones go where the best loot (and the fights) are (-1: anywhere, the richest)
 int CCSBot::LsModeLayerWant()
 {
+	// (the mode's say first: Battle Royale spreads its players over the layers)
+	int told = entindex() >= 1 && entindex() <= MAX_CLIENTS ? s_lsLayer[entindex()] : -1;
+	if (told >= 0)
+		return told;
 	if (LsModeKitted())
 		return 2;
 	float taste = LsTrait(210);
@@ -1947,6 +1955,16 @@ void Bot_LsModeCommand()
 	if (FStrEq(what, "zone_clear"))
 	{
 		s_lsRing = LsModeRing();
+		return;
+	}
+	// layer <who> <below | surface | high | ->: where the mode wants the player to loot and stay
+	if (FStrEq(what, "layer"))
+	{
+		const char *name = CMD_ARGV(3);
+		int layer = FStrEq(name, "below") ? 1 : FStrEq(name, "high") ? 2 : FStrEq(name, "surface") ? 0 : -1;
+		int n = LsModeWho(CMD_ARGV(2), who, false);
+		for (int i = 0; i < n; i++)
+			s_lsLayer[who[i]] = layer;
 		return;
 	}
 	// role <who> <role | ->
