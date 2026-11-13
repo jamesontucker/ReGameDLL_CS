@@ -208,7 +208,7 @@ static bool GapJumpAt(const Vector &p, int dir, bool runup, Vector *land, Vector
 			float midZ;
 			Vector midN;
 			Vector mid(p.x + d.x * GenerationStepSize, p.y + d.y * GenerationStepSize, p.z + 32.0f);
-			if (GroundBelow(mid, 32.0f + 60.0f, &midZ, &midN))
+			if (GroundBelow(mid, 32.0f + 60.0f, &midZ, &midN) && !DeadlyAt(s_learnHurts, Vector(mid.x, mid.y, midZ)))
 			{
 				if (say)
 					CONSOLE_ECHO("  %.0f: floor in between (walkable)\n", L);
