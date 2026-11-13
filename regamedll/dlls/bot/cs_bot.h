@@ -1691,6 +1691,75 @@ private:
 	const char *m_lsWhy = "";						// why it's going where it's going (bot_ls_trace)
 	float m_lsWhyAt = 0.0f;
 	float m_lsTraceAt = 0.0f;
+
+public:
+	// Loner-Strike modes (cs_bot_ls_modes.cpp): what a game mode's components ask of the bot
+	// through ls_mode (hold here, capture that, loot this, stay in the zone, shoot those). All of
+	// it is off until a mode sends something: no goals, no zones, no change from the plain brain
+	struct LsModeGoal
+	{
+		int kind = 0;								// LS_GOAL_*, 0 the slot is free
+		Vector at;
+		float radius = 0.0f;						// what counts as there (capture, extract, hold area)
+		int ent = 0;								// the entity it's about (a crate, a platform), 0 none
+		EntityHandle<CBaseEntity> thing;			// ...kept by handle (gone: the goal ends)
+		Vector onMesh;								// the point on the nav mesh it walks to
+		int prio = 50;								// 0-100: 80 and up every bot does it, below 30 a hint
+		float until = 0.0f;							// 0 until cleared
+		bool care = true;							// this bot took it up (its persona decided, once)
+		int phase = 0;								// 0 on its way, 1 there (holding, using, riding)
+		float phaseUntil = 0.0f;					// ...that lasts till then
+		float nextTry = 0.0f;						// the next MoveTo, if it's been sent off its way
+		int tries = 0;								// times sent back on its way without getting there
+	};
+	enum { LS_MODE_GOALS = 4 };
+	void LsModeSetGoal(int kind, const Vector &at, float radius, int ent, int prio, float secs);
+	void LsModeClearGoals(int kind, int ent);		// kind 0 and ent 0: all of them
+	bool LsModeHasGoal() const;
+	void LsModeTick();								// each think after a person's order (cs_bot_update.cpp)
+	void LsModeInside(unsigned int *avoidMask) const;	// the avoid zones it's standing in (paths may leave them)
+	void LsModePostUpdate();						// after the state machine: a stand-still or step a goal asked for
+	const Vector *LsModeSpot() const;				// the spot it holds for a station (teammates pick others)
+	int LsModeGoalNow() const { return m_lsModeGoalOn >= 0 ? m_lsModeGoal[m_lsModeGoalOn].kind : 0; }	// what it's on (trace)
+	const LsModeGoal &LsModeGoalAt(int i) const { return m_lsModeGoal[i]; }
+private:
+	LsModeGoal m_lsModeGoal[LS_MODE_GOALS];
+	int m_lsModeGoalOn = -1;						// the slot it's acting on now (-1 none)
+	Vector m_lsModeMoveTo;							// where its last mode MoveTo was headed
+	float m_lsModeMoveAt = -1.0f;					// ...sent then
+	float m_lsModeEscapeAt = -1.0f;					// last sent out of a zone then
+	float m_lsModeEscapeState = -1.0f;				// ...the MoveTo that started (its state time)
+	float m_lsModeScanAt = 0.0f;					// next look for a mode enemy (a creature)
+	EntityHandle<CBaseEntity> m_lsModeTarget;		// the mode enemy it's shooting
+	float m_lsModeStillUntil = 0.0f;				// standing still till then (on a platform, waiting for it)
+	Vector m_lsModeStepTo;							// stepping onto a platform...
+	float m_lsModeStepUntil = 0.0f;					// ...till then
+	bool LsModeMove(const Vector &to, bool hurry);	// a MoveTo of its own (false: already on its way there)
+	bool LsModeHeadedTo(const Vector &to) const;
+	bool LsModeEscape();							// out of a no-go zone, into the safe zone (true: on its way)
+	void LsModeGoalTick(LsModeGoal &g);
+	bool LsModeAttractTick();						// hunting: off to somewhere a mode says is worth going (true: sent)
+	float m_lsModeAttractAt = 0.0f;					// next roll for that
+	bool LsModeSees(CBaseEntity *pEntity, bool testFOV, Vector *at, int *traces);	// a point on a mode enemy in sight
+	bool LsModeOursHiding() const;					// the hide it's in is a station's
+	bool LsModePickSpot(const Vector &center, float radius, Vector *out);	// a spot of its own in an area
+	void LsModeStationTick(LsModeGoal &g, float dist);	// hold, defend, capture, extract, meeting
+	bool LsModePushTick(const LsModeGoal &g);		// defending: out to a creature now and then
+	bool LsModeRoamTick();							// a creature mode's free players: roam like a person
+	bool LsModeHome(Vector *home);					// where its side is based (teammates' held spots)
+	float m_lsModeRoamAt = 0.0f;					// next roam decision
+	float m_lsModeHideState = -1.0f;				// the station's hide began then (its state time)
+	Vector m_lsModeSpot;							// ...at this spot
+	bool m_lsModeSpotOn = false;
+	float m_lsModeSawAt = -100.0f;					// a mode enemy last in sight then
+	float m_lsModeCoverAt = 0.0f;					// next "hurt: to cover" allowed
+	Vector m_lsModeBackFrom;						// backing off from a creature close up...
+	float m_lsModeBackUntil = 0.0f;					// ...till then
+	float m_lsModePushUntil = 0.0f;					// out pushing (or tagging along) till then: the station waits
+	float m_lsModePushAt = 0.0f;					// next push roll
+	bool LsModeShootTick();							// a mode enemy (a creature) in sight: shoot it (true: it is)
+	float LsModeGreed();							// 0-1: how much loot and pickups pull it
+	bool LsModeCares(int kind, int prio);			// a goal's taken up or not (once, by its persona)
 };
 
 // Loner-Strike: how far a person could see from one point toward another, 1 all the way: doors,
@@ -1713,6 +1782,10 @@ inline void LsForTeammates(CCSBot *me, F f)
 // Loner-Strike: the playstyles gm_people tells the bot brain (LsStyle)
 enum { LS_STYLE_RUSHER, LS_STYLE_ROAMER, LS_STYLE_LURKER, LS_STYLE_CAREFUL, LS_STYLE_CAMPER, LS_STYLE_AWPER,
 	LS_STYLE_KNIFER, LS_STYLE_NADER, LS_STYLE_NINJA, LS_STYLE_OBJECTIVE, LS_STYLE_WEIRDGUN };
+
+// Loner-Strike: the goals a mode can give a bot (ls_mode goal, cs_bot_ls_modes.cpp)
+enum { LS_GOAL_NONE, LS_GOAL_HOLD, LS_GOAL_DEFEND, LS_GOAL_CAPTURE, LS_GOAL_EXTRACT, LS_GOAL_LOOT, LS_GOAL_USE,
+	LS_GOAL_RIDE, LS_GOAL_INVESTIGATE, LS_GOAL_FLEE, LS_GOAL_MEETING, LS_GOAL_KINDS };
 
 // Loner-Strike (cs_bot_ls.cpp)
 // A bot's taste in routes for one path search (worked out once, used for every area)
@@ -1807,6 +1880,11 @@ void LsTSiteDeath(CBasePlayer *pVictim);	// a T down at it early: two and the te
 void Bot_LsRegisterCVars();
 void LsTraceMark();						// ls_mark [note]: a moment flagged in lstrace.csv
 void Bot_LsServerCommand();
+void Bot_LsModeCommand();				// ls_mode (cs_bot_ls_modes.cpp)
+void LsModeMapStart();					// a new map: every mode fact forgotten
+void LsModePlayerGone(int index);		// a player left: their role and ties forgotten (client.cpp)
+bool LsModeCosts();						// any avoid, block or zone set (path costs to add)
+float LsModeAreaCost(const CNavArea *area, unsigned int insideMask);	// 1 plain, more inside an avoid or outside the zone, -1 never
 
 // Inlines
 inline float CCSBot::GetCombatRange() const
@@ -2379,6 +2457,12 @@ public:
 		m_lsCrowdCount = 0;
 		if (m_lsTaste)
 			m_lsCrowdCount = pBot->LsCrowdAreas(m_lsCrowd, 32, &m_lsCrowdCost);
+		// Loner-Strike: a mode's avoid zones, blocked doors and safe zone, for the path the bot
+		// walks (none set: nothing changes); the zones it's already in it may walk out of
+		m_lsMode = lsTaste && LsModeCosts();
+		m_lsModeInside = 0;
+		if (m_lsMode)
+			pBot->LsModeInside(&m_lsModeInside);
 	}
 	float operator()(CNavArea *area, CNavArea *fromArea, const CNavLadder *ladder)
 	{
@@ -2432,6 +2516,16 @@ public:
 				// (Loner-Strike: somewhere it keeps getting stuck getting into: the long way)
 				if (m_bot->LsBadArea(area))
 					dist *= 20.0f;
+			}
+
+			// Loner-Strike: a mode's zones: costlier inside an avoid zone or outside the safe zone,
+			// never through a no-go one (a damage zone, a closed door)
+			if (m_lsMode)
+			{
+				float modeCost = LsModeAreaCost(area, m_lsModeInside);
+				if (modeCost < 0.0f)
+					return -1.0f;
+				dist *= modeCost;
 			}
 
 			// Loner-Strike: this bot's favourite (and not so favourite) parts of the map
@@ -2547,6 +2641,8 @@ private:
 	CNavArea *m_lsCrowd[32];
 	int m_lsCrowdCount;
 	float m_lsCrowdCost;
+	bool m_lsMode;
+	unsigned int m_lsModeInside;
 };
 
 class FollowTargetCollector

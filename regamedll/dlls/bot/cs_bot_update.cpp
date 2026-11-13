@@ -250,6 +250,7 @@ void CCSBot::Update()
 
 	LsTeamTick();	// Loner-Strike: team play
 	LsOrderTick();	// Loner-Strike: a person's order
+	LsModeTick();	// Loner-Strike: a game mode's goals and zones (nothing unless a mode set some)
 	LsFlankCheck();	// Loner-Strike: shot from the side
 	// (Loner-Strike: a retake against the clock, or the Ts' push into a site, is run, not walked)
 	if (LsRushing() && !IsAttacking())
@@ -996,6 +997,7 @@ void CCSBot::Update()
 
 	// Loner-Strike: whatever a plugin asked of it for a moment (ls_bot)
 	LsPuppetUpdate();
+	LsModePostUpdate();	// Loner-Strike: a mode goal's stand-still or step (nothing unless one asked)
 
 	// Loner-Strike: a prefire, looking back while falling back
 	LsMovesUpdate();

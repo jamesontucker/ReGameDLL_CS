@@ -69,6 +69,7 @@ cvar_t cv_ls_sites          = { "ls_sites", "", 0, 0.0f, nullptr };
 const char LS_PEEK[] = "Loner-Strike: peek";
 
 extern cvar_t cv_bot_ls_surf, cv_bot_ls_surf_land;	// bot/cs_bot_surf.cpp
+extern cvar_t cv_ls_mode_ver;	// bot/cs_bot_ls_modes.cpp
 
 void Bot_LsRegisterCVars()
 {
@@ -83,6 +84,7 @@ void Bot_LsRegisterCVars()
 	CVAR_REGISTER(&cv_bot_ls_match);
 	CVAR_REGISTER(&cv_bot_ls_trace);
 	CVAR_REGISTER(&cv_ls_sites);
+	CVAR_REGISTER(&cv_ls_mode_ver);	// (cs_bot_ls_modes.cpp)
 }
 
 // The bomb sites' letters as the nav names them (BombsiteA / BombsiteB), published once per
@@ -2623,7 +2625,7 @@ static FILE *LsTraceFile()
 		s_file = fopen("lstrace.csv", "a");
 		if (!s_file)
 			return nullptr;
-		fprintf(s_file, "#cols,time,id,team,state,task,enemy,leader,goal_x,goal_y,noise_x,noise_y,why,why_ago,speed,view_off,attacking,look,x,y,z,hp,weapon,crouched,pitch\n");
+		fprintf(s_file, "#cols,time,id,team,state,task,enemy,leader,goal_x,goal_y,noise_x,noise_y,why,why_ago,speed,view_off,attacking,look,x,y,z,hp,weapon,crouched,pitch,mode_goal\n");
 		fprintf(s_file, "#cols_why,time,id,team,x,y,z,why\n");
 		fprintf(s_file, "#cols_attack,time,id,team,enemy,since_first_saw,range\n");
 		fprintf(s_file, "#cols_seen,time,id,team,enemy,range\n");
@@ -2722,13 +2724,13 @@ void CCSBot::LsTrace()
 	float off = speed > 1.0f ? NormalizeAngle(pev->v_angle.y - UTIL_VecToYaw(pev->velocity)) : 0.0f;
 	const char *look = (m_lookAtSpotState != NOT_LOOKING_AT_SPOT && m_lookAtDesc) ? m_lookAtDesc : "-";
 	CBasePlayerItem *pItem = m_pActiveItem;
-	fprintf(s_file, "%.2f,%d,%d,%s,%d,%d,%d,%.0f,%.0f,%.0f,%.0f,%s,%.1f,%.0f,%.0f,%d,%s,%.0f,%.0f,%.0f,%.0f,%d,%d,%.0f\n",
+	fprintf(s_file, "%.2f,%d,%d,%s,%d,%d,%d,%.0f,%.0f,%.0f,%.0f,%s,%.1f,%.0f,%.0f,%d,%s,%.0f,%.0f,%.0f,%.0f,%d,%d,%.0f,%d\n",
 		gpGlobals->time, entindex(), m_iTeam, m_state ? m_state->GetName() : "-", int(GetTask()),
 		pEnemy ? pEnemy->entindex() : 0, pLeader ? pLeader->entindex() : 0,
 		goal.x, goal.y, noise ? noise->x : 0.0f, noise ? noise->y : 0.0f,
 		m_lsWhy, m_lsWhy[0] ? gpGlobals->time - m_lsWhyAt : 0.0f,
 		speed, off, IsAttacking() ? 1 : 0, look,
-		pev->origin.x, pev->origin.y, pev->origin.z, pev->health, pItem ? pItem->m_iId : 0, (pev->flags & FL_DUCKING) ? 1 : 0, pev->v_angle.x);
+		pev->origin.x, pev->origin.y, pev->origin.z, pev->health, pItem ? pItem->m_iId : 0, (pev->flags & FL_DUCKING) ? 1 : 0, pev->v_angle.x, LsModeGoalNow());
 	fflush(s_file);
 }
 
