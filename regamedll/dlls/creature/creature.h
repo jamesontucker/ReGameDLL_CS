@@ -162,7 +162,10 @@ struct LsCreatureType
 	// filled in at precache
 	bool precached;
 	bool usingFallback;		// the first model candidate wasn't there
+	bool disabled;			// the file dropped it on a reload: no new spawns (the slot stays for live ones)
 	string_t iszName;
+	string_t iszModel;		// engine strings: the engine keeps the pointers it's given at precache
+	string_t iszSound[LSS_COUNT][LS_CREATURE_MAX_SOUNDS];
 	int soundCount[LSS_COUNT];
 	char soundFile[LSS_COUNT][LS_CREATURE_MAX_SOUNDS][64];
 };
@@ -173,7 +176,8 @@ class ILsCreature
 public:
 	virtual ~ILsCreature() {}
 
-	virtual CBaseEntity *Entity() const = 0;
+	virtual CBaseEntity *Entity() const = 0;					// for identity (and our own: everything); null once gone
+	virtual entvars_t *Vars() const = 0;						// its entvars: the safe way to read position etc. for any provider
 	virtual const char *Provider() const = 0;					// "ls", "adopted"
 	virtual const LsCreatureType *Type() const = 0;				// may be null (an adopted one without a type)
 	virtual int Category() const = 0;
@@ -329,8 +333,9 @@ private:
 
 // Our own creature entity, "ls_creature". A map can place it (keys below), the server command
 // and plugins can make it (create_entity + keys + DispatchSpawn, or ls_creature spawn).
-// Keys: type, behaviour, target (first path_corner of a patrol), radius, respawn, health, speed,
-//       damage, model, hates, aggression, detect, persist (1 = survives round restarts)
+// Keys: type, behaviour, path (first path_corner of a patrol; "patrol" also works), radius,
+//       respawn, health, speed, damage, aggression, detect, hates, persist (1 = survives round
+//       restarts), plus the usual origin/angles
 class CLsCreature: public CBaseMonster
 {
 public:
@@ -461,6 +466,7 @@ private:
 // The registry and what the rest of the game DLL calls
 void LsCreatures_RegisterCVars();
 void LsCreaturesPrecache();										// CWorld::Precache: types in ls_creature_precache
+void LsCreaturesServerActivate();								// the map runs: spawning by command allowed
 void LsCreaturesServerDeactivate();
 void LsCreaturesOnEvent(GameEventType event, CBaseEntity *pEntity, CBaseEntity *pOther);	// from CBotManager::OnEvent
 void LsCreature_f();											// "ls_creature" server command

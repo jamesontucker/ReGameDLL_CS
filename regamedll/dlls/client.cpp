@@ -3884,6 +3884,9 @@ void EXT_FUNC ServerActivate(edict_t *pEdictList, int edictCount, int clientMax)
 		g_pHostages->ServerActivate();
 	}
 
+	// Loner-Strike: creatures can be spawned by command from now on
+	LsCreaturesServerActivate();
+
 #ifdef REGAMEDLL_ADD
 	CSGameRules()->ServerActivate();
 #endif

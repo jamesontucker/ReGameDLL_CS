@@ -61,6 +61,76 @@ static bool s_typesLoaded = false;
 static int s_precachedModels = 0;
 static int s_precachedSounds = 0;
 
+// A load builds the types here first, then merges them into s_types by name: a type keeps its
+// slot for the whole server run (live creatures hold its index), new names are appended, and a
+// name the file dropped is only disabled (no new spawns)
+static LsCreatureType s_build[LS_CREATURE_MAX_TYPES];
+static int s_buildCount = 0;
+
+static bool s_mapRunning = false;		// between ServerActivate and the map's end
+
+// Reentrant tokenizer (strtok can't nest: the type loader runs inside other loops): the next
+// token of *cursor split on any of seps, null terminated in place, or null at the end
+static char *LsNextToken(char **cursor, const char *seps)
+{
+	char *p = *cursor;
+	while (*p && Q_strchr(seps, *p))
+		p++;
+
+	if (!*p)
+	{
+		*cursor = p;
+		return nullptr;
+	}
+
+	char *start = p;
+	while (*p && !Q_strchr(seps, *p))
+		p++;
+
+	if (*p)
+		*p++ = '\0';
+
+	*cursor = p;
+	return start;
+}
+
+// A number from a file, a key or a command: anything not finite keeps the old value, the rest
+// is clamped to what makes sense
+static bool LsFinite(float v)
+{
+	return v == v && v < 1e30f && v > -1e30f;
+}
+
+static float LsNum(const char *value, float lo, float hi, float keep)
+{
+	float v = float(Q_atof(value));
+	if (!LsFinite(v))
+		return keep;
+
+	return clamp(v, lo, hi);
+}
+
+// A position from a command: finite and inside the world (+-8192 leaves room past the usual +-4096)
+static bool LsPosOk(const Vector &v)
+{
+	for (int i = 0; i < 3; i++)
+	{
+		if (!LsFinite(v[i]) || v[i] > 8192.0f || v[i] < -8192.0f)
+			return false;
+	}
+
+	return true;
+}
+
+// A yaw from anywhere: finite, folded into -360..360 (the turn code loops on huge angles)
+static float LsYaw(float yaw)
+{
+	if (!LsFinite(yaw))
+		return 0.0f;
+
+	return float(fmod(yaw, 360.0));
+}
+
 static const char *s_categoryNames[LSC_CATEGORY_COUNT] = { "infected", "alien", "wildlife", "mechanical", "boss", "special" };
 static const char *s_behaviourNames[LSB_COUNT] = { "idle", "wander", "patrol", "guard", "chase", "flee" };
 static const char *s_attackNames[] = { "none", "melee", "ranged" };
@@ -98,10 +168,27 @@ static int LsHatesFromString(const char *value)
 	return 0;
 }
 
-static Vector LsParseVector(const char *value)
+static Vector LsParseVector(const char *value, const Vector &keep)
 {
 	Vector v(0, 0, 0);
-	sscanf(value, "%f %f %f", &v.x, &v.y, &v.z);
+	if (sscanf(value, "%f %f %f", &v.x, &v.y, &v.z) != 3)
+		return keep;
+
+	for (int i = 0; i < 3; i++)
+	{
+		if (!LsFinite(v[i]) || v[i] > 8192.0f || v[i] < -8192.0f)
+			return keep;
+	}
+
+	return v;
+}
+
+static Vector LsParseColor(const char *value, const Vector &keep)
+{
+	Vector v = LsParseVector(value, keep);
+	for (int i = 0; i < 3; i++)
+		v[i] = clamp(v[i], 0.0f, 255.0f);
+
 	return v;
 }
 
@@ -151,18 +238,19 @@ static void LsTypeDefaults(LsCreatureType *t, const char *name)
 	Q_strlcpy(t->sound[LSS_DIE], "zombie/zo_pain2.wav | player/die1.wav player/die3.wav");
 }
 
+// (into the build list: see s_build)
 static LsCreatureType *LsAddType(const char *name)
 {
-	for (int i = 0; i < s_typeCount; i++)
+	for (int i = 0; i < s_buildCount; i++)
 	{
-		if (!Q_stricmp(s_types[i].name, name))
-			return &s_types[i];
+		if (!Q_stricmp(s_build[i].name, name))
+			return &s_build[i];
 	}
 
-	if (s_typeCount >= LS_CREATURE_MAX_TYPES)
+	if (s_buildCount >= LS_CREATURE_MAX_TYPES || !*name)
 		return nullptr;
 
-	LsCreatureType *t = &s_types[s_typeCount++];
+	LsCreatureType *t = &s_build[s_buildCount++];
 	LsTypeDefaults(t, name);
 	return t;
 }
@@ -344,55 +432,57 @@ static void LsSetTypeKey(LsCreatureType *t, const char *key, const char *value)
 	if (!Q_stricmp(key, "base"))
 	{
 		// inherit everything from a type above (keeps the name)
-		int b = LsCreatureTypeIndex(value);
-		if (b >= 0 && &s_types[b] != t)
+		for (int b = 0; b < s_buildCount; b++)
 		{
-			char name[32];
-			Q_strlcpy(name, t->name);
-			*t = s_types[b];
-			Q_strlcpy(t->name, name);
-			t->precached = false;
+			if (&s_build[b] != t && !Q_stricmp(s_build[b].name, value))
+			{
+				char name[32];
+				Q_strlcpy(name, t->name);
+				*t = s_build[b];
+				Q_strlcpy(t->name, name);
+				break;
+			}
 		}
 	}
 	else if (!Q_stricmp(key, "name") || !Q_stricmp(key, "display")) Q_strlcpy(t->display, value);
 	else if (!Q_stricmp(key, "category")) t->category = LsNameIndex(value, s_categoryNames, LSC_CATEGORY_COUNT, t->category);
-	else if (!Q_stricmp(key, "hp") || !Q_stricmp(key, "health")) t->health = Q_max(1.0f, float(Q_atof(value)));
-	else if (!Q_stricmp(key, "speed")) t->speed = Q_max(0.0f, float(Q_atof(value)));
-	else if (!Q_stricmp(key, "walk_speed")) t->walkSpeed = Q_max(0.0f, float(Q_atof(value)));
-	else if (!Q_stricmp(key, "aggression")) t->aggression = clamp(float(Q_atof(value)), 0.0f, 1.0f);
-	else if (!Q_stricmp(key, "detect_radius") || !Q_stricmp(key, "detect")) t->detectRadius = Q_max(0.0f, float(Q_atof(value)));
-	else if (!Q_stricmp(key, "detect_fov") || !Q_stricmp(key, "fov")) t->detectFov = clamp(float(Q_atof(value)), 10.0f, 360.0f);
-	else if (!Q_stricmp(key, "hearing")) t->hearScale = Q_max(0.0f, float(Q_atof(value)));
+	else if (!Q_stricmp(key, "hp") || !Q_stricmp(key, "health")) t->health = LsNum(value, 1.0f, 100000.0f, t->health);
+	else if (!Q_stricmp(key, "speed")) t->speed = LsNum(value, 0.0f, 2000.0f, t->speed);
+	else if (!Q_stricmp(key, "walk_speed")) t->walkSpeed = LsNum(value, 0.0f, 2000.0f, t->walkSpeed);
+	else if (!Q_stricmp(key, "aggression")) t->aggression = LsNum(value, 0.0f, 1.0f, t->aggression);
+	else if (!Q_stricmp(key, "detect_radius") || !Q_stricmp(key, "detect")) t->detectRadius = LsNum(value, 0.0f, 8192.0f, t->detectRadius);
+	else if (!Q_stricmp(key, "detect_fov") || !Q_stricmp(key, "fov")) t->detectFov = LsNum(value, 10.0f, 360.0f, t->detectFov);
+	else if (!Q_stricmp(key, "hearing")) t->hearScale = LsNum(value, 0.0f, 10.0f, t->hearScale);
 	else if (!Q_stricmp(key, "attack")) t->attack = LsNameIndex(value, s_attackNames, ARRAYSIZE(s_attackNames), t->attack);
-	else if (!Q_stricmp(key, "damage")) t->damage = Q_max(0.0f, float(Q_atof(value)));
-	else if (!Q_stricmp(key, "attack_range")) t->attackRange = Q_max(16.0f, float(Q_atof(value)));
-	else if (!Q_stricmp(key, "attack_rate")) t->attackRate = clamp(float(Q_atof(value)), 0.1f, 20.0f);
-	else if (!Q_stricmp(key, "attack_delay")) t->attackDelay = clamp(float(Q_atof(value)), 0.0f, 3.0f);
-	else if (!Q_stricmp(key, "spread")) t->spread = clamp(float(Q_atof(value)), 0.0f, 45.0f);
-	else if (!Q_stricmp(key, "flee_hp")) t->fleeHealth = clamp(float(Q_atof(value)), 0.0f, 1.0f);
+	else if (!Q_stricmp(key, "damage")) t->damage = LsNum(value, 0.0f, 10000.0f, t->damage);
+	else if (!Q_stricmp(key, "attack_range")) t->attackRange = LsNum(value, 16.0f, 8192.0f, t->attackRange);
+	else if (!Q_stricmp(key, "attack_rate")) t->attackRate = LsNum(value, 0.1f, 20.0f, t->attackRate);
+	else if (!Q_stricmp(key, "attack_delay")) t->attackDelay = LsNum(value, 0.0f, 3.0f, t->attackDelay);
+	else if (!Q_stricmp(key, "spread")) t->spread = LsNum(value, 0.0f, 45.0f, t->spread);
+	else if (!Q_stricmp(key, "flee_hp")) t->fleeHealth = LsNum(value, 0.0f, 1.0f, t->fleeHealth);
 	else if (!Q_stricmp(key, "behaviour") || !Q_stricmp(key, "behavior")) t->behaviour = LsNameIndex(value, s_behaviourNames, LSB_COUNT, t->behaviour);
-	else if (!Q_stricmp(key, "radius") || !Q_stricmp(key, "guard_radius")) t->guardRadius = Q_max(32.0f, float(Q_atof(value)));
+	else if (!Q_stricmp(key, "radius") || !Q_stricmp(key, "guard_radius")) t->guardRadius = LsNum(value, 32.0f, 8192.0f, t->guardRadius);
 	else if (!Q_stricmp(key, "target")) t->targeting = LsNameIndex(value, s_targetingNames, ARRAYSIZE(s_targetingNames), t->targeting);
 	else if (!Q_stricmp(key, "hates")) t->hates = LsHatesFromString(value);
-	else if (!Q_stricmp(key, "respawn")) t->respawn = Q_max(0.0f, float(Q_atof(value)));
-	else if (!Q_stricmp(key, "corpse_time")) t->corpseTime = clamp(float(Q_atof(value)), 0.0f, 120.0f);
+	else if (!Q_stricmp(key, "respawn")) t->respawn = LsNum(value, 0.0f, 3600.0f, t->respawn);
+	else if (!Q_stricmp(key, "corpse_time")) t->corpseTime = LsNum(value, 0.0f, 120.0f, t->corpseTime);
 	else if (!Q_stricmp(key, "moves")) t->moves = Q_atoi(value) != 0;
-	else if (!Q_stricmp(key, "frags")) t->frags = Q_atoi(value);
-	else if (!Q_stricmp(key, "money")) t->money = Q_atoi(value);
+	else if (!Q_stricmp(key, "frags")) t->frags = clamp(Q_atoi(value), -100, 100);
+	else if (!Q_stricmp(key, "money")) t->money = clamp(Q_atoi(value), -16000, 16000);
 	else if (!Q_stricmp(key, "model") || !Q_stricmp(key, "models")) Q_strlcpy(t->models, value);
-	else if (!Q_stricmp(key, "skin")) t->skin = Q_atoi(value);
-	else if (!Q_stricmp(key, "body")) t->body = Q_atoi(value);
-	else if (!Q_stricmp(key, "scale")) t->scale = clamp(float(Q_atof(value)), 0.1f, 4.0f);
-	else if (!Q_stricmp(key, "hull_min")) t->hullMin = LsParseVector(value);
-	else if (!Q_stricmp(key, "hull_max")) t->hullMax = LsParseVector(value);
+	else if (!Q_stricmp(key, "skin")) t->skin = clamp(Q_atoi(value), 0, 255);
+	else if (!Q_stricmp(key, "body")) t->body = clamp(Q_atoi(value), 0, 255);
+	else if (!Q_stricmp(key, "scale")) t->scale = LsNum(value, 0.1f, 4.0f, t->scale);
+	else if (!Q_stricmp(key, "hull_min")) t->hullMin = LsParseVector(value, t->hullMin);
+	else if (!Q_stricmp(key, "hull_max")) t->hullMax = LsParseVector(value, t->hullMax);
 	else if (!Q_stricmp(key, "glow"))
 	{
-		t->glowColor = LsParseVector(value);
+		t->glowColor = LsParseColor(value, t->glowColor);
 		t->glow = !t->glowColor.IsZero();
 	}
 	else if (!Q_stricmp(key, "fallback_glow"))
 	{
-		t->fallbackGlowColor = LsParseVector(value);
+		t->fallbackGlowColor = LsParseColor(value, t->fallbackGlowColor);
 		t->fallbackGlow = !t->fallbackGlowColor.IsZero();
 	}
 	else if (!Q_stricmp(key, "blood")) t->bloodColor = !Q_stricmp(value, "yellow") ? BLOOD_COLOR_YELLOW : !Q_stricmp(value, "none") ? DONT_BLEED : BLOOD_COLOR_RED;
@@ -410,8 +500,9 @@ static void LsSetTypeKey(LsCreatureType *t, const char *key, const char *value)
 		Q_strlcpy(buf, value);
 		const int animOrder[] = { LSAN_WALK, LSAN_RUN, LSAN_ATTACK, LSAN_DIE };
 		int animNext = -1;
-		char *tok = strtok(buf, " \t");
-		while (tok)
+		char *cursor = buf;
+		char *tok;
+		while ((tok = LsNextToken(&cursor, " \t")))
 		{
 			if (!Q_strnicmp(tok, "model=", 6))
 			{
@@ -428,7 +519,6 @@ static void LsSetTypeKey(LsCreatureType *t, const char *key, const char *value)
 			{
 				Q_strlcpy(t->anim[animOrder[animNext++]], tok);
 			}
-			tok = strtok(nullptr, " \t");
 		}
 	}
 	else
@@ -465,15 +555,31 @@ static char *LsTrim(char *s)
 	return s;
 }
 
+// A type's hull: finite, min below max on each axis, low enough to crouch (Crouch caps the top
+// at 30) - else the default human hull, with a word on the console
+static void LsCheckHull(LsCreatureType *t)
+{
+	bool ok = t->hullMin.z <= 0.0f && t->hullMin.z >= -64.0f && t->hullMax.z >= 30.0f;
+	for (int i = 0; i < 3 && ok; i++)
+	{
+		if (!LsFinite(t->hullMin[i]) || !LsFinite(t->hullMax[i]) || t->hullMin[i] >= t->hullMax[i]
+			|| t->hullMax[i] - t->hullMin[i] > 256.0f)
+			ok = false;
+	}
+
+	if (!ok)
+	{
+		CONSOLE_ECHO("ls_creature: type '%s' has a bad hull (%.0f %.0f %.0f / %.0f %.0f %.0f), using the default\n", t->name,
+			t->hullMin.x, t->hullMin.y, t->hullMin.z, t->hullMax.x, t->hullMax.y, t->hullMax.z);
+		t->hullMin = Vector(-16, -16, 0);
+		t->hullMax = Vector(16, 16, 72);
+	}
+}
+
 static void LsLoadTypes()
 {
-	// (precache state survives a reload: a type that was precached keeps its files)
-	LsCreatureType saved[LS_CREATURE_MAX_TYPES];
-	int savedCount = s_typeCount;
-	Q_memcpy(saved, s_types, sizeof(saved));
-
-	s_typeCount = 0;
 	s_typesLoaded = true;
+	s_buildCount = 0;
 	LsBuiltinTypes();
 
 	int length = 0;
@@ -530,25 +636,55 @@ static void LsLoadTypes()
 		FREE_FILE(data);
 	}
 
+	// merge by name: a slot never moves or goes away while the server runs
 	for (int i = 0; i < s_typeCount; i++)
-	{
-		LsCreatureType *t = &s_types[i];
-		if (t->walkSpeed > t->speed)
-			t->walkSpeed = t->speed;
+		s_types[i].disabled = true;
 
-		for (int j = 0; j < savedCount; j++)
+	for (int b = 0; b < s_buildCount; b++)
+	{
+		LsCreatureType *fresh = &s_build[b];
+		if (fresh->walkSpeed > fresh->speed)
+			fresh->walkSpeed = fresh->speed;
+		LsCheckHull(fresh);
+
+		int slot = 0;
+		while (slot < s_typeCount && Q_stricmp(s_types[slot].name, fresh->name))
+			slot++;
+
+		if (slot == s_typeCount)
 		{
-			if (saved[j].precached && !Q_stricmp(saved[j].name, t->name))
+			if (s_typeCount >= LS_CREATURE_MAX_TYPES)
 			{
-				// (only the files can't change after the map loaded)
-				t->precached = true;
-				t->usingFallback = saved[j].usingFallback;
-				t->iszName = saved[j].iszName;
-				Q_strlcpy(t->model, saved[j].model);
-				Q_memcpy(t->soundCount, saved[j].soundCount, sizeof(t->soundCount));
-				Q_memcpy(t->soundFile, saved[j].soundFile, sizeof(t->soundFile));
+				CONSOLE_ECHO("ls_creature: no room for new type '%s' until the server restarts\n", fresh->name);
+				continue;
 			}
+
+			s_types[s_typeCount++] = *fresh;
+			continue;
 		}
+
+		LsCreatureType *t = &s_types[slot];
+		if (!t->precached)
+		{
+			*t = *fresh;
+			continue;
+		}
+
+		// precached this map: the files (and the strings the engine holds) stay; the rest updates
+		LsCreatureType keep = *t;
+		*t = *fresh;
+		t->precached = true;
+		t->usingFallback = keep.usingFallback;
+		t->iszName = keep.iszName;
+		t->iszModel = keep.iszModel;
+		Q_strlcpy(t->models, keep.models);
+		Q_strlcpy(t->model, keep.model);
+		t->hullMin = keep.hullMin;
+		t->hullMax = keep.hullMax;
+		Q_memcpy(t->sound, keep.sound, sizeof(t->sound));
+		Q_memcpy(t->soundCount, keep.soundCount, sizeof(t->soundCount));
+		Q_memcpy(t->soundFile, keep.soundFile, sizeof(t->soundFile));
+		Q_memcpy(t->iszSound, keep.iszSound, sizeof(t->iszSound));
 	}
 }
 
@@ -562,7 +698,7 @@ int LsCreatureTypeIndex(const char *name)
 
 	for (int i = 0; i < s_typeCount; i++)
 	{
-		if (!Q_stricmp(s_types[i].name, name))
+		if (!s_types[i].disabled && !Q_stricmp(s_types[i].name, name))
 			return i;
 	}
 
@@ -596,7 +732,8 @@ bool LsCreaturePrecacheType(int index)
 	t->model[0] = '\0';
 	t->usingFallback = false;
 	int candidate = 0;
-	for (char *tok = strtok(buf, " \t"); tok; tok = strtok(nullptr, " \t"), candidate++)
+	char *cursor = buf;
+	for (char *tok; (tok = LsNextToken(&cursor, " \t")); candidate++)
 	{
 		if (g_pFileSystem->FileExists(tok))
 		{
@@ -612,7 +749,9 @@ bool LsCreaturePrecacheType(int index)
 		return false;
 	}
 
-	PRECACHE_MODEL(t->model);
+	// (the engine keeps the pointer it's given: an engine string, never our arrays a reload rewrites)
+	t->iszModel = ALLOC_STRING(t->model);
+	PRECACHE_MODEL(STRING(t->iszModel));
 	s_precachedModels++;
 
 	for (int s = 0; s < LSS_COUNT; s++)
@@ -620,7 +759,8 @@ bool LsCreaturePrecacheType(int index)
 		t->soundCount[s] = LsPickFiles(t->sound[s], "sound/", t->soundFile[s], LS_CREATURE_MAX_SOUNDS);
 		for (int i = 0; i < t->soundCount[s]; i++)
 		{
-			PRECACHE_SOUND(t->soundFile[s][i]);
+			t->iszSound[s][i] = ALLOC_STRING(t->soundFile[s][i]);
+			PRECACHE_SOUND(STRING(t->iszSound[s][i]));
 			s_precachedSounds++;
 		}
 	}
@@ -643,6 +783,7 @@ bool LsCreaturePrecacheType(int index)
 // The map loads: precache the types the mode asked for (ls_creature_precache), nothing otherwise
 void LsCreaturesPrecache()
 {
+	s_mapRunning = false;
 	s_precachedModels = 0;
 	s_precachedSounds = 0;
 
@@ -667,7 +808,8 @@ void LsCreaturesPrecache()
 	{
 		char buf[256];
 		Q_strlcpy(buf, want);
-		for (char *tok = strtok(buf, " ,\t"); tok; tok = strtok(nullptr, " ,\t"))
+		char *cursor = buf;
+		for (char *tok; (tok = LsNextToken(&cursor, " ,\t")); )
 		{
 			int index = LsCreatureTypeIndex(tok);
 			if (index < 0)
@@ -698,6 +840,11 @@ static LsAdoptRule s_adopt[8];
 static int s_adoptCount = 0;
 static float s_nextAdoptScan = 0.0f;
 static float s_nextAliveCount = 0.0f;
+
+void LsCreaturesServerActivate()
+{
+	s_mapRunning = true;
+}
 
 bool LsCreaturesExist()
 {
@@ -818,6 +965,7 @@ public:
 	LsNativeCreature(CLsCreature *pCreature) { m_handle = pCreature; }
 
 	virtual CBaseEntity *Entity() const { return const_cast<EHANDLE &>(m_handle); }
+	virtual entvars_t *Vars() const { CLsCreature *c = Get(); return c ? c->pev : nullptr; }
 	virtual const char *Provider() const { return "ls"; }
 	virtual const LsCreatureType *Type() const { CLsCreature *c = Get(); return c ? c->GetType() : nullptr; }
 	virtual int Category() const { const LsCreatureType *t = Type(); return t ? t->category : LSC_INFECTED; }
@@ -852,22 +1000,30 @@ private:
 };
 
 // Anyone else's monster (MonsterMod's monster_*), wrapped by classname: the list, the bots and
-// the events see it; its own code still runs it (target and behaviour are only hints it can't take)
+// the events see it; its own code still runs it (target and behaviour are hints it can't take).
+// Its private data isn't ours (another module's classes), so only the edict's entvars are read:
+// no ReGameDLL virtual is ever called on it, and kill/remove are refused. Entity() hands out the
+// pointer for identity and pev only.
 class LsAdoptedCreature: public ILsCreature
 {
 public:
-	LsAdoptedCreature(CBaseEntity *pEntity, int type) { m_handle = pEntity; m_type = type; }
+	LsAdoptedCreature(edict_t *pEdict, int type) { m_edict = pEdict; m_serial = pEdict->serialnumber; m_type = type; }
 
-	virtual CBaseEntity *Entity() const { return const_cast<EHANDLE &>(m_handle); }
+	virtual CBaseEntity *Entity() const
+	{
+		edict_t *pEdict = Edict();
+		return pEdict ? (CBaseEntity *)GET_PRIVATE(pEdict) : nullptr;
+	}
+	virtual entvars_t *Vars() const { edict_t *pEdict = Edict(); return pEdict ? &pEdict->v : nullptr; }
 	virtual const char *Provider() const { return "adopted"; }
 	virtual const LsCreatureType *Type() const { return LsCreatureTypeAt(m_type); }
 	virtual int Category() const { const LsCreatureType *t = Type(); return t ? t->category : LSC_ALIEN; }
 	virtual bool IsAlive() const
 	{
-		CBaseEntity *pEntity = Entity();
-		return pEntity && pEntity->pev->deadflag == DEAD_NO && pEntity->pev->health > 0.0f && pEntity->pev->takedamage != DAMAGE_NO;
+		edict_t *pEdict = Edict();
+		return pEdict && pEdict->v.deadflag == DEAD_NO && pEdict->v.health > 0.0f && pEdict->v.takedamage != DAMAGE_NO;
 	}
-	virtual float Health() const { CBaseEntity *pEntity = Entity(); return pEntity ? pEntity->pev->health : 0.0f; }
+	virtual float Health() const { edict_t *pEdict = Edict(); return pEdict ? pEdict->v.health : 0.0f; }
 	virtual void SetTarget(CBaseEntity *pTarget) {}
 	virtual CBaseEntity *GetTarget() const { return nullptr; }
 	virtual void SetBehaviour(int behaviour, const Vector *spot) {}
@@ -875,29 +1031,69 @@ public:
 	virtual float Threat() const { return clamp(0.4f + Health() / 600.0f, 0.4f, 1.0f); }
 	virtual bool IsHostileTo(CBaseEntity *pOther) const { const LsCreatureType *t = Type(); return IsAlive() && LsIsHostilePlayer(pOther, t ? t->hates : 0); }
 	virtual bool LastNoise(Vector *pos, float *when, float *range) const { return false; }
-	virtual void Kill()
+	virtual void Kill() {}		// (refused: see above; the command says why)
+
+	edict_t *Edict() const
 	{
-		CBaseEntity *pEntity = Entity();
-		if (pEntity && IsAlive())
-			pEntity->TakeDamage(VARS(INDEXENT(0)), VARS(INDEXENT(0)), pEntity->pev->health + 1000.0f, DMG_GENERIC);
+		return (m_edict && !m_edict->free && m_edict->serialnumber == m_serial) ? m_edict : nullptr;
 	}
 
 private:
-	EHANDLE m_handle;
+	edict_t *m_edict;
+	int m_serial;
 	int m_type;
 };
+
+static bool LsIsAdopted(ILsCreature *c)
+{
+	return !Q_strcmp(c->Provider(), "adopted");
+}
+
+static bool LsAdoptedHas(edict_t *pEdict)
+{
+	for (int i = 0; i < LsCreatureCount(); i++)
+	{
+		ILsCreature *c = LsCreatureAt(i);
+		if (c && LsIsAdopted(c) && static_cast<LsAdoptedCreature *>(c)->Edict() == pEdict)
+			return true;
+	}
+
+	return false;
+}
+
+// Classnames adopt refuses: players, the world, our own, items and brushes
+static bool LsAdoptDenied(const char *classname)
+{
+	static const char *exact[] = { "player", "worldspawn", "ls_creature", "hostage_entity", "monster_scientist", "grenade",
+		"weaponbox", "armoury_entity", "bodyque" };
+	for (size_t i = 0; i < ARRAYSIZE(exact); i++)
+	{
+		if (!Q_stricmp(classname, exact[i]))
+			return true;
+	}
+
+	static const char *prefixes[] = { "weapon_", "item_", "ammo_", "func_", "info_", "trigger_", "env_", "light", "path_", "game_", "multi" };
+	for (size_t i = 0; i < ARRAYSIZE(prefixes); i++)
+	{
+		if (!Q_strnicmp(classname, prefixes[i], Q_strlen(prefixes[i])))
+			return true;
+	}
+
+	return false;
+}
 
 static void LsAdoptScan()
 {
 	for (int r = 0; r < s_adoptCount; r++)
 	{
-		CBaseEntity *pEntity = nullptr;
-		while ((pEntity = UTIL_FindEntityByClassname(pEntity, s_adopt[r].classname)))
+		// (the engine's own search: another module's entities aren't in our classname hash)
+		edict_t *pEdict = nullptr;
+		while (!FNullEnt(pEdict = FIND_ENTITY_BY_CLASSNAME(pEdict, s_adopt[r].classname)))
 		{
-			if (pEntity->pev->deadflag != DEAD_NO || LsCreatureOf(pEntity))
+			if (pEdict->free || pEdict->v.deadflag != DEAD_NO || !GET_PRIVATE(pEdict) || LsAdoptedHas(pEdict))
 				continue;
 
-			LsCreatureRegister(new LsAdoptedCreature(pEntity, s_adopt[r].type));
+			LsCreatureRegister(new LsAdoptedCreature(pEdict, s_adopt[r].type));
 		}
 	}
 }
@@ -913,6 +1109,18 @@ public:
 		LsCreatureType *t = LsCreatureTypeAt(typeIndex);
 		if (!t)
 			return nullptr;
+
+		// (only into a running map: not while one loads or after it ended)
+		if (!s_mapRunning)
+		{
+			CONSOLE_ECHO("ls_creature: no map running\n");
+			return nullptr;
+		}
+
+		if (!LsPosOk(origin))
+			return nullptr;
+
+		yaw = LsYaw(yaw);
 
 		if (!t->precached && !LsCreaturePrecacheType(typeIndex))
 		{
@@ -969,7 +1177,8 @@ public:
 		{
 			char buf[256];
 			Q_strlcpy(buf, keys);
-			for (char *tok = strtok(buf, " \t"); tok; tok = strtok(nullptr, " \t"))
+			char *cursor = buf;
+			for (char *tok; (tok = LsNextToken(&cursor, " \t")); )
 			{
 				char *eq = Q_strchr(tok, '=');
 				if (!eq)
@@ -1011,6 +1220,8 @@ CBaseEntity *LsCreatureSpawn(const char *type, const Vector &origin, float yaw, 
 
 void LsCreaturesServerDeactivate()
 {
+	s_mapRunning = false;
+
 	for (int i = 0; i < s_listCount; i++)
 	{
 		delete s_list[i];
@@ -1061,9 +1272,19 @@ void LsCreaturesOnEvent(GameEventType event, CBaseEntity *pEntity, CBaseEntity *
 
 LINK_ENTITY_TO_CLASS(ls_creature, CLsCreature, CCSMonster)
 
+// Never null: a creature whose slot somehow isn't there gets neutral values (it can't be
+// spawned or set up with them - Setup wants a precached type - but nothing dereferences null)
 const LsCreatureType *CLsCreature::GetType() const
 {
-	return LsCreatureTypeAt(m_type);
+	const LsCreatureType *t = LsCreatureTypeAt(m_type);
+	if (t)
+		return t;
+
+	static LsCreatureType s_none;
+	if (!s_none.name[0])
+		LsTypeDefaults(&s_none, "none");
+
+	return &s_none;
 }
 
 void CLsCreature::KeyValue(KeyValueData *pkvd)
@@ -1082,19 +1303,19 @@ void CLsCreature::KeyValue(KeyValueData *pkvd)
 	else if (FStrEq(key, "path") || FStrEq(key, "patrol"))
 		m_patrolStart = ALLOC_STRING(value);
 	else if (FStrEq(key, "radius"))
-		m_guardRadius = Q_atof(value);
+		m_guardRadius = LsNum(value, 0.0f, 8192.0f, 0.0f);
 	else if (FStrEq(key, "respawn"))
-		m_respawn = Q_atof(value);
+		m_respawn = LsNum(value, 0.0f, 3600.0f, 0.0f);
 	else if (FStrEq(key, "health") || FStrEq(key, "hp"))
-		m_keyHealth = Q_atof(value);
+		m_keyHealth = LsNum(value, 0.0f, 100000.0f, 0.0f);
 	else if (FStrEq(key, "speed"))
-		m_keySpeed = Q_atof(value);
+		m_keySpeed = LsNum(value, 0.0f, 2000.0f, 0.0f);
 	else if (FStrEq(key, "damage"))
-		m_keyDamage = Q_atof(value);
+		m_keyDamage = LsNum(value, 0.0f, 10000.0f, 0.0f);
 	else if (FStrEq(key, "aggression"))
-		m_keyAggression = Q_atof(value) + 0.001f;		// (0 stays "set": passive)
+		m_keyAggression = LsNum(value, 0.0f, 1.0f, -1.0f) + 0.001f;		// (0 stays "set": passive)
 	else if (FStrEq(key, "detect"))
-		m_keyDetect = Q_atof(value);
+		m_keyDetect = LsNum(value, 0.0f, 8192.0f, 0.0f);
 	else if (FStrEq(key, "hates"))
 		m_keyHates = LsHatesFromString(value) + 1;
 	else if (FStrEq(key, "persist"))
@@ -1122,7 +1343,7 @@ void CLsCreature::Spawn()
 		// first spawn: a map entity is spawned before ServerActivate; one made by a command after
 		m_fromMap = !g_bServerActive;
 		m_spawnOrigin = pev->origin;
-		m_spawnAngles = pev->angles;
+		m_spawnAngles = Vector(0, LsYaw(pev->angles.y), 0);
 	}
 
 	if (m_type < 0 || !LsCreatureTypeAt(m_type))
@@ -1156,6 +1377,12 @@ void CLsCreature::Spawn()
 void CLsCreature::Setup()
 {
 	const LsCreatureType *t = GetType();
+	if (!t || !t->precached)
+	{
+		// (can't happen with stable type slots; never run on a type that isn't there)
+		pev->flags |= FL_KILLME;
+		return;
+	}
 
 	pev->origin = m_spawnOrigin;
 	pev->angles = m_spawnAngles;
@@ -1178,7 +1405,7 @@ void CLsCreature::Setup()
 	pev->frame = 0;
 	pev->framerate = 1.0f;
 
-	SET_MODEL(edict(), t->model);
+	SET_MODEL(edict(), STRING(t->iszModel));
 	UTIL_SetSize(pev, t->hullMin, t->hullMax);
 	UTIL_SetOrigin(pev, pev->origin);
 
@@ -1258,6 +1485,9 @@ void CLsCreature::ComeBack()
 	// (somebody standing on the spot: wait a moment rather than spawn inside them)
 	TraceResult tr;
 	const LsCreatureType *t = GetType();
+	if (!t)
+		return;
+
 	UTIL_TraceHull(m_spawnOrigin + Vector(0, 0, 2), m_spawnOrigin + Vector(0, 0, 3), dont_ignore_monsters,
 		(t->hullMax.z > 40.0f) ? human_hull : head_hull, edict(), &tr);
 	if (tr.fStartSolid || tr.fAllSolid)
@@ -1328,7 +1558,7 @@ void CLsCreature::PlaySound(int kind, float volume)
 	if (!t || t->soundCount[kind] <= 0)
 		return;
 
-	const char *file = t->soundFile[kind][RANDOM_LONG(0, t->soundCount[kind] - 1)];
+	const char *file = STRING(t->iszSound[kind][RANDOM_LONG(0, t->soundCount[kind] - 1)]);
 	int channel = (kind == LSS_ATTACK || kind == LSS_HIT || kind == LSS_MISS) ? CHAN_WEAPON : CHAN_VOICE;
 	EMIT_SOUND_DYN(edict(), channel, file, volume, ATTN_NORM, 0, PITCH_NORM + RANDOM_LONG(-5, 5));
 
@@ -1389,12 +1619,13 @@ void CLsCreature::SetAnim(int anim)
 
 void CLsCreature::UpdateAnimation()
 {
-	if (m_mode == MODE_DEAD)
+	const LsCreatureType *t = GetType();
+	if (m_mode == MODE_DEAD || !t)
 		return;
 
 	float speed = m_improv->GetActualVelocity().Make2D().Length();
 
-	if (m_attackStart > 0.0f && gpGlobals->time < m_attackStart + Q_max(0.5f, 1.0f / GetType()->attackRate))
+	if (m_attackStart > 0.0f && gpGlobals->time < m_attackStart + Q_max(0.5f, 1.0f / t->attackRate))
 	{
 		if (m_anim != LSAN_ATTACK)
 			SetAnim(LSAN_ATTACK);
@@ -1485,6 +1716,9 @@ bool CLsCreature::CanSee(CBaseEntity *pOther, bool alert) const
 		return false;
 
 	const LsCreatureType *t = GetType();
+	if (!t)
+		return false;
+
 	if (!alert && t->detectFov < 359.0f && dist > 64.0f)
 	{
 		UTIL_MakeVectors(Vector(0, pev->angles.y, 0));
@@ -1781,7 +2015,8 @@ void CLsCreature::TraceAttack(entvars_t *pevAttacker, float flDamage, Vector vec
 
 BOOL CLsCreature::TakeDamage(entvars_t *pevInflictor, entvars_t *pevAttacker, float flDamage, int bitsDamageType)
 {
-	if (pev->takedamage == DAMAGE_NO || !IsAlive() || flDamage <= 0.0f)
+	const LsCreatureType *t = GetType();
+	if (pev->takedamage == DAMAGE_NO || !IsAlive() || !t || !LsFinite(flDamage) || flDamage <= 0.0f)
 		return FALSE;
 
 	CBaseEntity *pAttacker = pevAttacker ? CBaseEntity::Instance(pevAttacker) : nullptr;
@@ -1799,8 +2034,6 @@ BOOL CLsCreature::TakeDamage(entvars_t *pevInflictor, entvars_t *pevAttacker, fl
 		Killed(pevAttacker, GIB_NORMAL);
 		return TRUE;
 	}
-
-	const LsCreatureType *t = GetType();
 
 	if (gpGlobals->time > m_painSoundAt + 0.6f)
 	{
@@ -2557,11 +2790,17 @@ void LsCreature_f()
 		}
 
 		Vector origin(Q_atof(CMD_ARGV(3)), Q_atof(CMD_ARGV(4)), Q_atof(CMD_ARGV(5)));
+		if (!LsPosOk(origin))
+		{
+			CONSOLE_ECHO("ls_creature: that position is outside the world\n");
+			return;
+		}
+
 		int next = 6;
 		float yaw = RANDOM_FLOAT(0.0f, 360.0f);
 		if (CMD_ARGC() > 6 && !Q_strchr(CMD_ARGV(6), '='))
 		{
-			yaw = Q_atof(CMD_ARGV(6));
+			yaw = LsYaw(Q_atof(CMD_ARGV(6)));
 			next = 7;
 		}
 
@@ -2580,16 +2819,21 @@ void LsCreature_f()
 
 	if (!Q_stricmp(cmd, "kill"))
 	{
-		int n = LsForEachMatching(CMD_ARGV(2), [](ILsCreature *c) { c->Kill(); });
+		int n = 0, foreign = 0;
+		LsForEachMatching(CMD_ARGV(2), [&](ILsCreature *c) { if (LsIsAdopted(c)) foreign++; else { c->Kill(); n++; } });
 		CONSOLE_ECHO("ls_creature: %d killed\n", n);
+		if (foreign)
+			CONSOLE_ECHO("ls_creature: %d adopted ones left alone - their own module runs them (use its commands)\n", foreign);
 		return;
 	}
 
 	if (!Q_stricmp(cmd, "remove"))
 	{
 		CBaseEntity *gone[LS_CREATURE_MAX_LIST];
-		int count = 0;
-		LsForEachMatching(CMD_ARGV(2), [&](ILsCreature *c) { if (count < LS_CREATURE_MAX_LIST) gone[count++] = c->Entity(); });
+		int count = 0, foreign = 0;
+		LsForEachMatching(CMD_ARGV(2), [&](ILsCreature *c) { if (LsIsAdopted(c)) foreign++; else if (count < LS_CREATURE_MAX_LIST) gone[count++] = c->Entity(); });
+		if (foreign)
+			CONSOLE_ECHO("ls_creature: %d adopted ones left alone - their own module runs them (use its commands)\n", foreign);
 		for (int i = 0; i < count; i++)
 		{
 			LsCreatureUnregister(gone[i]);
@@ -2620,6 +2864,12 @@ void LsCreature_f()
 
 		bool hasSpot = CMD_ARGC() >= 7;
 		Vector spot(Q_atof(CMD_ARGV(4)), Q_atof(CMD_ARGV(5)), Q_atof(CMD_ARGV(6)));
+		if (hasSpot && !LsPosOk(spot))
+		{
+			CONSOLE_ECHO("ls_creature: that position is outside the world\n");
+			return;
+		}
+
 		LsForEachMatching(CMD_ARGV(2), [&](ILsCreature *c) { c->SetBehaviour(behaviour, hasSpot ? &spot : nullptr); });
 		return;
 	}
@@ -2631,6 +2881,12 @@ void LsCreature_f()
 		if (!classname[0])
 		{
 			CONSOLE_ECHO("usage: ls_creature adopt <classname> [type]\n");
+			return;
+		}
+
+		if (LsAdoptDenied(classname) || Q_strlen(classname) >= sizeof(s_adopt[0].classname))
+		{
+			CONSOLE_ECHO("ls_creature: '%s' can't be adopted (players, the world, items, brushes and our own are refused)\n", classname);
 			return;
 		}
 
@@ -2683,15 +2939,17 @@ void LsCreature_f()
 			if (!c)
 				continue;
 
-			CBaseEntity *pEntity = c->Entity();
+			entvars_t *pevC = c->Vars();
+			if (!pevC)
+				continue;
 			const LsCreatureType *t = c->Type();
 			CBaseEntity *pTarget = c->GetTarget();
 			if (c->IsAlive())
 				alive++;
 
-			CONSOLE_ECHO("#%-4d %-8s %-12s %s hp %4.0f  %s  at %.0f %.0f %.0f%s%s\n", pEntity->entindex(), c->Provider(),
-				t ? t->name : STRING(pEntity->pev->classname), c->IsAlive() ? "alive" : "dead ", c->Health(),
-				s_behaviourNames[clamp(c->GetBehaviour(), 0, LSB_COUNT - 1)], pEntity->pev->origin.x, pEntity->pev->origin.y, pEntity->pev->origin.z,
+			CONSOLE_ECHO("#%-4d %-8s %-12s %s hp %4.0f  %s  at %.0f %.0f %.0f%s%s\n", ENTINDEX(ENT(pevC)), c->Provider(),
+				t ? t->name : STRING(pevC->classname), c->IsAlive() ? "alive" : "dead ", c->Health(),
+				s_behaviourNames[clamp(c->GetBehaviour(), 0, LSB_COUNT - 1)], pevC->origin.x, pevC->origin.y, pevC->origin.z,
 				pTarget ? " -> " : "", pTarget ? STRING(pTarget->pev->netname) : "");
 		}
 

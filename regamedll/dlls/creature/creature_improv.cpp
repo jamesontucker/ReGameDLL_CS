@@ -637,7 +637,11 @@ void CCreatureImprov::UpdatePosition(float deltaT)
 		if (!pOther || !pOther->IsAlive() || pOther->Entity() == m_creature)
 			continue;
 
-		Vector to = pOther->Entity()->pev->origin - GetCentroid();
+		entvars_t *pevOther = pOther->Vars();
+		if (!pevOther)
+			continue;
+
+		Vector to = pevOther->origin - GetCentroid();
 		to.z = 0;
 		float range = to.NormalizeInPlace();
 
