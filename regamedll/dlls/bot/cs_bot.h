@@ -147,6 +147,7 @@ private:
 	int m_retries;
 	bool m_doneBuying;
 	bool m_lsEquippedDone = false;				// Loner-Strike: the gun out once in freeze time
+	float m_lsPastFreezeAt = -1.0f;				// Loner-Strike: first think in the buy state past the freeze time
 	bool m_buyDefuseKit;
 	bool m_buyGrenade;
 	bool m_buyShield;
@@ -1719,6 +1720,9 @@ public:
 	void LsModeTick();								// each think after a person's order (cs_bot_update.cpp)
 	void LsModeInside(unsigned int *avoidMask) const;	// the avoid zones it's standing in (paths may leave them)
 	void LsModePostUpdate();						// after the state machine: a stand-still or step a goal asked for
+	bool LsModePeace();								// a mode's peace (a loot-up), or the moment after it: no player enemies
+	bool LsModeGearing();							// just after the peace: gearing up before hunting (40-80 s)
+	bool LsModeLetsBe(CBasePlayer *pPlayer);		// ...someone in sight left be (not right on it, nor coming at it)
 	const Vector *LsModeSpot() const;				// the spot it holds for a station (teammates pick others)
 	int LsModeGoalNow() const { return m_lsModeGoalOn >= 0 ? m_lsModeGoal[m_lsModeGoalOn].kind : 0; }	// what it's on (trace)
 	const LsModeGoal &LsModeGoalAt(int i) const { return m_lsModeGoal[i]; }
@@ -1738,7 +1742,7 @@ private:
 	bool LsModeHeadedTo(const Vector &to) const;
 	bool LsModeEscape();							// out of a no-go zone, into the safe zone (true: on its way)
 	void LsModeGoalTick(LsModeGoal &g);
-	bool LsModeAttractTick();						// hunting: off to somewhere a mode says is worth going (true: sent)
+	bool LsModeAttractTick(bool gearing = false);	// hunting: off to somewhere a mode says is worth going (true: sent)
 	float m_lsModeAttractAt = 0.0f;					// next roll for that
 	bool LsModeSees(CBaseEntity *pEntity, bool testFOV, Vector *at, int *traces);	// a point on a mode enemy in sight
 	bool LsModeOursHiding() const;					// the hide it's in is a station's
@@ -1752,6 +1756,11 @@ private:
 	bool m_lsModeStrafeLeft = false;
 	float m_lsModeBlockedSince = -1.0f;				// its mode enemy's been behind something bullets stop since
 	float m_lsModeAngleAt = 0.0f;					// next move for another angle
+	void LsModePeaceTick();
+	void LsModeRoomTick(float reach);				// room from anyone close (a peace, gearing up)
+	float m_lsModePeaceMoveAt = 0.0f;				// next "giving them room" check
+	float m_lsModeGearFor = -1.0f;					// the peace end its gearing up is for
+	bool m_lsModeGearDone = false;
 	int m_lsModePressed = 0;						// buttons the mode pressed this think (1 fire, 2 use, 4 reload)
 	float m_lsModeHideState = -1.0f;				// the station's hide began then (its state time)
 	Vector m_lsModeSpot;							// ...at this spot
@@ -1889,6 +1898,7 @@ void Bot_LsModeCommand();				// ls_mode (cs_bot_ls_modes.cpp)
 void LsModeMapStart();					// a new map: every mode fact forgotten
 void LsModePlayerGone(int index);		// a player left: their role and ties forgotten (client.cpp)
 bool LsModeCosts();						// any avoid, block or zone set (path costs to add)
+bool LsModeNoBuy();						// a mode said there's nothing to buy (ls_mode nobuy 1)
 float LsModeAreaCost(const CNavArea *area, unsigned int insideMask);	// 1 plain, more inside an avoid or outside the zone, -1 never
 
 // Inlines
