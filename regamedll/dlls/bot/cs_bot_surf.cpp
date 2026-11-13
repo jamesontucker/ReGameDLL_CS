@@ -501,7 +501,7 @@ void LsSurfCheck_f()
 // enemy it keeps its own aim (it can shoot): the move is turned to match.
 
 cvar_t cv_bot_ls_surf = { "bot_ls_surf", "0", FCVAR_SERVER, 0.0f, nullptr };
-cvar_t cv_bot_ls_surf_land = { "bot_ls_surf_land", "1", FCVAR_SERVER, 0.0f, nullptr };	// landing-aware air control (0: off, for comparing)
+cvar_t cv_bot_ls_surf_land = { "bot_ls_surf_land", "0", FCVAR_SERVER, 0.0f, nullptr };	// landing-aware air control: off (1 to try it - side by side on surf_ski_2 it halved the long runs: judged only at touchdown, it beats the line's own robust air moves)
 
 static double NowMs()
 {
