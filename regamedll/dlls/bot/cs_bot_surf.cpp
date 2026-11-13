@@ -1023,7 +1023,11 @@ static int PickTarget(int from, const Vector *enemy)
 		}
 		if (dt < minAhead)
 			continue;
-		float score = enemy ? -(s_nodes[n].st.o - *enemy).Length() : dt + RANDOM_FLOAT(0.0f, 8.0f) + (s_nodes[n].landed ? 3.0f : 0.0f);
+		// (never somewhere it comes to rest: a surfer keeps going - a line that ends standing on a
+		// flat with no ramp in reach leaves it standing there)
+		if (s_nodes[n].landed)
+			continue;
+		float score = enemy ? -(s_nodes[n].st.o - *enemy).Length() : dt + RANDOM_FLOAT(0.0f, 8.0f);
 		if (score > bestScore)
 		{
 			bestScore = score;
