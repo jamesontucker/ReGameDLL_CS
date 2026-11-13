@@ -275,7 +275,16 @@ static void LsBuiltinTypes()
 	t->attackRate = 1.6f;
 	t->attackDelay = 0.25f;
 	t->behaviour = LSB_CHASE;
+	t->bloodColor = BLOOD_COLOR_YELLOW;
+	Q_strlcpy(t->models, "models/houndeye.mdl models/hostage.mdl");	// (has a real run; the HL zombie only walks)
+	t->hullMin = Vector(-16, -16, 0);
+	t->hullMax = Vector(16, 16, 36);
 	t->fallbackGlowColor = Vector(160, 160, 20);
+	Q_strlcpy(t->sound[LSS_IDLE], "houndeye/he_idle1.wav houndeye/he_idle2.wav houndeye/he_idle3.wav");
+	Q_strlcpy(t->sound[LSS_ALERT], "houndeye/he_alert1.wav houndeye/he_alert2.wav houndeye/he_alert3.wav");
+	Q_strlcpy(t->sound[LSS_ATTACK], "houndeye/he_attack1.wav houndeye/he_attack3.wav");
+	Q_strlcpy(t->sound[LSS_PAIN], "houndeye/he_pain1.wav houndeye/he_pain3.wav | player/pl_pain2.wav");
+	Q_strlcpy(t->sound[LSS_DIE], "houndeye/he_die1.wav houndeye/he_die2.wav | player/die1.wav");
 
 	t = LsAddType("brute");
 	Q_strlcpy(t->display, "Brute");
@@ -286,10 +295,16 @@ static void LsBuiltinTypes()
 	t->attackRange = 72.0f;
 	t->attackRate = 0.7f;
 	t->attackDelay = 0.6f;
-	t->scale = 1.25f;
+	t->category = LSC_ALIEN;
 	t->frags = 3;
-	t->glow = true;
-	t->glowColor = Vector(120, 20, 20);
+	t->bloodColor = BLOOD_COLOR_YELLOW;
+	Q_strlcpy(t->models, "models/agrunt.mdl models/hostage.mdl");	// the alien grunt: walk, run, two swings
+	t->fallbackGlowColor = Vector(120, 20, 20);
+	Q_strlcpy(t->sound[LSS_IDLE], "agrunt/ag_idle1.wav agrunt/ag_idle2.wav agrunt/ag_idle3.wav agrunt/ag_idle4.wav");
+	Q_strlcpy(t->sound[LSS_ALERT], "agrunt/ag_alert1.wav agrunt/ag_alert3.wav agrunt/ag_alert4.wav");
+	Q_strlcpy(t->sound[LSS_ATTACK], "agrunt/ag_attack1.wav agrunt/ag_attack2.wav agrunt/ag_attack3.wav");
+	Q_strlcpy(t->sound[LSS_PAIN], "agrunt/ag_pain1.wav agrunt/ag_pain2.wav agrunt/ag_pain3.wav | player/pl_pain2.wav");
+	Q_strlcpy(t->sound[LSS_DIE], "agrunt/ag_die1.wav agrunt/ag_die4.wav | player/die1.wav");
 
 	t = LsAddType("spitter");
 	Q_strlcpy(t->display, "Spitter");
@@ -380,10 +395,40 @@ static void LsBuiltinTypes()
 	t->attackDelay = 0.7f;
 	t->detectRadius = 2000.0f;
 	t->behaviour = LSB_CHASE;
-	t->scale = 1.6f;
+	t->scale = 0.7f;					// (the gargantua is twice a player's height at 1; the hull stays player-sized)
 	t->frags = 10;
-	t->glow = true;
-	t->glowColor = Vector(160, 0, 160);
+	t->bloodColor = BLOOD_COLOR_YELLOW;
+	Q_strlcpy(t->models, "models/garg.mdl models/hostage.mdl");
+	t->fallbackGlowColor = Vector(160, 0, 160);
+	Q_strlcpy(t->sound[LSS_IDLE], "garg/gar_idle1.wav garg/gar_idle2.wav garg/gar_idle3.wav garg/gar_breathe1.wav");
+	Q_strlcpy(t->sound[LSS_ALERT], "garg/gar_alert1.wav garg/gar_alert2.wav garg/gar_alert3.wav");
+	Q_strlcpy(t->sound[LSS_ATTACK], "garg/gar_attack1.wav garg/gar_attack2.wav garg/gar_attack3.wav");
+	Q_strlcpy(t->sound[LSS_HIT], "garg/gar_stomp1.wav | weapons/knife_hit1.wav");
+	Q_strlcpy(t->sound[LSS_PAIN], "garg/gar_pain1.wav garg/gar_pain2.wav garg/gar_pain3.wav | player/pl_pain2.wav");
+	Q_strlcpy(t->sound[LSS_DIE], "garg/gar_die1.wav garg/gar_die2.wav | player/die1.wav");
+
+	t = LsAddType("headcrab");
+	Q_strlcpy(t->display, "Headcrab");
+	t->health = 25.0f;
+	t->speed = 200.0f;
+	t->walkSpeed = 60.0f;
+	t->damage = 8.0f;
+	t->attackRange = 72.0f;
+	t->attackDelay = 0.3f;
+	t->detectRadius = 800.0f;
+	t->bloodColor = BLOOD_COLOR_YELLOW;
+	Q_strlcpy(t->models, "models/headcrab.mdl models/hostage.mdl");
+	Q_strlcpy(t->anim[LSAN_ATTACK], "jump");	// (its leap is a range attack in the model; MELEE_ATTACK2 is a looping turn)
+	t->hullMin = Vector(-16, -16, 0);
+	t->hullMax = Vector(16, 16, 36);
+	t->fallbackGlowColor = Vector(200, 200, 120);
+	Q_strlcpy(t->sound[LSS_IDLE], "headcrab/hc_idle1.wav headcrab/hc_idle2.wav headcrab/hc_idle3.wav headcrab/hc_idle4.wav headcrab/hc_idle5.wav");
+	Q_strlcpy(t->sound[LSS_ALERT], "headcrab/hc_alert1.wav headcrab/hc_alert2.wav");
+	Q_strlcpy(t->sound[LSS_ATTACK], "headcrab/hc_attack1.wav headcrab/hc_attack2.wav headcrab/hc_attack3.wav");
+	Q_strlcpy(t->sound[LSS_HIT], "headcrab/hc_headbite.wav | weapons/knife_hit1.wav");
+	t->sound[LSS_MISS][0] = '\0';
+	Q_strlcpy(t->sound[LSS_PAIN], "headcrab/hc_pain1.wav headcrab/hc_pain2.wav headcrab/hc_pain3.wav | player/pl_pain2.wav");
+	Q_strlcpy(t->sound[LSS_DIE], "headcrab/hc_die1.wav headcrab/hc_die2.wav | player/die1.wav");
 }
 
 // Picks the first group of a "a b | c d" list that has a file present (sounds), keeps up to max
