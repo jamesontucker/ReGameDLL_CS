@@ -156,9 +156,8 @@ static bool GroundBelow(const Vector &from, float depth, float *z, Vector *norma
 // The jump: 240 units/s along (a knife or pistol run, a little short of 250), 268 up (45 units
 // high), feet tucked 18 more for a landing higher up (a duck-jump); a hull that fits all the way;
 // a floor to land on that's flat enough, not a deadly trigger, not a fall that hurts much
-static bool GapJump(const CNavNode *node, int dir, Vector *land, Vector *landNormal)
+static bool GapJumpAt(const Vector &p, int dir, bool runup, Vector *land, Vector *landNormal, bool say)
 {
-	const Vector p = *node->GetPosition();
 	Vector2D d;
 	DirectionToVector2D((NavDirType)dir, &d);
 
@@ -167,9 +166,17 @@ static bool GapJump(const CNavNode *node, int dir, Vector *land, Vector *landNor
 	Vector stand(p.x, p.y, p.z + HalfHumanHeight + 1.0f);
 	UTIL_TraceHull(stand, stand, ignore_monsters, human_hull, nullptr, &tr);
 	if (tr.fStartSolid || tr.fAllSolid)
+	{
+		if (say)
+			CONSOLE_ECHO("  no room to stand at the takeoff\n");
 		return false;
-	if (!node->GetConnectedNode(OppositeDirection((NavDirType)dir)))
+	}
+	if (!runup)
+	{
+		if (say)
+			CONSOLE_ECHO("  no step behind to run up from\n");
 		return false;
+	}
 
 	const float vh = 240.0f, vz = 268.0f, g = 800.0f;
 	for (float L = 2.0f * GenerationStepSize; L <= 9.0f * GenerationStepSize + 0.1f; L += GenerationStepSize)
@@ -178,7 +185,11 @@ static bool GapJump(const CNavNode *node, int dir, Vector *land, Vector *landNor
 		float gz;
 		Vector n;
 		if (!GroundBelow(col, 64.0f + 200.0f, &gz, &n) || n.z < 0.7f)
+		{
+			if (say)
+				CONSOLE_ECHO("  %.0f: no floor\n", L);
 			continue;
+		}
 		float dz = gz - p.z;
 		// (a step it could just walk onto isn't a gap: the learner would have walked it)
 		if (L <= 2.0f * GenerationStepSize + 0.1f && Q_fabs(dz) < StepHeight)
@@ -187,7 +198,11 @@ static bool GapJump(const CNavNode *node, int dir, Vector *land, Vector *landNor
 			Vector midN;
 			Vector mid(p.x + d.x * GenerationStepSize, p.y + d.y * GenerationStepSize, p.z + 32.0f);
 			if (GroundBelow(mid, 32.0f + 60.0f, &midZ, &midN))
+			{
+				if (say)
+					CONSOLE_ECHO("  %.0f: floor in between (walkable)\n", L);
 				continue;
+			}
 		}
 		// flight: takes off at the node's edge (half a step out), lands a little way in
 		float flight = L - 0.5f * GenerationStepSize + 8.0f;
@@ -197,7 +212,11 @@ static bool GapJump(const CNavNode *node, int dir, Vector *land, Vector *landNor
 		if (zAt < dz + 2.0f)
 		{
 			if (zAt + 18.0f < dz + 2.0f)
+			{
+				if (say)
+					CONSOLE_ECHO("  %.0f: too high (%.0f up)\n", L, dz);
 				continue;
+			}
 			duck = true;
 		}
 		if (dz < -180.0f)
@@ -206,9 +225,17 @@ static bool GapJump(const CNavNode *node, int dir, Vector *land, Vector *landNor
 		Vector at(col.x, col.y, gz + HalfHumanHeight + 1.0f);
 		UTIL_TraceHull(at, at, ignore_monsters, human_hull, nullptr, &tr);
 		if (tr.fStartSolid || tr.fAllSolid)
+		{
+			if (say)
+				CONSOLE_ECHO("  %.0f: no room to land (floor %.0f)\n", L, gz);
 			continue;
+		}
 		if (DeadlyAt(s_learnHurts, Vector(col.x, col.y, gz)))
+		{
+			if (say)
+				CONSOLE_ECHO("  %.0f: deadly landing\n", L);
 			continue;
+		}
 		// the arc, in short straight pieces, with the hull it has in the air (tucked: the short one)
 		bool clear = true;
 		// (the hull's centre is 37 above the feet either way: standing, or tucked 18 up in the short hull)
@@ -224,16 +251,27 @@ static bool GapJump(const CNavNode *node, int dir, Vector *land, Vector *landNor
 			Vector cur(p.x + d.x * (0.5f * GenerationStepSize + vh * tk), p.y + d.y * (0.5f * GenerationStepSize + vh * tk), p.z + zk + centre);
 			UTIL_TraceHull(prev, cur, ignore_monsters, duck ? head_hull : human_hull, nullptr, &tr);
 			if (tr.fStartSolid || tr.flFraction < 1.0f)
+			{
 				clear = false;
+				if (say)
+					CONSOLE_ECHO("  %.0f: the arc hits %s at piece %d (%.0f %.0f %.0f)\n", L, tr.pHit ? STRING(tr.pHit->v.classname) : "?", k, tr.vecEndPos.x, tr.vecEndPos.y, tr.vecEndPos.z);
+			}
 			prev = cur;
 		}
 		if (!clear)
 			continue;
 		*land = Vector(col.x, col.y, gz);
 		*landNormal = n;
+		if (say)
+			CONSOLE_ECHO("  %.0f: lands at %.0f %.0f %.0f%s\n", L, col.x, col.y, gz, duck ? " (duck-jump)" : "");
 		return true;
 	}
 	return false;
+}
+
+static bool GapJump(const CNavNode *node, int dir, Vector *land, Vector *landNormal)
+{
+	return GapJumpAt(*node->GetPosition(), dir, node->GetConnectedNode(OppositeDirection((NavDirType)dir)) != nullptr, land, landNormal, false);
 }
 
 } // namespace LsDr
@@ -1518,6 +1556,19 @@ void LsDrDrive(CBasePlayer *bot, float *forward, float *strafe, unsigned short *
 
 void LsDrCommand()
 {
+	// ls_dr gap <x> <y> <z> <dir 0 N 1 E 2 S 3 W>: the gap check from a floor spot, with reasons
+	if (CMD_ARGC() >= 6 && FStrEq(CMD_ARGV(1), "gap"))
+	{
+		Vector p(Q_atof(CMD_ARGV(2)), Q_atof(CMD_ARGV(3)), Q_atof(CMD_ARGV(4)));
+		float z;
+		Vector n, land;
+		if (GroundBelow(p + Vector(0, 0, 40.0f), 200.0f, &z, &n))
+			p.z = z;
+		DeadlyHurts(s_learnHurts);
+		CONSOLE_ECHO("ls_dr gap from %.0f %.0f %.0f dir %d:\n", p.x, p.y, p.z, Q_atoi(CMD_ARGV(5)));
+		GapJumpAt(p, Q_atoi(CMD_ARGV(5)) & 3, true, &land, &n, true);
+		return;
+	}
 	if (!Ready())
 	{
 		CONSOLE_ECHO("ls_dr: no course (bot_ls_deathrun %s, deathrun map %d, nav areas %d)\n", cv_bot_ls_deathrun.string, LsDrMapName() ? 1 : 0, int(TheNavAreaList.size()));
