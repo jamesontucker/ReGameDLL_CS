@@ -1742,10 +1742,12 @@ void CCSBot::LsDrPathTick()
 					}
 					if (wait)
 					{
-						Vector2D away = (pev->origin - tl.at).Make2D();
-						float len = away.Length();
-						away = len > 1.0f ? away / len : Vector2D(1.0f, 0.0f);
-						m_goalPosition = pev->origin + Vector(away.x, away.y, 0.0f) * 100.0f;
+						// (back the way it came along its path - on the floor, not off the side - or hold)
+						Vector back = m_path[Q_max(0, m_pathIndex - 1)].pos;
+						if ((back - pev->origin).Make2D().IsLengthLessThan(40.0f) && m_pathIndex >= 2)
+							back = m_path[m_pathIndex - 2].pos;
+						m_goalPosition = back;
+						r.holdLook = tl.at;
 						r.teleWaitSince = 0.0f;
 						LsWhy("deathrun: lets one through the teleport");
 						return;
