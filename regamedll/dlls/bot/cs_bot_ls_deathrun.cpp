@@ -392,8 +392,10 @@ CNavNode *LsCourseSeedSearch()
 			if (s_scanned[id] & (1 << dir))
 				continue;
 			s_scanned[id] |= (1 << dir);
+			// (a step onto deadly floor - lava, a hurt pit level with the walkway - is no way on either:
+			// on such maps the walkways' edges only ever led into it, and no jump was looked for)
 			const CNavNode *adj = node->GetConnectedNode((NavDirType)dir);
-			if (adj && adj->GetPosition()->z > node->GetPosition()->z - 60.0f)
+			if (adj && adj->GetPosition()->z > node->GetPosition()->z - 60.0f && !DeadlyAt(s_learnHurts, *adj->GetPosition()))
 				continue;
 			if (DeadlyAt(s_learnHurts, *node->GetPosition()))
 				continue;
