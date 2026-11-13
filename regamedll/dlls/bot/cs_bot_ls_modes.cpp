@@ -526,10 +526,11 @@ bool CCSBot::LsModeShootTick()
 
 	SetLookAt("Loner-Strike: mode enemy", &pos, PRIORITY_HIGH, 0.5f, false, 3.0f);
 
-	// moving while it fights: hurt and with it close, to cover (once in a while); one close up
-	// with a gun out, a step or two back (the bolder hold their ground); a knife closes in
+	// how it fights: a gun is fired standing still (on the move it sprays wide, and the creatures
+	// close in); one right up close, a step or two back (the bolder hold their ground); hurt, from
+	// one shooting at range, to cover (running from a biter only gets it bitten); a knife closes in
 	float gap = (pTarget->pev->origin - pev->origin).Make2D().Length();
-	if (LsHealth() < 35.0f && gap < 500.0f && now >= m_lsModeCoverAt)
+	if (LsHealth() < 35.0f && gap > 350.0f && gap < 900.0f && now >= m_lsModeCoverAt)
 	{
 		m_lsModeCoverAt = now + 4.0f;
 		if (LsTakeCoverFrom(pTarget->pev->origin, 300.0f, true))
@@ -545,6 +546,8 @@ bool CCSBot::LsModeShootTick()
 		m_lsModeStepTo = pTarget->pev->origin;
 		m_lsModeStepUntil = now + 0.35f;
 	}
+	else if (!IsUsingKnife())
+		m_lsModeStillUntil = now + 0.4f;
 
 	// the trigger once the view's on it (the stock fire's tolerance: a body's width at that range)
 	Vector to = pos - GetGunPosition();
@@ -750,6 +753,8 @@ bool CCSBot::LsModeEscape()
 
 	if (!go)
 		return false;
+	// (getting out comes before standing to shoot)
+	m_lsModeStillUntil = m_lsModeBackUntil = 0.0f;
 	// (already on its way out: sent lately, or its escape is still the MoveTo it's on)
 	if (IsMovingTo() && (now - m_lsModeEscapeAt < 2.0f || Q_fabs(m_stateTimestamp - m_lsModeEscapeState) < 0.05f))
 		return true;
@@ -805,6 +810,9 @@ void CCSBot::LsModeTick()
 	bool shooting = LsModeShootTick();
 
 	if (LsModeEscape())
+		return;
+	// (mid-fight with a creature: no new spot, no errand; it shoots)
+	if (shooting)
 		return;
 
 	// the goal to act on: the most important it cares about (the nearer of two alike); spent
