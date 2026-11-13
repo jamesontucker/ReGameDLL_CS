@@ -346,7 +346,9 @@ bool CCSBot::LsModeGearing()
 	bool armed = m_rgpPlayerItems[PRIMARY_WEAPON_SLOT] != nullptr;
 	// (hit: armed, the fight's on; unarmed, it fights whoever hit it - LsModeLetsBe - and goes
 	// back to looting: a knife let loose on whoever's nearest set off the chains of knife kills)
-	if (since < 0.0f || since > (armed ? 90.0f : 40.0f + 40.0f * LsTrait(206)) || (armed && LsModeKitted())
+	// (kitted out is a reason to go hunting only after the first 45 s: everyone landed armed on
+	// some maps, and the whole lobby went hunting at once)
+	if (since < 0.0f || since > (armed ? 90.0f : 60.0f + 40.0f * LsTrait(206)) || (armed && since > 45.0f && LsModeKitted())
 		|| (armed && GetTimeSinceAttacked() < 2.0f))
 	{
 		m_lsModeGearDone = true;
@@ -370,7 +372,7 @@ bool CCSBot::LsModeLetsBe(CBasePlayer *pPlayer)
 	bool threat = pPlayer == GetAttacker() && GetTimeSinceAttacked() < 5.0f;
 	// (armed, and someone in sight who landed close by: a hot drop - fight now; in sight already,
 	// this is only asked of players it sees)
-	if (m_rgpPlayerItems[PRIMARY_WEAPON_SLOT] && d < 500.0f)
+	if (m_rgpPlayerItems[PRIMARY_WEAPON_SLOT] && d < 400.0f)
 	{
 		m_lsModeGearDone = true;
 		LsWhy("mode gearing up: hot drop");
