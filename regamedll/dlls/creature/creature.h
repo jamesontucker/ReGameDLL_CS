@@ -562,5 +562,9 @@ extern cvar_t ls_creature_debug;
 // or a plugin).
 void LsMark(const char *where, int ent = 0);
 void LsMarkText(const char *text);				// a short copy kept beside the newest mark (a command's name)
-void LsWatchdogFrame();						// StartFrame: a frame came
+void LsWatchdogFrame();
+double LsPerfClock();							// ls_perf: now in seconds (0 while ls_perf is off)
+void LsPerfAddCreature(double seconds);
+void LsPerfAddBots(double seconds);
+void LsPerfFrame();						// StartFrame: a frame came
 void LsWatchdogStart();						// GameDLLInit
