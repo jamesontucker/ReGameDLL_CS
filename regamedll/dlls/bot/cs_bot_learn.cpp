@@ -519,6 +519,12 @@ bool CCSBot::AnalyzeAlphaStep()
 	CNavArea *area = (*iter);
 	area->ComputeHidingSpots();
 	area->ComputeApproachAreas();
+
+	// Loner-Strike: progress in the console (this step can take long on big navs)
+	const int n = int(TheNavAreaList.size());
+	if (n >= 20 && _generationIndex % (n / 10) == 0)
+		CONSOLE_ECHO("  Analyzing approach areas and hiding spots: %d of %d areas\n", _generationIndex, n);
+
 	return true;
 }
 

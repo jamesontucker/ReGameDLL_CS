@@ -1785,6 +1785,7 @@ public:
 private:
 	bool LsDrActivatorTick();
 	bool LsDrJumpGap(int i);						// the floor ahead is gone: jump to the next one, if it's in reach
+	bool LsDrFloorGone(int i, const CNavArea *B);	// waited long enough for it: another way, or (none) a jump / keep waiting
 	int m_lsDrLife = -1;							// the life its run is for (a respawn starts a new one)
 };
 
