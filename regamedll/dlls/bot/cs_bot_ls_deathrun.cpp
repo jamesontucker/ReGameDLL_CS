@@ -996,6 +996,18 @@ bool LsDrCosts()
 	return LsDrOn() && LsDr::s_ready;
 }
 
+bool LsDrTeleport(const CNavArea *area, const CNavArea *fromArea)
+{
+	using namespace LsDr;
+	int ia = Index(fromArea), ib = Index(area);
+	if (ia < 0 || ib < 0)
+		return false;
+	for (const Tele &tl : s_teles)
+		if (tl.from == ia && tl.to == ib)
+			return true;
+	return false;
+}
+
 // A jump across a gap costs a little more than the walk: people take the floor when there is one
 float LsDrLinkCost(const CNavArea *area, const CNavArea *fromArea)
 {

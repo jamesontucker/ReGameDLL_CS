@@ -1844,6 +1844,7 @@ void LsDrDrive(CBasePlayer *bot, float *forward, float *strafe, unsigned short *
 bool LsDrCosts();
 float LsDrAreaCost(const CNavArea *area);
 float LsDrLinkCost(const CNavArea *area, const CNavArea *fromArea);
+bool LsDrTeleport(const CNavArea *area, const CNavArea *fromArea);
 bool LsSightReady();
 bool LsSees(const CNavArea *a, const CNavArea *b);	// someone in one area could see into the other
 int LsSightQuality(const CNavArea *a, const CNavArea *b);	// 0-255, how much
@@ -2561,7 +2562,8 @@ public:
 				return cost;
 
 			// add cost of "jump down" pain unless we're jumping into water
-			if (!area->IsConnected(fromArea, NUM_DIRECTIONS))
+			// (Loner-Strike deathrun: nor through a teleport - a link one way, but no fall)
+			if (!area->IsConnected(fromArea, NUM_DIRECTIONS) && !(m_lsDr && LsDrTeleport(area, fromArea)))
 			{
 				// this is a "jump down" (one way drop) transition - estimate damage we will take to traverse it
 				float fallDistance = -fromArea->ComputeHeightChange(area);
