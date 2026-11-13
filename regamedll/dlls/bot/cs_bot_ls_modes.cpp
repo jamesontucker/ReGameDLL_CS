@@ -563,12 +563,21 @@ bool CCSBot::LsModeShootTick()
 	if (IsUsingKnife())
 	{
 		if (range < 70.0f && !IsFriendInLineOfFire())
+		{
 			PrimaryAttack();
+			m_lsModePressed |= 1;
+		}
 	}
 	else if (IsActiveWeaponClipEmpty())
+	{
 		ReloadCheck();
+		m_lsModePressed |= 4;
+	}
 	else if (!IsActiveWeaponReloading() && !IsFriendInLineOfFire() && (!IsUsingPistol() || LsTriggerTap()))
+	{
 		PrimaryAttack();
+		m_lsModePressed |= 1;
+	}
 	return true;
 }
 
@@ -804,6 +813,7 @@ bool CCSBot::LsModeAttractTick()
 // mode; with nothing to do here, hunting may be pulled toward an attract
 void CCSBot::LsModeTick()
 {
+	m_lsModePressed = 0;
 	if (!s_lsModeOn || !IsAlive() || IsBuying() || (CSGameRules() && CSGameRules()->IsFreezePeriod()))
 		return;
 
@@ -1128,6 +1138,7 @@ void CCSBot::LsModeGoalTick(LsModeGoal &g)
 				m_lsModeStillUntil = now + 0.3f;
 			SetLookAt("Loner-Strike: using", &at, PRIORITY_HIGH, 0.5f);
 			UseEnvironment();
+			m_lsModePressed |= 2;
 			return;
 		}
 		if (handy)
@@ -1330,23 +1341,23 @@ void CCSBot::LsModeStationTick(LsModeGoal &g, float dist)
 void CCSBot::LsModePostUpdate()
 {
 	float now = gpGlobals->time;
-	if (now < m_lsModeStillUntil && !IsAttacking())
-	{
-		ClearMovement();
-		ResetStuckMonitor();
-	}
-	else if (now < m_lsModeStepUntil && !IsAttacking())
-	{
-		ClearMovement();
+	bool still = now < m_lsModeStillUntil, step = now < m_lsModeStepUntil, back = now < m_lsModeBackUntil && !IsOnLadder();
+	if (IsAttacking() || !(still || step || back))
+		return;
+	// (ClearMovement resets the whole command, buttons too: the trigger and use the mode pressed
+	// this think are pressed again - the stand-still is for shooting straight, the step for using)
+	ClearMovement();
+	if (!still && step)
 		MoveTowardsPosition(&m_lsModeStepTo);
-		ResetStuckMonitor();
-	}
-	else if (now < m_lsModeBackUntil && !IsAttacking() && !IsOnLadder())
-	{
-		ClearMovement();
+	else if (!still && back)
 		MoveAwayFromPosition(&m_lsModeBackFrom);
-		ResetStuckMonitor();
-	}
+	if (m_lsModePressed & 1)
+		PrimaryAttack();
+	if (m_lsModePressed & 2)
+		UseEnvironment();
+	if (m_lsModePressed & 4)
+		Reload();
+	ResetStuckMonitor();
 }
 
 // ---- the command ----------------------------------------------------------------------------
