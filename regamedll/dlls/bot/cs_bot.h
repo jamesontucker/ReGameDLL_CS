@@ -1719,6 +1719,7 @@ public:
 	void LsModeTick();								// each think after a person's order (cs_bot_update.cpp)
 	void LsModeInside(unsigned int *avoidMask) const;	// the avoid zones it's standing in (paths may leave them)
 	void LsModePostUpdate();						// after the state machine: a stand-still or step a goal asked for
+	bool LsModePeace();								// a mode's peace (a loot-up), or the moment after it: no player enemies
 	const Vector *LsModeSpot() const;				// the spot it holds for a station (teammates pick others)
 	int LsModeGoalNow() const { return m_lsModeGoalOn >= 0 ? m_lsModeGoal[m_lsModeGoalOn].kind : 0; }	// what it's on (trace)
 	const LsModeGoal &LsModeGoalAt(int i) const { return m_lsModeGoal[i]; }
@@ -1752,6 +1753,8 @@ private:
 	bool m_lsModeStrafeLeft = false;
 	float m_lsModeBlockedSince = -1.0f;				// its mode enemy's been behind something bullets stop since
 	float m_lsModeAngleAt = 0.0f;					// next move for another angle
+	void LsModePeaceTick();
+	float m_lsModePeaceMoveAt = 0.0f;				// next "giving them room" check
 	int m_lsModePressed = 0;						// buttons the mode pressed this think (1 fire, 2 use, 4 reload)
 	float m_lsModeHideState = -1.0f;				// the station's hide began then (its state time)
 	Vector m_lsModeSpot;							// ...at this spot
