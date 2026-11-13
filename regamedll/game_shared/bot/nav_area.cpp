@@ -4649,6 +4649,10 @@ void CNavArea::ComputeApproachAreas()
 				}
 
 				// traverse path to find first area we cannot see (skip the first area)
+				// (Loner-Strike: if nothing on the path gets blocked - a path longer than MAX_PATH_LENGTH whose
+				// first areas are all visible, as on deathrun maps with long course links - the next search finds
+				// the same path again, forever: the map learn hung in here on deathrun_dojo. Stop for this farArea.)
+				const int blockedBefore = BlockedIDCount;
 				for (i = 1; i < count; i++)
 				{
 					// if we see this area, continue on
@@ -4691,6 +4695,9 @@ void CNavArea::ComputeApproachAreas()
 					// we are done with this path
 					break;
 				}
+
+				if (BlockedIDCount == blockedBefore)
+					break;
 			}
 		}
 	}
