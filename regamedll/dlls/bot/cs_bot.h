@@ -1765,6 +1765,18 @@ private:
 	bool LsModeShootTick();							// a mode enemy (a creature) in sight: shoot it (true: it is)
 	float LsModeGreed();							// 0-1: how much loot and pickups pull it
 	bool LsModeCares(int kind, int prio);			// a goal's taken up or not (once, by its persona)
+
+public:
+	// Loner-Strike deathrun (cs_bot_ls_deathrun.cpp, bot_ls_deathrun): runners run the course, the
+	// terrorist works the trap buttons as a player does. Nothing unless it's on, on a deathrun map
+	bool LsDrTick();								// each think (cs_bot_update.cpp): true while it's standing still on purpose
+	void LsDrPostUpdate();							// after the state machine: waiting, stepping up to a button, pressing it
+	void LsDrPathTick();							// in path movement: a gap to jump, a teleport, a floor not there yet
+	bool LsDrRunner() const;						// a runner (deathrun players pass through each other: no queueing)
+private:
+	bool LsDrActivatorTick();
+	bool LsDrJumpGap(int i);						// the floor ahead is gone: jump to the next one, if it's in reach
+	int m_lsDrLife = -1;							// the life its run is for (a respawn starts a new one)
 };
 
 // Loner-Strike: how far a person could see from one point toward another, 1 all the way: doors,
@@ -1841,6 +1853,22 @@ struct LsAreaKnow
 #pragma pack(pop)
 void LsSightStep();
 void LsSurfStep();				// bot/cs_bot_surf.cpp: surf maps explored a little each frame (bot_ls_surf)
+// Loner-Strike deathrun (bot/cs_bot_ls_deathrun.cpp): obstacle-course nav learning (bot_ls_nav_course)
+// and the brain playing deathrun (bot_ls_deathrun)
+bool LsNavCourse();
+bool LsMoverFloor(const TraceResult &result);
+void LsCourseLearnStart();
+class CNavNode;
+CNavNode *LsCourseSeedSearch();
+void LsCourseLinkAreas();
+bool LsDrOn();
+void LsDrStep();
+void LsDrCommand();
+void LsDrDrive(CBasePlayer *bot, float *forward, float *strafe, unsigned short *buttons);
+bool LsDrCosts();
+float LsDrAreaCost(const CNavArea *area);
+float LsDrLinkCost(const CNavArea *area, const CNavArea *fromArea);
+bool LsDrTeleport(const CNavArea *area, const CNavArea *fromArea);
 bool LsSightReady();
 bool LsSees(const CNavArea *a, const CNavArea *b);	// someone in one area could see into the other
 int LsSightQuality(const CNavArea *a, const CNavArea *b);	// 0-255, how much
@@ -2465,6 +2493,8 @@ public:
 		// Loner-Strike: a mode's avoid zones, blocked doors and safe zone, for the path the bot
 		// walks (none set: nothing changes); the zones it's already in it may walk out of
 		m_lsMode = lsTaste && LsModeCosts();
+		// Loner-Strike deathrun: never through a deadly pit, the long way round where people fell
+		m_lsDr = lsTaste && LsDrCosts();
 		m_lsModeInside = 0;
 		if (m_lsMode)
 			pBot->LsModeInside(&m_lsModeInside);
@@ -2532,6 +2562,13 @@ public:
 					return -1.0f;
 				dist *= modeCost;
 			}
+			if (m_lsDr)
+			{
+				float drCost = LsDrAreaCost(area);
+				if (drCost < 0.0f)
+					return -1.0f;
+				dist = dist * drCost + LsDrLinkCost(area, fromArea);
+			}
 
 			// Loner-Strike: this bot's favourite (and not so favourite) parts of the map
 			if (m_lsTaste)
@@ -2549,7 +2586,8 @@ public:
 				return cost;
 
 			// add cost of "jump down" pain unless we're jumping into water
-			if (!area->IsConnected(fromArea, NUM_DIRECTIONS))
+			// (Loner-Strike deathrun: nor through a teleport - a link one way, but no fall)
+			if (!area->IsConnected(fromArea, NUM_DIRECTIONS) && !(m_lsDr && LsDrTeleport(area, fromArea)))
 			{
 				// this is a "jump down" (one way drop) transition - estimate damage we will take to traverse it
 				float fallDistance = -fromArea->ComputeHeightChange(area);
@@ -2648,6 +2686,7 @@ private:
 	float m_lsCrowdCost;
 	bool m_lsMode;
 	unsigned int m_lsModeInside;
+	bool m_lsDr;
 };
 
 class FollowTargetCollector

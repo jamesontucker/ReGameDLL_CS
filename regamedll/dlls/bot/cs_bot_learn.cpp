@@ -272,6 +272,7 @@ void CCSBot::StartLearnProcess()
 	startProgressMeter("#CZero_LearningMap");
 	drawProgressMeter(0, "#CZero_LearningMap");
 	BuildLadders();
+	LsCourseLearnStart();	// Loner-Strike: obstacle courses (cs_bot_ls_deathrun.cpp)
 
 	Vector normal;
 	Vector pos = pev->origin;
@@ -318,6 +319,11 @@ bool CCSBot::LearnStep()
 			// then from spawn points nothing reached (Loner-Strike)
 			if (!m_currentNode)
 				m_currentNode = SpawnSeedSearch();
+
+			// then past gaps a running jump clears, and where teleports go (Loner-Strike: obstacle
+			// courses, bot_ls_nav_course)
+			if (!m_currentNode)
+				m_currentNode = LsCourseSeedSearch();
 
 			if (!m_currentNode)
 			{

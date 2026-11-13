@@ -313,6 +313,7 @@ set(GAMEDLL_SRCS
 	"dlls/bot/cs_bot_ls_moves.cpp"
 	"dlls/bot/cs_bot_ls_modes.cpp"
 	"dlls/bot/cs_bot_surf.cpp"
+	"dlls/bot/cs_bot_ls_deathrun.cpp"
 	"dlls/bot/cs_bot_statemachine.cpp"
 	"dlls/bot/cs_bot_update.cpp"
 	"dlls/bot/cs_bot_vision.cpp"

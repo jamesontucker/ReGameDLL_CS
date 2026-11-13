@@ -1847,6 +1847,7 @@ void GenerateNavigationAreaMesh()
 	MergeGeneratedAreas();
 	SquareUpAreas();
 	MarkJumpAreas();
+	LsCourseLinkAreas();	// Loner-Strike: gaps a running jump clears (obstacle courses)
 }
 
 // Return true if 'pos' is within 2D extents of area.
@@ -4415,7 +4416,8 @@ bool GetGroundHeight(const Vector *pos, float *height, Vector *normal)
 		{
 			// ignoring any entities that we can walk through (Loner-Strike: except a breakable
 			// that's a floor: a glass arena's panes, a plank bridge)
-			if (IsEntityWalkable(VARS(result.pHit), WALK_THRU_DOORS | WALK_THRU_BREAKABLES) && !IsBreakableFloor(result))
+			// (nor, on an obstacle course, a door that's a floor: LsMoverFloor)
+			if (IsEntityWalkable(VARS(result.pHit), WALK_THRU_DOORS | WALK_THRU_BREAKABLES) && !IsBreakableFloor(result) && !LsMoverFloor(result))
 			{
 				ignore = result.pHit;
 				continue;
@@ -4647,6 +4649,10 @@ void CNavArea::ComputeApproachAreas()
 				}
 
 				// traverse path to find first area we cannot see (skip the first area)
+				// (Loner-Strike: if nothing on the path gets blocked - a path longer than MAX_PATH_LENGTH whose
+				// first areas are all visible, as on deathrun maps with long course links - the next search finds
+				// the same path again, forever: the map learn hung in here on deathrun_dojo. Stop for this farArea.)
+				const int blockedBefore = BlockedIDCount;
 				for (i = 1; i < count; i++)
 				{
 					// if we see this area, continue on
@@ -4689,6 +4695,9 @@ void CNavArea::ComputeApproachAreas()
 					// we are done with this path
 					break;
 				}
+
+				if (BlockedIDCount == blockedBefore)
+					break;
 			}
 		}
 	}
