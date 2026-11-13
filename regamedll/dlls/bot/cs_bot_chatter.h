@@ -262,6 +262,7 @@ public:
 	void OnMapChange();
 	Place NameToID(const char *name) const;
 	const char *IDToName(Place id) const;
+	Place AddSilentPlace(const char *name);		// Loner-Strike: a nav's own place name BotChatter.db doesn't list: a place with no voice line
 
 	bool IsValid() const { return !m_placeList.empty(); }
 

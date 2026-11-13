@@ -123,6 +123,10 @@ bool PlaceDirectory::Load(SteamFile *file)
 		Place place = TheBotPhrases->NameToID(placeName);
 		if (!TheBotPhrases->IsValid() && place == UNDEFINED_PLACE)
 			place = TheNavAreaGrid.NameToID(placeName);
+		// Loner-Strike: a name of the map's own (not in BotChatter.db): a place all the same,
+		// with no voice line (it used to become "nowhere")
+		if (TheBotPhrases->IsValid() && place == UNDEFINED_PLACE)
+			place = TheBotPhrases->AddSilentPlace(placeName);
 
 		AddPlace(place);
 	}
