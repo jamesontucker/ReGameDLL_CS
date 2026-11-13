@@ -1878,6 +1878,10 @@ bool CCSBot::LsDrJumpGap(int i)
 	int idx = entindex();
 	Runner &r = s_run[idx];
 	float now = gpGlobals->time;
+	// (people have fallen jumping from here: wait for the floor instead, as they'd learn to)
+	bool trapDeath;
+	if (DeathsNear(pev->origin, 150.0f, &trapDeath) >= 2 && !trapDeath)
+		return false;
 	for (int k = i + 1; k < m_pathLength && k <= i + 5; k++)
 	{
 		const CNavArea *C = m_path[k].area;
@@ -1924,48 +1928,7 @@ bool CCSBot::LsDrJumpGap(int i)
 		return true;
 	}
 
-	// (one big area over the hole - a floor learned whole that's broken now: straight on along the
-	// path, the first floor past the hole within a jump)
-	Vector ahead = m_path[Q_min(i + 1, m_pathLength - 1)].pos;
-	Vector2D d = (ahead - pev->origin).Make2D();
-	float len = d.Length();
-	if (len < 1.0f)
-		return false;
-	d = d / len;
-	float feet = GetFeetZ();
-	float edge = -1.0f, land = -1.0f, landZ = 0.0f;
-	for (float a = 0.0f; a <= 340.0f; a += 8.0f)
-	{
-		float z;
-		Vector n;
-		Vector p(pev->origin.x + d.x * a, pev->origin.y + d.y * a, feet + 44.0f);
-		bool ground = GroundBelow(p, 44.0f + 150.0f, &z, &n) && z > feet - 150.0f && z < feet + 40.0f && n.z >= 0.7f
-			&& !DeadlyAt(s_hurts, Vector(p.x, p.y, z));
-		if (edge < 0.0f)
-		{
-			if (!ground || z < feet - 20.0f)
-				edge = a;
-		}
-		else if (ground && z >= feet - 60.0f)
-		{
-			land = a + 20.0f;
-			landZ = z;
-			break;
-		}
-	}
-	if (edge < 0.0f || land < 0.0f || land - edge > 180.0f)
-		return false;
-	r.gapArmed = true;
-	r.tele = false;
-	r.armedAt = now;
-	r.landing = Vector(pev->origin.x + d.x * land, pev->origin.y + d.y * land, landZ);
-	r.gapDir = d;
-	r.edge = DotProduct(pev->origin.Make2D(), d) + edge - 4.0f;
-	r.duckJump = landZ > feet + 12.0f;
-	m_goalPosition = r.landing;
-	SetLookAt("Loner-Strike: the jump", &r.landing, PRIORITY_HIGH, 0.3f);
-	LsWhy("deathrun: jumps the hole");
-	return true;
+	return false;
 }
 
 // Each command: the jump across a gap, timed at the edge (a think is too coarse for that), with a
