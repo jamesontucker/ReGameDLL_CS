@@ -1751,6 +1751,10 @@ void CCSBot::LsDrPathTick()
 			there = false;
 		if (!there)
 		{
+			// a gap it can jump (a trap floor gone, a broken stretch): the next floor further along
+			// within a running jump - jumped, after a moment's look (the careful look longer)
+			if (r.floorWaitSince > 0.0f && now - r.floorWaitSince > 0.6f + 1.5f * (1.0f - LsAggro()) && LsDrJumpGap(i))
+				return;
 			if (r.floorWaitSince <= 0.0f)
 				r.floorWaitSince = now;
 			if (now - r.floorWaitSince > LsDrFloorPatience(B))
@@ -1767,6 +1771,61 @@ void CCSBot::LsDrPathTick()
 		}
 	}
 	r.floorWaitSince = 0.0f;
+}
+
+// The floor of path stretch i is gone: the first floor past it along the path within a running
+// jump (180 units across, up to 40 up, 150 down), the edge where this floor ends, a jump armed
+bool CCSBot::LsDrJumpGap(int i)
+{
+	int idx = entindex();
+	Runner &r = s_run[idx];
+	float now = gpGlobals->time;
+	for (int k = i + 1; k < m_pathLength && k <= i + 5; k++)
+	{
+		const CNavArea *C = m_path[k].area;
+		if (C == m_path[i].area || m_path[k].ladder)
+			continue;
+		Vector land;
+		C->GetClosestPointOnArea(&pev->origin, &land);
+		Vector2D d = (land - pev->origin).Make2D();
+		float len = d.Length();
+		if (len < 16.0f || len > 260.0f)
+			continue;
+		d = d / len;
+		land.x += d.x * 20.0f;
+		land.y += d.y * 20.0f;
+		land.z = C->GetZ(&land);
+		float feet = GetFeetZ();
+		if (land.z > feet + 40.0f || land.z < feet - 150.0f || !LsDrFloorThere(C, land, 0.6f))
+			continue;
+		// where the floor under it ends, that way
+		float edge = -1.0f;
+		for (float a = 0.0f; a <= len; a += 8.0f)
+		{
+			float z;
+			Vector n;
+			Vector p(pev->origin.x + d.x * a, pev->origin.y + d.y * a, feet + 24.0f);
+			if (!GroundBelow(p, 60.0f, &z, &n))
+			{
+				edge = a;
+				break;
+			}
+		}
+		if (edge < 0.0f || len - edge > 180.0f)
+			continue;
+		r.gapArmed = true;
+		r.tele = false;
+		r.armedAt = now;
+		r.landing = land;
+		r.gapDir = d;
+		r.edge = DotProduct(pev->origin.Make2D(), d) + edge - 4.0f;
+		r.duckJump = land.z > feet + 12.0f;
+		m_goalPosition = land;
+		SetLookAt("Loner-Strike: the jump", &land, PRIORITY_HIGH, 0.3f);
+		LsWhy("deathrun: jumps the gap");
+		return true;
+	}
+	return false;
 }
 
 // Each command: the jump across a gap, timed at the edge (a think is too coarse for that), with a

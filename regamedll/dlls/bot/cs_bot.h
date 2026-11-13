@@ -1775,6 +1775,7 @@ public:
 	bool LsDrRunner() const;						// a runner (deathrun players pass through each other: no queueing)
 private:
 	bool LsDrActivatorTick();
+	bool LsDrJumpGap(int i);						// the floor ahead is gone: jump to the next one, if it's in reach
 	int m_lsDrLife = -1;							// the life its run is for (a respawn starts a new one)
 };
 
