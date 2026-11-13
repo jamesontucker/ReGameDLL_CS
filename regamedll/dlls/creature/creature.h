@@ -107,7 +107,7 @@ enum LsCreatureSound
 	LSS_COUNT
 };
 
-const int LS_CREATURE_MAX_TYPES = 32;
+const int LS_CREATURE_MAX_TYPES = 48;
 const int LS_CREATURE_MAX_SOUNDS = 6;		// per kind
 const int LS_CREATURE_MAX_LIST = 128;		// registered creatures (alive or dead), all providers
 

@@ -762,6 +762,60 @@ static void LsBuiltinTypes()
 	Q_strlcpy(t->sound[LSS_ATTACK], "squeek/sqk_hunt2.wav");
 	Q_strlcpy(t->sound[LSS_DIE], "squeek/sqk_blast1.wav squeek/sqk_die1.wav");
 
+	t = LsAddType("babycrab");
+	Q_strlcpy(t->display, "Baby headcrab");
+	t->health = 8.0f;
+	t->speed = 230.0f;
+	t->walkSpeed = 80.0f;
+	t->damage = 3.0f;
+	t->attackRange = 56.0f;
+	t->attackRate = 2.0f;
+	t->attackDelay = 0.2f;
+	t->detectRadius = 900.0f;
+	t->behaviour = LSB_CHASE;
+	t->corpseTime = 1.5f;
+	t->frags = 0;
+	t->bloodColor = BLOOD_COLOR_YELLOW;
+	Q_strlcpy(t->models, "models/baby_headcrab.mdl models/headcrab.mdl");	// (its leap is its range-attack sequence)
+	t->hullMin = Vector(-8, -8, 0);
+	t->hullMax = Vector(8, 8, 30);
+	t->fallbackGlowColor = Vector(200, 200, 120);
+	for (int s = 0; s < LSS_COUNT; s++)
+		t->sound[s][0] = '\0';
+	Q_strlcpy(t->sound[LSS_ATTACK], "headcrab/hc_attack1.wav headcrab/hc_attack2.wav");
+	Q_strlcpy(t->sound[LSS_HIT], "headcrab/hc_headbite.wav");
+	Q_strlcpy(t->sound[LSS_DIE], "headcrab/hc_die1.wav headcrab/hc_die2.wav");
+
+	t = LsAddType("miniturret");
+	Q_strlcpy(t->display, "Mini turret");
+	t->category = LSC_MECHANICAL;
+	t->health = 80.0f;
+	t->moves = false;
+	t->speed = 0.0f;
+	t->walkSpeed = 0.0f;
+	t->attack = LSA_RANGED;
+	t->damage = 4.0f;
+	t->attackRange = 900.0f;
+	t->attackRate = 6.0f;
+	t->attackDelay = 0.05f;
+	t->spread = 4.0f;
+	t->detectFov = 360.0f;
+	t->hearScale = 0.0f;
+	t->behaviour = LSB_GUARD;
+	t->bloodColor = DONT_BLEED;
+	t->corpseTime = 15.0f;
+	Q_strlcpy(t->models, "models/miniturret.mdl models/sentry.mdl");
+	Q_strlcpy(t->anim[LSAN_IDLE], "spin");
+	Q_strlcpy(t->anim[LSAN_ATTACK], "fire");
+	Q_strlcpy(t->anim[LSAN_DIE], "die");
+	t->hullMin = Vector(-16, -16, 0);
+	t->hullMax = Vector(16, 16, 32);
+	for (int s = 0; s < LSS_COUNT; s++)
+		t->sound[s][0] = '\0';
+	Q_strlcpy(t->sound[LSS_ALERT], "turret/tu_alert.wav turret/tu_spinup.wav");
+	Q_strlcpy(t->sound[LSS_ATTACK], "turret/tu_fire1.wav");
+	Q_strlcpy(t->sound[LSS_DIE], "turret/tu_die.wav turret/tu_die2.wav turret/tu_die3.wav");
+
 	t = LsAddType("assassin");
 	Q_strlcpy(t->display, "Assassin");
 	t->category = LSC_SPECIAL;
@@ -1217,6 +1271,8 @@ static const LsKnownModel s_knownModels[] =
 	{ "models/w_squeak.mdl", 12360, 0x1437f971u, 4 },
 	{ "models/controller.mdl", 187652, 0xff9d759cu, 19 },
 	{ "models/barnacle.mdl", 41752, 0x94c9ecf3u, 7 },
+	{ "models/baby_headcrab.mdl", 36024, 0x52698e53u, 13 },
+	{ "models/miniturret.mdl", 13876, 0x179014a3u, 6 },
 };
 
 // A loud word when the server's copy of a Half-Life model isn't Steam's current one: players
