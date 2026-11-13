@@ -859,6 +859,7 @@ struct Runner
 	int waitTrap = -1;				// the trap it's waiting at (or waited at: then it goes)
 	int passedTrap = -1;
 	float floorWaitSince = 0.0f;	// waiting for a floor that isn't there
+	float teleWaitSince = 0.0f;		// standing in a teleport that doesn't send it anywhere
 	// a jump across a gap, armed by the path
 	bool gapArmed = false;
 	Vector takeoff, landing;
@@ -1529,6 +1530,21 @@ void CCSBot::LsDrPathTick()
 			{
 				r.tele = true;
 				m_goalPosition = tl.at;
+				// (in it a while and still here: it's switched off - another way for a while)
+				if ((pev->origin - tl.at).Make2D().IsLengthLessThan(40.0f))
+				{
+					if (r.teleWaitSince <= 0.0f)
+						r.teleWaitSince = now;
+					else if (now - r.teleWaitSince > 2.5f)
+					{
+						LsForceBadArea(A, 30.0f);
+						DestroyPath();
+						r.teleWaitSince = 0.0f;
+						LsWhy("deathrun: teleport off");
+					}
+				}
+				else
+					r.teleWaitSince = 0.0f;
 				break;
 			}
 		if (r.tele)
