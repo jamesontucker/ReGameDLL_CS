@@ -702,6 +702,13 @@ void CCreatureImprov::UpdatePosition(float deltaT)
 		ApplyForce(to * -(spring - range));
 	}
 
+	// (the pushes come on top of the speed: cap again, and a stopped one - swinging, flinching,
+	// standing - only gets nudged, it doesn't drift through a crowd mid-swing)
+	float capSpeed = (m_moveType == Stopped) ? 20.0f : Q_max(MaxSpeed(), 30.0f);
+	float pushed = m_vel.Length();
+	if (pushed > capSpeed)
+		m_vel = m_vel * (capSpeed / pushed);
+
 	m_creature->pev->velocity.x = m_vel.x;
 	m_creature->pev->velocity.y = m_vel.y;
 }
