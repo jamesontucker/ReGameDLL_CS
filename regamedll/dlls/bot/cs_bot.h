@@ -1702,6 +1702,8 @@ public:
 		Vector at;
 		float radius = 0.0f;						// what counts as there (capture, extract, hold area)
 		int ent = 0;								// the entity it's about (a crate, a platform), 0 none
+		EntityHandle<CBaseEntity> thing;			// ...kept by handle (gone: the goal ends)
+		Vector onMesh;								// the point on the nav mesh it walks to
 		int prio = 50;								// 0-100: 80 and up every bot does it, below 30 a hint
 		float until = 0.0f;							// 0 until cleared
 		bool care = true;							// this bot took it up (its persona decided, once)
@@ -1724,6 +1726,7 @@ private:
 	Vector m_lsModeMoveTo;							// where its last mode MoveTo was headed
 	float m_lsModeMoveAt = -1.0f;					// ...sent then
 	float m_lsModeEscapeAt = -1.0f;					// last sent out of a zone then
+	float m_lsModeEscapeState = -1.0f;				// ...the MoveTo that started (its state time)
 	float m_lsModeScanAt = 0.0f;					// next look for a mode enemy (a creature)
 	EntityHandle<CBaseEntity> m_lsModeTarget;		// the mode enemy it's shooting
 	float m_lsModeStillUntil = 0.0f;				// standing still till then (on a platform, waiting for it)

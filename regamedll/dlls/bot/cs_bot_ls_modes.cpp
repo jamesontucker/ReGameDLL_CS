@@ -584,8 +584,20 @@ bool CCSBot::LsModeCares(int kind, int prio)
 
 // A new goal: one of each kind (the same kind again replaces it); with every slot taken, the
 // least important goes if the new one matters more
+static Vector LsModeOnMesh(const Vector &pos);
+
 void CCSBot::LsModeSetGoal(int kind, const Vector &at, float radius, int ent, int prio, float secs)
 {
+	// (an entity named has to be there now; it's kept by handle, so a new one in its slot later
+	// isn't mistaken for it)
+	CBaseEntity *pThing = nullptr;
+	if (ent > 0)
+	{
+		edict_t *pEdict = INDEXENT(ent);
+		if (!pEdict || pEdict->free || !pEdict->pvPrivateData)
+			return;
+		pThing = CBaseEntity::Instance(pEdict);
+	}
 	int slot = -1;
 	for (int i = 0; i < LS_MODE_GOALS && slot < 0; i++)
 		if (m_lsModeGoal[i].kind == kind)
@@ -607,6 +619,8 @@ void CCSBot::LsModeSetGoal(int kind, const Vector &at, float radius, int ent, in
 	g.at = at;
 	g.radius = radius > 0.0f ? radius : s_lsGoalRadius[kind];
 	g.ent = ent;
+	g.thing = pThing;
+	g.onMesh = LsModeOnMesh(at);
 	g.prio = prio;
 	g.until = LsModeUntil(secs);
 	g.care = LsModeCares(kind, prio);
@@ -710,13 +724,14 @@ bool CCSBot::LsModeEscape()
 
 	if (!go)
 		return false;
-	out = LsModeOnMesh(out);
-	if (LsModeHeadedTo(out) || (IsMovingTo() && now - m_lsModeEscapeAt < 2.0f))
+	// (already on its way out: sent lately, or its escape is still the MoveTo it's on)
+	if (IsMovingTo() && (now - m_lsModeEscapeAt < 2.0f || Q_fabs(m_stateTimestamp - m_lsModeEscapeState) < 0.05f))
 		return true;
+	out = LsModeOnMesh(out);
 	m_lsModeEscapeAt = now;
 	m_lsModeMoveTo = out;
 	MoveTo(&out, FASTEST_ROUTE);
-	m_lsModeMoveAt = m_stateTimestamp;
+	m_lsModeMoveAt = m_lsModeEscapeState = m_stateTimestamp;
 	LsWhy("mode zone");
 	return true;
 }
@@ -776,8 +791,7 @@ void CCSBot::LsModeTick()
 		LsModeGoal &g = m_lsModeGoal[i];
 		if (g.kind == LS_GOAL_NONE)
 			continue;
-		edict_t *pEnt = g.ent > 0 ? INDEXENT(g.ent) : nullptr;
-		if ((g.until > 0.0f && now >= g.until) || (g.ent > 0 && (!pEnt || pEnt->free || !pEnt->pvPrivateData)))
+		if ((g.until > 0.0f && now >= g.until) || (g.ent > 0 && !g.thing.IsValid()))
 		{
 			LsModeClearGoals(g.kind, 0);
 			continue;
@@ -838,7 +852,7 @@ void CCSBot::LsModeGoalTick(LsModeGoal &g)
 			LsModeClearGoals(LS_GOAL_RIDE, 0);
 			return;
 		}
-		CBaseEntity *pPlat = g.ent > 0 ? CBaseEntity::Instance(INDEXENT(g.ent)) : nullptr;
+		CBaseEntity *pPlat = g.ent > 0 ? (CBaseEntity *)g.thing : nullptr;
 		if (pPlat)
 		{
 			if (pev->groundentity == pPlat->edict())
@@ -876,7 +890,7 @@ void CCSBot::LsModeGoalTick(LsModeGoal &g)
 	if (g.kind == LS_GOAL_LOOT || g.kind == LS_GOAL_USE)
 	{
 		Vector at = g.at;
-		CBaseEntity *pThing = g.ent > 0 ? CBaseEntity::Instance(INDEXENT(g.ent)) : nullptr;
+		CBaseEntity *pThing = g.ent > 0 ? (CBaseEntity *)g.thing : nullptr;
 		if (pThing)
 			at = pThing->Center();
 		Vector toThing = at - pev->origin;
@@ -964,7 +978,7 @@ void CCSBot::LsModeGoalTick(LsModeGoal &g)
 	}
 
 	// on its way (again, if something took it off); a spot it can't get to rests a while
-	if (LsModeHeadedTo(LsModeOnMesh(g.at)) || now < g.nextTry)
+	if (now < g.nextTry || LsModeHeadedTo(g.onMesh))
 		return;
 	// (in cover a moment after being shot at: it waits)
 	if (IsHiding() && GetTimeSinceAttacked() < 5.0f)
@@ -976,7 +990,7 @@ void CCSBot::LsModeGoalTick(LsModeGoal &g)
 		return;
 	}
 	g.nextTry = now + 2.0f;
-	LsModeMove(LsModeOnMesh(g.at), hurry);
+	LsModeMove(g.onMesh, hurry);
 	LsWhy("mode goal");
 }
 
