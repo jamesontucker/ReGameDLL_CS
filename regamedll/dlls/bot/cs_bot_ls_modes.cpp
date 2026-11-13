@@ -372,7 +372,7 @@ bool CCSBot::LsModeLetsBe(CBasePlayer *pPlayer)
 	if (pPlayer->IsBot())
 	{
 		CCSBot *pOther = static_cast<CCSBot *>(pPlayer);
-		threat = pOther->IsAttacking() && pOther->GetEnemy() == this;
+		threat = pOther->IsAttacking() && pOther->GetEnemy() == this && pOther->IsEnemyVisible();
 	}
 	else if (d < 250.0f)
 	{
@@ -1057,6 +1057,11 @@ bool CCSBot::LsModeAttractTick(bool gearing)
 void CCSBot::LsModeTick()
 {
 	m_lsModePressed = 0;
+	// (a peace ends any fight, also one carried over from before it in a state the rest of this
+	// skips - a bot still in the buy state kept "attacking" from the round start, and set its
+	// neighbours off when the fighting began)
+	if (s_lsPeace && IsAttacking())
+		StopAttacking();
 	if (!s_lsModeOn || !IsAlive() || IsBuying() || (CSGameRules() && CSGameRules()->IsFreezePeriod()))
 		return;
 
