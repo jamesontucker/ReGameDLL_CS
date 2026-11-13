@@ -255,6 +255,12 @@ void CBotManager::__API_HOOK(OnEvent)(GameEventType event, CBaseEntity* pEntity,
 	{
 		g_pHostages->OnEvent(event, pEntity, pOther);
 	}
+
+	// Loner-Strike: creatures hear what the bots hear (nothing to do when there are none)
+	if (LsCreaturesExist())
+	{
+		LsCreaturesOnEvent(event, pEntity, pOther);
+	}
 }
 
 // Add an active grenade to the bot's awareness

@@ -129,6 +129,8 @@
     <ClCompile Include="..\dlls\bot\cs_bot_ls_moves.cpp" />
     <ClCompile Include="..\dlls\bot\cs_bot_ls_modes.cpp" />
     <ClCompile Include="..\dlls\bot\cs_bot_surf.cpp" />
+    <ClCompile Include="..\dlls\creature\creature.cpp" />
+    <ClCompile Include="..\dlls\creature\creature_improv.cpp" />
     <ClCompile Include="..\dlls\bot\cs_bot_radio.cpp">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
       </ExcludedFromBuild>
@@ -698,6 +700,7 @@
     <ClInclude Include="..\dlls\globals.h" />
     <ClInclude Include="..\dlls\healthkit.h" />
     <ClInclude Include="..\dlls\hintmessage.h" />
+    <ClInclude Include="..\dlls\creature\creature.h" />
     <ClInclude Include="..\dlls\hostage\hostage.h" />
     <ClInclude Include="..\dlls\hostage\hostage_improv.h" />
     <ClInclude Include="..\dlls\hostage\hostage_localnav.h" />
