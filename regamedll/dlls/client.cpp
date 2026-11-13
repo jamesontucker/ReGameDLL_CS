@@ -3808,6 +3808,9 @@ void EXT_FUNC ServerDeactivate()
 		g_pHostages->ServerDeactivate();
 	}
 
+	// Loner-Strike: the creature list goes with the map
+	LsCreaturesServerDeactivate();
+
 	WeaponInfoReset();
 }
 

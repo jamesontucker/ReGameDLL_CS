@@ -127,6 +127,9 @@ using FloatRef = float;
 #include "hostage/hostage.h"
 #include "hostage/hostage_localnav.h"
 
+// Loner-Strike creatures
+#include "creature/creature.h"
+
 #include "bot/cs_bot.h"
 
 // Addons

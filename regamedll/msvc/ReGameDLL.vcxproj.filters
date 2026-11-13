@@ -46,6 +46,9 @@
     <Filter Include="dlls\common">
       <UniqueIdentifier>{5b3411a4-0455-4c6f-ba83-e0faf0bdfb84}</UniqueIdentifier>
     </Filter>
+    <Filter Include="dlls\creature">
+      <UniqueIdentifier>{3c1d6f0e-8a52-4b7e-9e4d-5f2a1c7b9e31}</UniqueIdentifier>
+    </Filter>
     <Filter Include="dlls\hostage">
       <UniqueIdentifier>{6983a983-71e2-4c14-a013-d4dc5e34d60c}</UniqueIdentifier>
     </Filter>
@@ -386,6 +389,12 @@
     </ClCompile>
     <ClCompile Include="..\dlls\bot\cs_bot_weapon.cpp">
       <Filter>dlls\bot</Filter>
+    </ClCompile>
+    <ClCompile Include="..\dlls\creature\creature.cpp">
+      <Filter>dlls\creature</Filter>
+    </ClCompile>
+    <ClCompile Include="..\dlls\creature\creature_improv.cpp">
+      <Filter>dlls\creature</Filter>
     </ClCompile>
     <ClCompile Include="..\dlls\hostage\hostage.cpp">
       <Filter>dlls\hostage</Filter>
@@ -826,6 +835,9 @@
     </ClInclude>
     <ClInclude Include="..\dlls\career_tasks.h">
       <Filter>dlls</Filter>
+    </ClInclude>
+    <ClInclude Include="..\dlls\creature\creature.h">
+      <Filter>dlls\creature</Filter>
     </ClInclude>
     <ClInclude Include="..\dlls\hostage\hostage.h">
       <Filter>dlls\hostage</Filter>
