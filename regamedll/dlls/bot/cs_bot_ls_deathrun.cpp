@@ -245,6 +245,28 @@ static bool GapJumpVec(const Vector &p, Vector2D d, bool runup, Vector *land, Ve
 		}
 		if (dz < -180.0f)
 			continue;
+		// where a full running jump really comes down at that height (it doesn't stop at the near
+		// edge: a jump onto a small block overshoots it) - floor there too, at about that height
+		{
+			float disc = vz * vz - 2.0f * g * (dz - (duck ? 18.0f : 0.0f));
+			float tDown = disc > 0.0f ? (vz + sqrtf(disc)) / g : t;
+			float reach = 0.5f * GenerationStepSize + vh * tDown;
+			bool solid = true;
+			for (float off = -16.0f; off <= 16.0f && solid; off += 16.0f)
+			{
+				float rz;
+				Vector rn;
+				Vector rc(p.x + d.x * (reach + off), p.y + d.y * (reach + off), gz + 40.0f);
+				if (!GroundBelow(rc, 60.0f, &rz, &rn) || Q_fabs(rz - gz) > 20.0f || DeadlyAt(s_learnHurts, Vector(rc.x, rc.y, rz)))
+					solid = false;
+			}
+			if (!solid)
+			{
+				if (say)
+					CONSOLE_ECHO("  %.0f: a full jump comes down %.0f out, and there's no floor there\n", L, reach);
+				continue;
+			}
+		}
 		// the landing has room for a standing player, and isn't deadly
 		Vector at(col.x, col.y, gz + HalfHumanHeight + 1.0f);
 		UTIL_TraceHull(at, at, ignore_monsters, human_hull, nullptr, &tr);
