@@ -374,9 +374,21 @@ void LsCourseLinkAreas()
 	int made = 0, noArea = 0, same = 0, already = 0;
 	for (const Link &l : s_learnLinks)
 	{
-		Vector a = l.from + Vector(0, 0, 8.0f), b = l.to + Vector(0, 0, 8.0f);
+		// (looked up a little way in from each end: a node on an area's edge can fall in the grid
+		// cell next to it)
+		Vector2D d;
+		DirectionToVector2D((NavDirType)l.dir, &d);
+		Vector a = l.from + Vector(-d.x * 6.0f, -d.y * 6.0f, 8.0f), b = l.to + Vector(d.x * 6.0f, d.y * 6.0f, 8.0f);
 		CNavArea *from = TheNavAreaGrid.GetNavArea(&a);
 		CNavArea *to = TheNavAreaGrid.GetNavArea(&b);
+		if (!from)
+			from = TheNavAreaGrid.GetNearestNavArea(&a);
+		if (!to)
+			to = TheNavAreaGrid.GetNearestNavArea(&b);
+		if (from && (*from->GetCenter() - a).Make2D().IsLengthGreaterThan(400.0f))
+			from = nullptr;
+		if (to && (*to->GetCenter() - b).Make2D().IsLengthGreaterThan(400.0f))
+			to = nullptr;
 		if (!from || !to)
 		{
 			noArea++;
