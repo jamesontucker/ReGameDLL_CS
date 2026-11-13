@@ -101,6 +101,15 @@ static void DeadlyHurts(std::vector<Box> &out)
 	}
 }
 
+// A player standing on this floor spot is in one (feet to head overlapping the trigger)
+static bool DeadlyAt(const std::vector<Box> &boxes, const Vector &floor)
+{
+	for (const Box &b : boxes)
+		if (floor.x >= b.lo.x && floor.x <= b.hi.x && floor.y >= b.lo.y && floor.y <= b.hi.y && floor.z <= b.hi.z + 1.0f && floor.z + HumanHeight >= b.lo.z)
+			return true;
+	return false;
+}
+
 static bool InBoxes(const std::vector<Box> &boxes, const Vector &p, float pad = 0.0f)
 {
 	for (const Box &b : boxes)
@@ -198,7 +207,7 @@ static bool GapJump(const CNavNode *node, int dir, Vector *land, Vector *landNor
 		UTIL_TraceHull(at, at, ignore_monsters, human_hull, nullptr, &tr);
 		if (tr.fStartSolid || tr.fAllSolid)
 			continue;
-		if (InBoxes(s_learnHurts, Vector(col.x, col.y, gz + 8.0f)))
+		if (DeadlyAt(s_learnHurts, Vector(col.x, col.y, gz)))
 			continue;
 		// the arc, in short straight pieces, with the hull it has in the air (tucked: the short one)
 		bool clear = true;
@@ -290,7 +299,7 @@ CNavNode *LsCourseSeedSearch()
 			const CNavNode *adj = node->GetConnectedNode((NavDirType)dir);
 			if (adj && adj->GetPosition()->z > node->GetPosition()->z - 60.0f)
 				continue;
-			if (InBoxes(s_learnHurts, *node->GetPosition() + Vector(0, 0, 8.0f)))
+			if (DeadlyAt(s_learnHurts, *node->GetPosition()))
 				continue;
 			Vector land, n;
 			if (!GapJump(node, dir, &land, &n))
@@ -612,7 +621,7 @@ static void Build()
 	DeadlyHurts(s_hurts);
 	s_deadly.assign(n, 0);
 	for (size_t i = 0; i < n; i++)
-		s_deadly[i] = InBoxes(s_hurts, *s_areas[i]->GetCenter() + Vector(0, 0, 10.0f)) ? 1 : 0;
+		s_deadly[i] = DeadlyAt(s_hurts, *s_areas[i]->GetCenter()) ? 1 : 0;
 
 	CBaseEntity *pStart = UTIL_FindEntityByClassname(nullptr, "info_player_start");
 	CBaseEntity *pTStart = UTIL_FindEntityByClassname(nullptr, "info_player_deathmatch");
@@ -656,11 +665,11 @@ static void Build()
 				sum = sum + (t.parts[k].lo + t.parts[k].hi) * 0.5f;
 			t.mid = sum / float(t.partCount);
 			// where it's pressed from: the floor nearest it
-			CNavArea *near = TheNavAreaGrid.GetNearestNavArea(&t.btn, true);
-			if (near)
+			CNavArea *pressArea = TheNavAreaGrid.GetNearestNavArea(&t.btn, true);
+			if (pressArea)
 			{
-				near->GetClosestPointOnArea(&t.btn, &t.spot);
-				t.spotIdx = Index(near);
+				pressArea->GetClosestPointOnArea(&t.btn, &t.spot);
+				t.spotIdx = Index(pressArea);
 				t.reachT = t.spotIdx >= 0 && s_progT[t.spotIdx] >= 0.0f && (t.spot - t.btn).Make2D().IsLengthLessThan(140.0f);
 			}
 			// how far along the course: the nearest course area to what it moves
@@ -1311,10 +1320,10 @@ static bool LsDrSeparated(const CNavArea *a, const CNavArea *b)
 	return Q_max(dx, dy) > 10.0f;
 }
 
-static bool LsDrFloorThere(const CNavArea *area, const Vector &near)
+static bool LsDrFloorThere(const CNavArea *area, const Vector &nearPos)
 {
 	Vector p;
-	area->GetClosestPointOnArea(&near, &p);
+	area->GetClosestPointOnArea(&nearPos, &p);
 	float z;
 	Vector n;
 	return GroundBelow(Vector(p.x, p.y, area->GetZ(&p) + 40.0f), 100.0f, &z, &n);
