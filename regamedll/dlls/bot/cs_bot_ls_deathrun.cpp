@@ -1126,7 +1126,7 @@ float LsDrAreaCost(const CNavArea *area)
 		return 1.0f;
 	bool trap;
 	int n = DeathsNear(*area->GetCenter(), 100.0f, &trap);
-	return trap ? 1.0f : 1.0f + Q_min(6.0f, 1.5f * float(n));
+	return trap ? 1.0f : 1.0f + Q_min(19.0f, 1.5f * float(n));	// (a place people keep falling: well out of the way)
 }
 
 // ---- the bots -----------------------------------------------------------------------------------
@@ -1658,6 +1658,14 @@ void CCSBot::LsDrPathTick()
 			{
 				r.tele = true;
 				m_goalPosition = tl.at;
+				// (close: walked straight into it, LsDrDrive - not round the edge of a hole beside it)
+				if ((pev->origin - tl.at).Make2D().IsLengthLessThan(200.0f))
+				{
+					r.gapArmed = true;
+					r.armedAt = now;
+					r.landing = tl.at;
+					r.jumpedAt = -9.0f;
+				}
 				// (in it a while and still here: it's switched off - another way for a while)
 				if ((pev->origin - tl.at).Make2D().IsLengthLessThan(40.0f))
 				{
@@ -1771,7 +1779,7 @@ void LsDrDrive(CBasePlayer *bot, float *forward, float *strafe, unsigned short *
 	if (idx < 1 || idx > MAX_CLIENTS)
 		return;
 	Runner &r = s_run[idx];
-	if (!r.gapArmed || r.tele || !LsDrOn())
+	if (!r.gapArmed || !LsDrOn())
 		return;
 	CCSBot *me = static_cast<CCSBot *>(bot);
 	float now = gpGlobals->time;
@@ -1785,7 +1793,16 @@ void LsDrDrive(CBasePlayer *bot, float *forward, float *strafe, unsigned short *
 	}
 	Vector2D o = bot->pev->origin.Make2D();
 	Vector2D wish;
-	if (ground)
+	if (r.tele)
+	{
+		// (into the teleport: straight at its middle, no jump)
+		wish = r.landing.Make2D() - o;
+		float len = wish.Length();
+		if (len < 4.0f)
+			return;
+		wish = wish / len;
+	}
+	else if (ground)
 	{
 		float toEdge = r.edge - DotProduct(o, r.gapDir);
 		float speed = DotProduct(bot->pev->velocity.Make2D(), r.gapDir);
