@@ -357,6 +357,9 @@ static void LsBuiltinTypes()
 	t->bloodColor = DONT_BLEED;
 	t->corpseTime = 15.0f;
 	Q_strlcpy(t->models, "models/sentry.mdl models/hostage.mdl");
+	Q_strlcpy(t->anim[LSAN_IDLE], "spin");		// (sentry.mdl has no activities: its sequences by name)
+	Q_strlcpy(t->anim[LSAN_ATTACK], "fire");
+	Q_strlcpy(t->anim[LSAN_DIE], "die");
 	t->hullMin = Vector(-16, -16, 0);
 	t->hullMax = Vector(16, 16, 48);
 	t->fallbackGlowColor = Vector(40, 80, 200);
@@ -2764,6 +2767,14 @@ void CLsCreature::StartAttack()
 	const LsCreatureType *t = GetType();
 	m_attackStart = gpGlobals->time;
 	m_attackLanded = false;
+
+	// (planted for the swing from its first frame, not sliding into it)
+	if (t->moves)
+	{
+		m_improv->Stop();
+		pev->velocity.x = pev->velocity.y = 0.0f;
+	}
+
 	SetAnim(LSAN_ATTACK, true);
 
 	// (the swing fits the attack rate: a long HL swing plays faster, never slower than made)
