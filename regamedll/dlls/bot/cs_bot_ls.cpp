@@ -68,8 +68,12 @@ cvar_t cv_bot_ls_trace      = { "bot_ls_trace", "0", FCVAR_SERVER, 0.0f, nullptr
 cvar_t cv_ls_sites          = { "ls_sites", "", 0, 0.0f, nullptr };
 const char LS_PEEK[] = "Loner-Strike: peek";
 
+extern cvar_t cv_bot_ls_surf, cv_bot_ls_surf_land;	// bot/cs_bot_surf.cpp
+
 void Bot_LsRegisterCVars()
 {
+	CVAR_REGISTER(&cv_bot_ls_surf);
+	CVAR_REGISTER(&cv_bot_ls_surf_land);
 	CVAR_REGISTER(&cv_bot_ls_own_memory);
 	CVAR_REGISTER(&cv_bot_ls_routes);
 	CVAR_REGISTER(&cv_bot_ls_lines);

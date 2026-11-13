@@ -151,6 +151,10 @@ void CCSBotManager::StartFrame()
 	if (UTIL_BotsInGame() > 0)
 		LsSightStep();
 
+	// (Loner-Strike: on a surf map with bot_ls_surf, where surfing gets you, worked out a little at a time)
+	if (UTIL_BotsInGame() > 0)
+		LsSurfStep();
+
 	// debug zone extent visualization
 	if (cv_bot_debug.value == 5.0f)
 	{

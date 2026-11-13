@@ -375,6 +375,9 @@
     <ClCompile Include="..\dlls\bot\cs_bot_ls_moves.cpp">
       <Filter>dlls\bot</Filter>
     </ClCompile>
+    <ClCompile Include="..\dlls\bot\cs_bot_surf.cpp">
+      <Filter>dlls\bot</Filter>
+    </ClCompile>
     <ClCompile Include="..\dlls\bot\cs_bot_radio.cpp">
       <Filter>dlls\bot</Filter>
     </ClCompile>
