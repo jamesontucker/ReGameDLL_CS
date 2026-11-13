@@ -114,11 +114,12 @@ static void DeadlyHurts(std::vector<Box> &out)
 	}
 }
 
-// A player standing on this floor spot is in one (feet to head overlapping the trigger)
+// A player standing on this floor spot is in one (feet to head overlapping the trigger, as the
+// engine tests it: both boxes padded a unit, so a floor 2 units over a deadly trigger still touches it)
 static bool DeadlyAt(const std::vector<Box> &boxes, const Vector &floor)
 {
 	for (const Box &b : boxes)
-		if (floor.x >= b.lo.x && floor.x <= b.hi.x && floor.y >= b.lo.y && floor.y <= b.hi.y && floor.z <= b.hi.z + 1.0f && floor.z + HumanHeight >= b.lo.z)
+		if (floor.x >= b.lo.x && floor.x <= b.hi.x && floor.y >= b.lo.y && floor.y <= b.hi.y && floor.z <= b.hi.z + 2.0f && floor.z + HumanHeight >= b.lo.z - 2.0f)
 			return true;
 	return false;
 }
@@ -171,10 +172,18 @@ static bool GroundBelow(const Vector &from, float depth, float *z, Vector *norma
 // The jump: 240 units/s along (a knife or pistol run, a little short of 250), 268 up (45 units
 // high), feet tucked 18 more for a landing higher up (a duck-jump); a hull that fits all the way;
 // a floor to land on that's flat enough, not a deadly trigger, not a fall that hurts much
+static bool GapJumpVec(const Vector &p, Vector2D d, bool runup, Vector *land, Vector *landNormal, bool say);
+
 static bool GapJumpAt(const Vector &p, int dir, bool runup, Vector *land, Vector *landNormal, bool say)
 {
 	Vector2D d;
 	DirectionToVector2D((NavDirType)dir, &d);
+	return GapJumpVec(p, d, runup, land, landNormal, say);
+}
+
+// The same check any way along the ground (d: a unit vector)
+static bool GapJumpVec(const Vector &p, Vector2D d, bool runup, Vector *land, Vector *landNormal, bool say)
+{
 
 	// room to stand where it takes off, and a step behind it to run up from
 	TraceResult tr;
@@ -1663,26 +1672,60 @@ static bool LsDrFloorThere(const CNavArea *area, const Vector &nearPos, float st
 	return false;
 }
 
-// Floors that come and go (platforms, trap floors, turning stones): when each area's floor was
-// last seen there, by anyone, this map - a floor that's been seen to come back is worth a longer wait
-static std::vector<float> s_floorSeenAt;
+// Floors that come and go (platforms, trap floors, turning stones), per area, by anyone this map:
+// when it was last there, when it went, the longest it's been seen gone before it came back, and
+// whether it was seen moving. A wait lasts as long as the evidence says it comes back: its own
+// cycle (and a bit), 8 s for a floor never seen to move or return - then it's gone: another way
+struct FloorLog { float there = -999.0f, goneSince = -1.0f, cycle = 0.0f; bool moves = false; };
+static std::vector<FloorLog> s_floorLog;
 
-static void LsDrFloorSeen(const CNavArea *area, bool there)
+static void LsDrFloorSeen(const CNavArea *area, bool there, bool moving = false)
 {
 	int i = Index(area);
 	if (i < 0)
 		return;
-	if (s_floorSeenAt.size() != s_areas.size())
-		s_floorSeenAt.assign(s_areas.size(), -999.0f);
+	if (s_floorLog.size() != s_areas.size())
+		s_floorLog.assign(s_areas.size(), FloorLog());
+	FloorLog &f = s_floorLog[i];
+	float now = gpGlobals->time;
+	if (f.there > now)
+		f = FloorLog();	// (a new map: the clock went back)
+	f.moves = f.moves || moving;
 	if (there)
-		s_floorSeenAt[i] = gpGlobals->time;
+	{
+		if (f.goneSince >= 0.0f)
+		{
+			f.cycle = Q_max(f.cycle, now - f.goneSince);
+			f.moves = true;
+		}
+		f.goneSince = -1.0f;
+		f.there = now;
+	}
+	else if (f.goneSince < 0.0f)
+		f.goneSince = now;
 }
 
 static float LsDrFloorPatience(const CNavArea *area)
 {
 	int i = Index(area);
-	bool comesBack = i >= 0 && size_t(i) < s_floorSeenAt.size() && gpGlobals->time - s_floorSeenAt[i] < 90.0f && s_floorSeenAt[i] <= gpGlobals->time;
-	return comesBack ? 30.0f : 12.0f;
+	if (i < 0 || size_t(i) >= s_floorLog.size())
+		return 8.0f;
+	const FloorLog &f = s_floorLog[i];
+	if (f.cycle > 0.0f)
+		return Q_min(30.0f, 1.3f * f.cycle + 1.0f);
+	return 8.0f;
+}
+
+// Is the floor under this spot a moving thing right now (a train, a turning door)
+static bool LsDrFloorMoving(const CNavArea *area)
+{
+	const Vector *c = area->GetCenter();
+	float z;
+	Vector n;
+	edict_t *hit = nullptr;
+	if (!GroundBelow(Vector(c->x, c->y, c->z + 40.0f), 100.0f, &z, &n, &hit) || !hit || FNullEnt(hit) || hit == INDEXENT(0))
+		return false;
+	return VARS(hit)->velocity.Length() > 1.0f || VARS(hit)->avelocity.Length() > 1.0f;
 }
 
 void CCSBot::LsDrPathTick()
@@ -1800,7 +1843,7 @@ void CCSBot::LsDrPathTick()
 		land.z = B->GetZ(&land);
 		// (the floor over there isn't there right now - a platform away, a trap floor open: wait)
 		bool there = LsDrFloorThere(B, land);
-		LsDrFloorSeen(B, there);
+		LsDrFloorSeen(B, there, there && LsDrFloorMoving(B));
 		// (and still there by the time it lands: a moving platform's timed, not jumped at blindly)
 		if (there && !LsDrFloorThere(B, land, 0.6f))
 			there = false;
@@ -1812,9 +1855,13 @@ void CCSBot::LsDrPathTick()
 					r.floorWaitSince = now;
 				if (now - r.floorWaitSince > LsDrFloorPatience(B))
 				{
-					LsForceBadArea(B, 20.0f);
+					// (gone: a jump over it if there's one, else another way)
+					if (LsDrJumpGap(i))
+						return;
+					LsForceBadArea(B, 60.0f);
 					DestroyPath();
 					r.floorWaitSince = 0.0f;
+					LsWhy("deathrun: floor gone, another way");
 					return;
 				}
 				r.holdUntil = Q_max(r.holdUntil, now + 0.3f);
@@ -1844,7 +1891,7 @@ void CCSBot::LsDrPathTick()
 		if ((pev->origin - m_path[i].pos).Make2D().IsLengthGreaterThan(120.0f))
 			break;
 		bool there = LsDrFloorThere(B, m_path[i].pos);
-		LsDrFloorSeen(B, there);
+		LsDrFloorSeen(B, there, there && LsDrFloorMoving(B));
 		if (there && !LsDrFloorThere(B, m_path[i].pos, 0.4f))
 			there = false;
 		if (!there)
@@ -1857,9 +1904,10 @@ void CCSBot::LsDrPathTick()
 				r.floorWaitSince = now;
 			if (now - r.floorWaitSince > LsDrFloorPatience(B))
 			{
-				LsForceBadArea(B, 20.0f);
+				LsForceBadArea(B, 60.0f);
 				DestroyPath();
 				r.floorWaitSince = 0.0f;
+				LsWhy("deathrun: floor gone, another way");
 				return;
 			}
 			r.holdUntil = Q_max(r.holdUntil, now + 0.3f);
@@ -1871,49 +1919,53 @@ void CCSBot::LsDrPathTick()
 	r.floorWaitSince = 0.0f;
 }
 
-// The floor of path stretch i is gone: the first floor past it along the path within a running
-// jump (180 units across, up to 40 up, 150 down), the edge where this floor ends, a jump armed
+// The floor of path stretch i is gone: a jump from its own spot that really works (checked like the
+// learner's), toward the path past it, landing nearer the end; armed for LsDrDrive
 bool CCSBot::LsDrJumpGap(int i)
 {
 	int idx = entindex();
 	Runner &r = s_run[idx];
 	float now = gpGlobals->time;
-	// (people have fallen jumping from here: wait for the floor instead, as they'd learn to)
+	// (people have fallen jumping from here: no, as they'd learn)
 	bool trapDeath;
 	if (DeathsNear(pev->origin, 150.0f, &trapDeath) >= 2 && !trapDeath)
 		return false;
+	int here = Index(m_lastKnownArea);
+	float hereToEnd = here >= 0 ? s_toEnd[here] : -1.0f;
+	float feet = GetFeetZ();
+	// each way toward the path's next points past the missing floor: where the floor under it ends
+	// that way, and the jump from there checked as the learner checks one (the arc's hull clear, a
+	// floor to land on that's not deadly, a fall it lives through), landing somewhere nearer the end
 	for (int k = i + 1; k < m_pathLength && k <= i + 5; k++)
 	{
-		const CNavArea *C = m_path[k].area;
-		if (C == m_path[i].area || m_path[k].ladder)
-			continue;
-		Vector land;
-		C->GetClosestPointOnArea(&pev->origin, &land);
-		Vector2D d = (land - pev->origin).Make2D();
+		Vector2D d = (m_path[k].pos - pev->origin).Make2D();
 		float len = d.Length();
-		if (len < 16.0f || len > 260.0f)
+		if (len < 24.0f)
 			continue;
 		d = d / len;
-		land.x += d.x * 20.0f;
-		land.y += d.y * 20.0f;
-		land.z = C->GetZ(&land);
-		float feet = GetFeetZ();
-		if (land.z > feet + 40.0f || land.z < feet - 150.0f || !LsDrFloorThere(C, land, 0.6f))
-			continue;
-		// where the floor under it ends, that way
 		float edge = -1.0f;
-		for (float a = 0.0f; a <= len; a += 8.0f)
+		for (float a = 0.0f; a <= 160.0f; a += 8.0f)
 		{
 			float z;
 			Vector n;
-			Vector p(pev->origin.x + d.x * a, pev->origin.y + d.y * a, feet + 24.0f);
-			if (!GroundBelow(p, 60.0f, &z, &n))
+			Vector q(pev->origin.x + d.x * a, pev->origin.y + d.y * a, feet + 24.0f);
+			if (!GroundBelow(q, 60.0f, &z, &n) || DeadlyAt(s_hurts, Vector(q.x, q.y, z)))
 			{
 				edge = a;
 				break;
 			}
 		}
-		if (edge < 0.0f || len - edge > 180.0f)
+		if (edge < 0.0f)
+			continue;
+		// (takes off half a step short of the edge, from the floor it's on)
+		Vector take(pev->origin.x + d.x * Q_max(0.0f, edge - 12.0f), pev->origin.y + d.y * Q_max(0.0f, edge - 12.0f), feet);
+		Vector land, n;
+		s_learnHurts = s_hurts;
+		if (!GapJumpVec(take, d, true, &land, &n, false))
+			continue;
+		Vector at = land + Vector(0, 0, 8.0f);
+		int li = Index(TheNavAreaGrid.GetNavArea(&at));
+		if (li < 0 || s_deadly[li] || (hereToEnd >= 0.0f && s_toEnd[li] >= 0.0f && s_toEnd[li] >= hereToEnd))
 			continue;
 		r.gapArmed = true;
 		r.tele = false;
@@ -1927,7 +1979,6 @@ bool CCSBot::LsDrJumpGap(int i)
 		LsWhy("deathrun: jumps the gap");
 		return true;
 	}
-
 	return false;
 }
 
