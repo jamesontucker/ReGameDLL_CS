@@ -1721,6 +1721,8 @@ public:
 	void LsModeInside(unsigned int *avoidMask) const;	// the avoid zones it's standing in (paths may leave them)
 	void LsModePostUpdate();						// after the state machine: a stand-still or step a goal asked for
 	bool LsModePeace();								// a mode's peace (a loot-up), or the moment after it: no player enemies
+	bool LsModeGearing();							// just after the peace: gearing up before hunting (40-80 s)
+	bool LsModeLetsBe(CBasePlayer *pPlayer);		// ...someone in sight left be (not right on it, nor coming at it)
 	const Vector *LsModeSpot() const;				// the spot it holds for a station (teammates pick others)
 	int LsModeGoalNow() const { return m_lsModeGoalOn >= 0 ? m_lsModeGoal[m_lsModeGoalOn].kind : 0; }	// what it's on (trace)
 	const LsModeGoal &LsModeGoalAt(int i) const { return m_lsModeGoal[i]; }
@@ -1740,7 +1742,7 @@ private:
 	bool LsModeHeadedTo(const Vector &to) const;
 	bool LsModeEscape();							// out of a no-go zone, into the safe zone (true: on its way)
 	void LsModeGoalTick(LsModeGoal &g);
-	bool LsModeAttractTick();						// hunting: off to somewhere a mode says is worth going (true: sent)
+	bool LsModeAttractTick(bool gearing = false);	// hunting: off to somewhere a mode says is worth going (true: sent)
 	float m_lsModeAttractAt = 0.0f;					// next roll for that
 	bool LsModeSees(CBaseEntity *pEntity, bool testFOV, Vector *at, int *traces);	// a point on a mode enemy in sight
 	bool LsModeOursHiding() const;					// the hide it's in is a station's
@@ -1756,6 +1758,8 @@ private:
 	float m_lsModeAngleAt = 0.0f;					// next move for another angle
 	void LsModePeaceTick();
 	float m_lsModePeaceMoveAt = 0.0f;				// next "giving them room" check
+	float m_lsModeGearFor = -1.0f;					// the peace end its gearing up is for
+	bool m_lsModeGearDone = false;
 	int m_lsModePressed = 0;						// buttons the mode pressed this think (1 fire, 2 use, 4 reload)
 	float m_lsModeHideState = -1.0f;				// the station's hide began then (its state time)
 	Vector m_lsModeSpot;							// ...at this spot
