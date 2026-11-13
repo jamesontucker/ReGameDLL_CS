@@ -766,7 +766,8 @@ static void Build()
 					Vector2D dv;
 					DirectionToVector2D((NavDirType)dir, &dv);
 					float gz;
-					if (GroundBelow(Vector(p.x + dv.x * GenerationStepSize, p.y + dv.y * GenerationStepSize, p.z + 24.0f), 84.0f, &gz, &nrm))
+					Vector past(p.x + dv.x * GenerationStepSize, p.y + dv.y * GenerationStepSize, p.z + 24.0f);
+					if (GroundBelow(past, 84.0f, &gz, &nrm) && !DeadlyAt(s_hurts, Vector(past.x, past.y, gz)))
 						continue;
 					if (!GapJumpAt(p, dir, true, &land, &nrm, false))
 						continue;
