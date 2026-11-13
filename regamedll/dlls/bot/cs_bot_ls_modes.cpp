@@ -341,11 +341,12 @@ bool CCSBot::LsModeLetsBe(CBasePlayer *pPlayer)
 {
 	if (!LsModeGearing())
 		return false;
-	// (right on it and facing it, or coming at it facing it; just near - both at one crate - isn't)
+	// (right on it and facing it, or coming at it facing it from close by - two heading for the
+	// same crate from across a field aren't)
 	Vector toMe = pev->origin - pPlayer->pev->origin;
 	float d = toMe.Length();
 	bool threat = false;
-	if (d < 500.0f)
+	if (d < 250.0f)
 	{
 		UTIL_MakeVectors(pPlayer->pev->v_angle);
 		Vector dir = toMe / Q_max(d, 1.0f);
