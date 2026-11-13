@@ -76,6 +76,7 @@ struct LsModeClass
 };
 
 static bool s_lsModeOn = false;			// anything at all for the bots to act on (goals, zones, classes)
+static bool s_lsNoBuy = false;			// nothing to buy (ls_mode nobuy 1): no time in the buy state
 static bool s_lsPeace = false;			// a peace phase (ls_mode phase loot): no player is an enemy
 static float s_lsPeaceEndAt = -100.0f;	// ...it ended then (each bot notices the fight is on a moment later)
 static char s_lsModeId[32] = "";
@@ -262,6 +263,7 @@ static void LsModeReset(bool all, bool bots = true)
 	s_lsRing = LsModeRing();
 	s_lsPeace = false;
 	s_lsPeaceEndAt = -100.0f;
+	s_lsNoBuy = false;
 	if (bots)
 		LsModeClearBotGoals(0, 0);
 	if (all)
@@ -283,6 +285,11 @@ void LsModeMapStart()
 {
 	LsModeReset(true, false);
 	s_lsTargetsAt = 0.0f;
+}
+
+bool LsModeNoBuy()
+{
+	return s_lsNoBuy;
 }
 
 // ---- a peace phase (ls_mode phase loot) ----------------------------------------------------
@@ -1590,6 +1597,12 @@ void Bot_LsModeCommand()
 	if (FStrEq(what, "status"))
 	{
 		LsModeStatus();
+		return;
+	}
+	// nobuy <1 | 0>: nothing to buy in this mode - bots don't wait in the buy state
+	if (FStrEq(what, "nobuy"))
+	{
+		s_lsNoBuy = Q_atoi(CMD_ARGV(2)) != 0;
 		return;
 	}
 	// phase <loot | peace | fight | off>: a peace (nobody can be hurt: a loot-up) - no player is

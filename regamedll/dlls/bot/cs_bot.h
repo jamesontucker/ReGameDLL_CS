@@ -147,6 +147,7 @@ private:
 	int m_retries;
 	bool m_doneBuying;
 	bool m_lsEquippedDone = false;				// Loner-Strike: the gun out once in freeze time
+	float m_lsPastFreezeAt = -1.0f;				// Loner-Strike: first think in the buy state past the freeze time
 	bool m_buyDefuseKit;
 	bool m_buyGrenade;
 	bool m_buyShield;
@@ -1892,6 +1893,7 @@ void Bot_LsModeCommand();				// ls_mode (cs_bot_ls_modes.cpp)
 void LsModeMapStart();					// a new map: every mode fact forgotten
 void LsModePlayerGone(int index);		// a player left: their role and ties forgotten (client.cpp)
 bool LsModeCosts();						// any avoid, block or zone set (path costs to add)
+bool LsModeNoBuy();						// a mode said there's nothing to buy (ls_mode nobuy 1)
 float LsModeAreaCost(const CNavArea *area, unsigned int insideMask);	// 1 plain, more inside an avoid or outside the zone, -1 never
 
 // Inlines
