@@ -10343,13 +10343,17 @@ void CBasePlayer::UpdateLocation(bool forceUpdate)
 			placeName = TheNavAreaGrid.IDToName(playerPlace);
 	}
 
-	if (!placeName || !placeName[0] || (m_lastLocation[0] && !Q_strcmp(placeName, &m_lastLocation[1])))
+	// (Loner-Strike: the last one sent may be without its # - see below)
+	if (!placeName || !placeName[0] || (m_lastLocation[0] && !Q_strcmp(placeName, &m_lastLocation[m_lastLocation[0] == '#' ? 1 : 0])))
 	{
 		return;
 	}
 
 	m_flLastUpdateTime = gpGlobals->time;
-	Q_snprintf(m_lastLocation, sizeof(m_lastLocation), "#%s", placeName);
+	// (Loner-Strike: a stock place goes as #Name, which the game's resource files turn into its
+	// readable name; a map's own place has no such entry, so it goes as written - shown as is
+	// rather than as "#ZorkBase")
+	Q_snprintf(m_lastLocation, sizeof(m_lastLocation), "%s%s", TheNavAreaGrid.NameToID(placeName) != UNDEFINED_PLACE ? "#" : "", placeName);
 
 	for (int i = 1; i <= gpGlobals->maxClients; i++)
 	{

@@ -700,6 +700,28 @@ Place BotPhraseManager::NameToID(const char *name) const
 	return UNDEFINED_PLACE;
 }
 
+// Loner-Strike: a place a nav names that BotChatter.db doesn't list (a map's own callout, made in
+// the Callouts tool): kept as a place with no voice line instead of dropped, so the Location
+// message, chat locations and the bots' callouts in text have it; radio skips the place part
+// (no sound file: the speech moves on to its next phrase)
+Place BotPhraseManager::AddSilentPlace(const char *name)
+{
+	if (!name || !name[0])
+		return UNDEFINED_PLACE;
+	Place found = NameToID(name);
+	if (found != UNDEFINED_PLACE)
+		return found;
+	unsigned int nextID = 1;
+	for (auto phrase : m_list)
+		nextID = Q_max(nextID, phrase->m_id + 1);
+	for (auto phrase : m_placeList)
+		nextID = Q_max(nextID, phrase->m_id + 1);
+	BotPhrase *phrase = new BotPhrase(nextID, true);
+	phrase->m_name = CloneString(name);
+	m_placeList.push_back(phrase);
+	return phrase->m_id;
+}
+
 const char *BotPhraseManager::IDToName(Place id) const
 {
 	for (auto phrase : m_placeList)
