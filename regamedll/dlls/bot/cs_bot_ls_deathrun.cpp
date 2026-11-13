@@ -709,7 +709,14 @@ static void Build()
 				continue;
 			if (int(i) == to)
 				continue;
-			Vector at((Q_max(e->lo.x, lo.x) + Q_min(e->hi.x, hi.x)) * 0.5f, (Q_max(e->lo.y, lo.y) + Q_min(e->hi.y, hi.y)) * 0.5f, c->z);
+			// (room to walk into it from this area: a sliver along its edge is no way in)
+			float ox = Q_min(e->hi.x, hi.x) - Q_max(e->lo.x, lo.x), oy = Q_min(e->hi.y, hi.y) - Q_max(e->lo.y, lo.y);
+			if (ox < 24.0f || oy < 24.0f)
+				continue;
+			// (walked to: the trigger's middle when it's over this area, else the middle of the overlap)
+			Vector at((lo.x + hi.x) * 0.5f, (lo.y + hi.y) * 0.5f, c->z);
+			if (at.x < e->lo.x || at.x > e->hi.x || at.y < e->lo.y || at.y > e->hi.y)
+				at = Vector((Q_max(e->lo.x, lo.x) + Q_min(e->hi.x, hi.x)) * 0.5f, (Q_max(e->lo.y, lo.y) + Q_min(e->hi.y, hi.y)) * 0.5f, c->z);
 			Vector d = *s_areas[to]->GetCenter() - at;
 			NavDirType dir = Q_fabs(d.x) > Q_fabs(d.y) ? (d.x > 0 ? EAST : WEST) : (d.y > 0 ? SOUTH : NORTH);
 			s_areas[i]->ConnectTo(s_areas[to], dir);
