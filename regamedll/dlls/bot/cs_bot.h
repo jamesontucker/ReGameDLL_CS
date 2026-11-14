@@ -1824,7 +1824,9 @@ enum { LS_STYLE_RUSHER, LS_STYLE_ROAMER, LS_STYLE_LURKER, LS_STYLE_CAREFUL, LS_S
 
 // Loner-Strike: the goals a mode can give a bot (ls_mode goal, cs_bot_ls_modes.cpp)
 enum { LS_GOAL_NONE, LS_GOAL_HOLD, LS_GOAL_DEFEND, LS_GOAL_CAPTURE, LS_GOAL_EXTRACT, LS_GOAL_LOOT, LS_GOAL_USE,
-	LS_GOAL_RIDE, LS_GOAL_INVESTIGATE, LS_GOAL_FLEE, LS_GOAL_MEETING, LS_GOAL_KINDS };
+	LS_GOAL_RIDE, LS_GOAL_INVESTIGATE, LS_GOAL_FLEE, LS_GOAL_MEETING,
+	LS_GOAL_OFFER,	// a use of the bot's own choosing (ls_mode offer), apart from the mode's use goals
+	LS_GOAL_KINDS };
 
 // Loner-Strike (cs_bot_ls.cpp)
 // A bot's taste in routes for one path search (worked out once, used for every area)

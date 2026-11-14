@@ -113,11 +113,11 @@ static int s_lsTargetCount = 0;
 static float s_lsTargetsAt = 0.0f;
 
 static const char *const s_lsGoalNames[LS_GOAL_KINDS] = { "", "go_hold", "defend", "capture", "extract", "loot", "use",
-	"ride", "investigate", "flee", "meeting" };
+	"ride", "investigate", "flee", "meeting", "offer" };
 
 // what counts as there, by kind, when the mode doesn't say
 static const float s_lsGoalRadius[LS_GOAL_KINDS] = { 0.0f, 250.0f, 300.0f, 150.0f, 120.0f, 64.0f, 64.0f,
-	150.0f, 150.0f, 800.0f, 150.0f };
+	150.0f, 150.0f, 800.0f, 150.0f, 64.0f };
 
 static bool LsModeLive(const LsModeZone &z)
 {
@@ -900,6 +900,8 @@ bool CCSBot::LsModeCares(int kind, int prio)
 	float lean;
 	switch (kind)
 	{
+	case LS_GOAL_OFFER:
+		return true;	// (its own pick)
 	case LS_GOAL_LOOT:
 	case LS_GOAL_USE:
 	case LS_GOAL_INVESTIGATE:
@@ -1139,14 +1141,15 @@ bool CCSBot::LsModeOfferTick()
 	if (now < m_lsModeOfferAt)
 		return false;
 	m_lsModeOfferAt = now + RANDOM_FLOAT(1.0f, 2.5f);
-	// (already on its way to one it picked - a lower one, the mode's "go to the shop" hint for the
-	// whole break, is replaced: with it in the way no perk was ever bought at a machine)
+	// (already on its way to one it picked: those have a goal slot of their own, apart from the mode's
+	// use goals - a gate repair, the shop - which kept replacing them on the way to a perk machine;
+	// at 72 they come after a revive (75), before a repair (50) or the shop (25))
 	for (int i = 0; i < LS_MODE_GOALS; i++)
 	{
 		const LsModeGoal &g = m_lsModeGoal[i];
 		CBaseEntity *pThing = g.ent > 0 ? (CBaseEntity *)g.thing : nullptr;
 		// (nor a revive: a teammate down comes first)
-		if (g.kind == LS_GOAL_USE && (g.prio >= 80 || (pThing && pThing->IsPlayer())))
+		if (g.kind == LS_GOAL_OFFER || (g.kind == LS_GOAL_USE && pThing && pThing->IsPlayer()))
 			return false;
 	}
 	// (calm: nothing to shoot within 600 u)
@@ -1204,10 +1207,10 @@ bool CCSBot::LsModeOfferTick()
 		Vector spot;
 		if (LsModePickSpot(pBest->at, 400.0f, &spot))
 			at = spot;
-		LsModeSetGoal(LS_GOAL_USE, at, 64.0f, 0, 80, 20.0f);
+		LsModeSetGoal(LS_GOAL_OFFER, at, 64.0f, 0, 72, 20.0f);
 	}
 	else
-		LsModeSetGoal(LS_GOAL_USE, at, 64.0f, pBest->ent, pBest->kind == LS_OFFER_TRAP ? 90 : 80, 20.0f);
+		LsModeSetGoal(LS_GOAL_OFFER, at, 64.0f, pBest->ent, pBest->kind == LS_OFFER_TRAP ? 90 : 72, 20.0f);
 	LsWhy(pBest->kind == LS_OFFER_PERK ? "mode offer: a perk" : pBest->kind == LS_OFFER_BENCH ? "mode offer: the bench"
 		: pBest->kind == LS_OFFER_BOX ? "mode offer: the box" : pBest->kind == LS_OFFER_TRAP ? "mode offer: the trap, gate under pressure"
 		: "mode offer: placing a turret");
@@ -1735,7 +1738,7 @@ void CCSBot::LsModeGoalTick(LsModeGoal &g)
 			return;
 		}
 	}
-	if (g.kind == LS_GOAL_LOOT || g.kind == LS_GOAL_USE || revive)
+	if (g.kind == LS_GOAL_LOOT || g.kind == LS_GOAL_USE || g.kind == LS_GOAL_OFFER || revive)
 	{
 		Vector at = g.at;
 		CBaseEntity *pThing = g.ent > 0 ? (CBaseEntity *)g.thing : nullptr;
