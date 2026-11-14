@@ -595,9 +595,12 @@ static bool SeamWalk(CNavArea *A, CNavArea *B)
 	Vector d = (cb - *A->GetCenter());
 	d.z = 0.0f;
 	d = d.Normalize();
+	// (just above the floor - a low corridor has little room over a standing player - and the step's
+	// height higher at the low end)
 	Vector from = pa - d * 16.0f, to = pb + d * 16.0f;
-	from.z = A->GetZ(&from) + HalfHumanHeight + StepHeight;
-	to.z = B->GetZ(&to) + HalfHumanHeight + StepHeight;
+	float za = A->GetZ(&from), zb = B->GetZ(&to), top = Q_max(za, zb);
+	from.z = top + HalfHumanHeight + 2.0f;
+	to.z = top + HalfHumanHeight + 2.0f;
 	TraceResult tr;
 	UTIL_TraceHull(from, to, ignore_monsters, human_hull, nullptr, &tr);
 	return !tr.fStartSolid && tr.flFraction >= 1.0f;
