@@ -3056,6 +3056,7 @@ void CLsCreature::Enrage()
 	m_enraged = true;
 	m_runSpeed *= t->enrageSpeed;
 	m_walkSpeed *= t->enrageSpeed;
+	m_improv->SetSpeeds(m_walkSpeed, m_runSpeed);	// (the movement reads its own copy)
 	m_damage *= t->enrageDamage;
 	m_animScale = t->enrageAnim;
 	ApplyLook();
@@ -3209,6 +3210,8 @@ void CLsCreature::SetSpeedScale(float scale)
 	float ratio = scale / Q_max(m_speedScale, 0.01f);
 	m_runSpeed *= ratio;
 	m_walkSpeed *= ratio;
+	if (m_improv)
+		m_improv->SetSpeeds(m_walkSpeed, m_runSpeed);
 	m_speedScale = scale;
 }
 
