@@ -2354,6 +2354,14 @@ void CCSBot::LsModeGoalTick(LsModeGoal &g)
 			if (revive && IsAttacking())
 				StopAttacking();
 			SetLookAt("Loner-Strike: using", &at, PRIORITY_HIGH, 0.5f);
+			// (a repair or a shop errand that suddenly cost real money - USE held on with the mystery box in
+			// front of it rolled it twice in a second: off it)
+			if (g.kind != LS_GOAL_OFFER && m_lsModeUseMoney >= 0 && m_iAccount < m_lsModeUseMoney - 400)
+			{
+				LsModeClearGoals(g.kind, 0);
+				LsWhy("mode use: spent by mistake, off it");
+				return;
+			}
 			// (bought: done - holding USE on at the box bought it again a second later)
 			if (g.kind == LS_GOAL_OFFER)
 			{
@@ -2380,6 +2388,7 @@ void CCSBot::LsModeGoalTick(LsModeGoal &g)
 			if (revive && IsAttacking())
 				StopAttacking();
 			g.phase = 1;
+			m_lsModeUseMoney = m_iAccount;
 			// (a revive or a crate as long as the goal lasts, at most 15 s; a plain use - a shop, a
 			// button - a few seconds)
 			g.phaseUntil = now + (g.ent > 0 ? 15.0f : 6.0f);
