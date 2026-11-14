@@ -2018,7 +2018,7 @@ bool LsCreaturesExist()
 	return s_listLive > 0 || s_adoptCount > 0;
 }
 
-void LsCreatureRegister(ILsCreature *pCreature)
+bool LsCreatureRegister(ILsCreature *pCreature)
 {
 	for (int i = 0; i < s_listCount; i++)
 	{
@@ -2026,18 +2026,19 @@ void LsCreatureRegister(ILsCreature *pCreature)
 		{
 			s_list[i] = pCreature;
 			s_listLive++;
-			return;
+			return true;
 		}
 	}
 
 	if (s_listCount >= LS_CREATURE_MAX_LIST)
 	{
 		delete pCreature;
-		return;
+		return false;
 	}
 
 	s_list[s_listCount++] = pCreature;
 	s_listLive++;
+	return true;
 }
 
 void LsCreatureUnregister(CBaseEntity *pEntity)
@@ -2582,8 +2583,16 @@ void CLsCreature::Spawn()
 
 	if (!m_improv)
 	{
+		// (one that can't be on the list isn't counted against the cap, gets no events and plugins
+		// can't find it: it isn't made at all. Bodies stay listed until they go, so a fast fight
+		// with many bodies used to fill the list and let creatures past the cap)
+		if (!LsCreatureRegister(new LsNativeCreature(this)))
+		{
+			CONSOLE_ECHO("ls_creature: the creature list is full (%d): not spawned\n", LS_CREATURE_MAX_LIST);
+			pev->flags |= FL_KILLME;
+			return;
+		}
 		m_improv = new CCreatureImprov(this);
-		LsCreatureRegister(new LsNativeCreature(this));
 	}
 
 	Setup();
@@ -3108,6 +3117,7 @@ void CLsCreature::Enrage()
 	m_enraged = true;
 	m_runSpeed *= t->enrageSpeed;
 	m_walkSpeed *= t->enrageSpeed;
+	m_improv->SetSpeeds(m_walkSpeed, m_runSpeed);	// (the movement reads its own copy)
 	m_damage *= t->enrageDamage;
 	m_animScale = t->enrageAnim;
 	ApplyLook();
@@ -3261,6 +3271,8 @@ void CLsCreature::SetSpeedScale(float scale)
 	float ratio = scale / Q_max(m_speedScale, 0.01f);
 	m_runSpeed *= ratio;
 	m_walkSpeed *= ratio;
+	if (m_improv)
+		m_improv->SetSpeeds(m_walkSpeed, m_runSpeed);
 	m_speedScale = scale;
 }
 
