@@ -1800,7 +1800,9 @@ void CCSBot::LsModeTick()
 	// takes is the revive's own weighing, by who it is)
 	const LsModeGoal &gb = m_lsModeGoal[best];
 	CBaseEntity *pBestThing = gb.ent > 0 ? (CBaseEntity *)gb.thing : nullptr;
-	bool reviveBest = (gb.kind == LS_GOAL_USE || gb.kind == LS_GOAL_HOLD) && pBestThing && pBestThing->IsPlayer();
+	// (Battle Royale's squads only: Last Stand's revives were right as they were - 40 % - and its
+	// creatures are the fight a reviver mustn't turn its back on)
+	bool reviveBest = (gb.kind == LS_GOAL_USE || gb.kind == LS_GOAL_HOLD) && pBestThing && pBestThing->IsPlayer() && s_lsRing.on;
 	bool reviveClose = reviveBest && (pBestThing->pev->origin - pev->origin).IsLengthLessThan(300.0f);
 	// (on its way to a squad mate bleeding out, for the vision: enemies a way off who aren't after it are
 	// left be a moment - it keeps going; anyone close or shooting at it is a fight as usual)
@@ -2445,11 +2447,12 @@ void CCSBot::LsModeGoalTick(LsModeGoal &g)
 		float gap = toThing.Make2D().Length();
 		bool handy = gap < 120.0f && Q_fabs(toThing.z) < 100.0f;
 		// (a revive needs it right by them - within 80 u, origin to origin, for 4 s: close in, stay)
-		if (revive)
+		bool brRevive = revive && s_lsRing.on;
+		if (brRevive)
 			handy = (pGoalThing->pev->origin - pev->origin).Length() < 70.0f;
 		if (g.phase == 1)
 		{
-			if (revive && !handy && now < g.phaseUntil && (pGoalThing->pev->origin - pev->origin).IsLengthLessThan(200.0f))
+			if (brRevive && !handy && now < g.phaseUntil && (pGoalThing->pev->origin - pev->origin).IsLengthLessThan(200.0f))
 			{
 				m_lsModeStepTo = pGoalThing->pev->origin;
 				m_lsModeStepUntil = now + 0.3f;
@@ -2460,7 +2463,7 @@ void CCSBot::LsModeGoalTick(LsModeGoal &g)
 				LsModeClearGoals(g.kind, 0);
 				return;
 			}
-			if (gap > (revive ? 30.0f : 48.0f))
+			if (gap > (brRevive ? 30.0f : 48.0f))
 			{
 				m_lsModeStepTo = at;
 				m_lsModeStepUntil = now + 0.3f;
@@ -2468,7 +2471,7 @@ void CCSBot::LsModeGoalTick(LsModeGoal &g)
 			else
 				m_lsModeStillUntil = now + 0.3f;
 			// (reviving: it stays on it - the fight it would turn to waits, unless it's shot: above)
-			if (revive && IsAttacking())
+			if (brRevive && IsAttacking())
 				StopAttacking();
 			SetLookAt("Loner-Strike: using", &at, PRIORITY_HIGH, 0.5f);
 			// (a repair or a shop errand that suddenly cost real money - USE held on with the mystery box in
@@ -2502,7 +2505,7 @@ void CCSBot::LsModeGoalTick(LsModeGoal &g)
 		if (handy)
 		{
 			// (a revive: the gun down - it can't shoot and get them up at once)
-			if (revive && IsAttacking())
+			if (brRevive && IsAttacking())
 				StopAttacking();
 			g.phase = 1;
 			m_lsModeUseMoney = m_iAccount;
@@ -2516,7 +2519,7 @@ void CCSBot::LsModeGoalTick(LsModeGoal &g)
 			return;
 		}
 		// (close: straight up to where they lie now - they may have crawled from where they fell)
-		if (revive && (pGoalThing->pev->origin - pev->origin).IsLengthLessThan(300.0f) && Q_fabs(toThing.z) < 60.0f)
+		if (brRevive && (pGoalThing->pev->origin - pev->origin).IsLengthLessThan(300.0f) && Q_fabs(toThing.z) < 60.0f)
 		{
 			if (IsAttacking())
 				StopAttacking();
