@@ -423,6 +423,16 @@ bool CCSBot::LsModeGearing()
 bool CCSBot::LsModeLetsBe(CBasePlayer *pPlayer)
 {
 	LS_PROF("LsModeLetsBe");
+	// (hunting someone down: others a way off who aren't after it are left be - it keeps on toward the
+	// hunted one; anyone close, or shooting at it, is a fight as usual)
+	if (m_lsModeHunting.IsValid() && gpGlobals->time < m_lsModeHuntingUntil && pPlayer != (CBasePlayer *)m_lsModeHunting)
+	{
+		float d = (pPlayer->pev->origin - pev->origin).Length();
+		bool threat = (pPlayer == GetAttacker() && GetTimeSinceAttacked() < 5.0f)
+			|| (pPlayer->IsBot() && static_cast<CCSBot *>(pPlayer)->GetEnemy() == this && static_cast<CCSBot *>(pPlayer)->IsAttacking());
+		if (!threat && d > 500.0f + 250.0f * m_lsModeHuntSway * LsAggro())
+			return true;
+	}
 	if (!LsModeGearing())
 		return false;
 	// (another bot: only once it's going for this one - two at one crate who bump or glance at each
@@ -1912,9 +1922,15 @@ void CCSBot::LsModeHuntPrefer()
 		const LsModeGoal &g = m_lsModeGoal[i];
 		CBaseEntity *pThing = g.ent > 0 ? (CBaseEntity *)g.thing : nullptr;
 		if (g.kind == LS_GOAL_HUNT && g.care && pThing && pThing->IsPlayer() && pThing != this && pThing->IsAlive()
-			&& (g.until <= 0.0f || now < g.until))
+			&& (g.until <= 0.0f || now < g.until) && now >= g.startAt)
+		{
 			pTarget = static_cast<CBasePlayer *>(pThing);
+			m_lsModeHuntSway = LsModeSway(g.infl);
+		}
 	}
+	// (who it's after, for the vision: others a way off are left be meanwhile)
+	m_lsModeHunting = pTarget;
+	m_lsModeHuntingUntil = pTarget ? now + 1.5f : 0.0f;
 	if (!pTarget || GetEnemy() == pTarget || BotRelationship(pTarget) != BOT_ENEMY || (pTarget->pev->flags & FL_NOTARGET)
 		|| IsOnLadder() || !IsVisible(pTarget, true))
 		return;
