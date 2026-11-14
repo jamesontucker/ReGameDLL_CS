@@ -58,6 +58,13 @@ enum LsCreatureCategory
 };
 
 // What it does when it has nobody to fight (its "home" behaviour), plus the two it switches to
+// What plugins read in pev->iuser3 of an ls_creature (ls_creature_ver 2): what it's doing now
+enum LsCreatureState
+{
+	LSST_NONE = 0,
+	LSST_IDLE, LSST_WANDER, LSST_PATROL, LSST_GUARD, LSST_CHASE, LSST_FLEE, LSST_ATTACK, LSST_SEARCH, LSST_DEAD
+};
+
 enum LsCreatureBehaviour
 {
 	LSB_IDLE = 0,		// stand where it is
@@ -516,11 +523,16 @@ private:
 	bool m_enraged;
 	float m_animScale;			// enraged: attacks and animation this much quicker
 	bool m_friendly;
+	float m_speedScale;			// ls_creature speed: times its walk and run (until it dies)
 
 	void ApplyLook();
 	void Enrage();
 public:
 	int Tier() const { return m_tier < 2 ? 1 : m_tier; }
+	void SetTier(int tier);				// 1..3 (0 = 1), on a live one too
+	void SetSpeedScale(float scale);	// times its normal walk and run (0.2..3), until it dies
+	void Resume();						// back to its own behaviour and home, no forced target
+	void PublishState();				// pev->iuser3 = its state (LsCreatureState), pev->enemy = whom it's after
 	bool Friendly() const { return m_friendly; }
 	bool Enraged() const { return m_enraged; }
 };
