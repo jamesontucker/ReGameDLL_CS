@@ -576,6 +576,35 @@ static int LedgeClimb(CNavArea *A, CNavArea *B, Vector *dirOut, Vector *landOut)
 	return 0;
 }
 
+// A walkable seam A -> B the nav left unlinked: side by side, level within a step where they meet,
+// and a standing player gets across (no wall between) - starwars' start corridor, ramps whose
+// centres are 48 apart but meet level
+static bool SeamWalk(CNavArea *A, CNavArea *B)
+{
+	const Extent *ea = A->GetExtent(), *eb = B->GetExtent();
+	float dx = Q_max(eb->lo.x - ea->hi.x, ea->lo.x - eb->hi.x), dy = Q_max(eb->lo.y - ea->hi.y, ea->lo.y - eb->hi.y);
+	if (dx > 2.0f || dy > 2.0f || (dx > 0.5f && dy > 0.5f) || A->IsConnected(B, NUM_DIRECTIONS))
+		return false;
+	// (they must share a stretch of edge at least a player wide)
+	float ox = Q_min(ea->hi.x, eb->hi.x) - Q_max(ea->lo.x, eb->lo.x), oy = Q_min(ea->hi.y, eb->hi.y) - Q_max(ea->lo.y, eb->lo.y);
+	if (Q_max(ox, oy) < 24.0f)
+		return false;
+	Vector cb = *B->GetCenter(), pa, pb;
+	A->GetClosestPointOnArea(&cb, &pa);
+	B->GetClosestPointOnArea(&pa, &pb);
+	if (Q_fabs(pb.z - pa.z) > StepHeight || DeadlyAt(s_hurts, cb))
+		return false;
+	Vector d = (cb - *A->GetCenter());
+	d.z = 0.0f;
+	d = d.Normalize();
+	Vector from = pa - d * 16.0f, to = pb + d * 16.0f;
+	from.z = A->GetZ(&from) + HalfHumanHeight + StepHeight;
+	to.z = B->GetZ(&to) + HalfHumanHeight + StepHeight;
+	TraceResult tr;
+	UTIL_TraceHull(from, to, ignore_monsters, human_hull, nullptr, &tr);
+	return !tr.fStartSolid && tr.flFraction >= 1.0f;
+}
+
 // Is the door of this link in the way right now (a hull between the two floors hits it)
 static bool DoorShut(const DoorLink &dl)
 {
@@ -901,7 +930,7 @@ static void Build()
 	// the arc's hull clear - nav generation leaves them unlinked and the course stopped below them
 	// (starwars' start corridor: a channel, then a 36-48 unit ledge)
 	{
-		int made = 0;
+		int made = 0, seams = 0;
 		for (size_t i = 0; i < n; i++)
 		{
 			CNavArea *A = s_areas[i];
@@ -919,15 +948,24 @@ static void Build()
 					continue;	// (only side by side, not corner to corner)
 				Vector dir2;
 				if (LedgeClimb(A, B, &dir2, nullptr) != 0)
+				{
+					if (SeamWalk(A, B))
+					{
+						Vector d = *B->GetCenter() - *A->GetCenter();
+						A->ConnectTo(B, Q_fabs(d.x) > Q_fabs(d.y) ? (d.x > 0 ? EAST : WEST) : (d.y > 0 ? SOUTH : NORTH));
+						s_out[i].push_back(int(j));
+						seams++;
+					}
 					continue;
+				}
 				NavDirType dir = Q_fabs(dir2.x) > Q_fabs(dir2.y) ? (dir2.x > 0 ? EAST : WEST) : (dir2.y > 0 ? SOUTH : NORTH);
 				A->ConnectTo(B, dir);
 				s_out[i].push_back(int(j));
 				made++;
 			}
 		}
-		if (made)
-			CONSOLE_ECHO("Loner-Strike deathrun: %d ledges a jump climbs linked\n", made);
+		if (made || seams)
+			CONSOLE_ECHO("Loner-Strike deathrun: %d ledges a jump climbs and %d walkable seams linked\n", made, seams);
 	}
 
 	// gaps a running jump clears, linked on this nav too (a nav learned without course learning -
@@ -2594,7 +2632,9 @@ void LsDrCommand()
 			if (dx > 4.0f || dy > 4.0f || Q_fabs(B->GetCenter()->z - A->GetCenter()->z) > 80.0f)
 				continue;
 			int r = LedgeClimb(A, B, nullptr, nullptr);
-			CONSOLE_ECHO("  -> #%d (%.0f %.0f - %.0f %.0f, z %.0f): %s\n", B->GetID(), eb->lo.x, eb->lo.y, eb->hi.x, eb->hi.y, B->GetCenter()->z, why[r]);
+			bool seam = r != 0 && SeamWalk(A, B);
+			CONSOLE_ECHO("  -> #%d (%.0f %.0f - %.0f %.0f, z %.0f): %s%s%s\n", B->GetID(), eb->lo.x, eb->lo.y, eb->hi.x, eb->hi.y, B->GetCenter()->z, why[r],
+				seam ? "; a walkable seam (linked)" : "", A->IsConnected(B, NUM_DIRECTIONS) ? "; linked" : "");
 			if (++shown >= 16)
 				break;
 		}
