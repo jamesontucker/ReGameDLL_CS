@@ -210,8 +210,12 @@ void CCSBot::MoveTowardsPosition(const Vector *pos)
 		// look far ahead to allow us to smoothly jump over gaps, ledges, etc
 		// only jump if ground is flat at lookahead spot to avoid jumping up slopes
 		bool jumped = false;
+		// Loner-Strike: a deathrun runner's gaps are jumped by the deathrun brain, timed at the edge (a jump
+		// far short of it lands in the pit: deathrun_death's runners jumped 40-100 units early off this
+		// look). Here only jumps up, and the last-moment one before a fall
+		bool drRunner = m_iTeam == CT && LsDrOn() && LsDrRunner();
 
-		if (IsRunning())
+		if (IsRunning() && !drRunner)
 		{
 			const float farLookAheadRange = 80.0f;
 			Vector normal;
@@ -258,7 +262,7 @@ void CCSBot::MoveTowardsPosition(const Vector *pos)
 			Vector stepAhead = pev->origin + lookAheadRange * aheadRay;
 			stepAhead.z += HalfHumanHeight;
 
-			if (GetSimpleGroundHeightWithFloor(&stepAhead, &ground))
+			if (GetSimpleGroundHeightWithFloor(&stepAhead, &ground) && (!drRunner || ground - GetFeetZ() > StepHeight))
 			{
 				jumped = DiscontinuityJump(ground);
 			}
