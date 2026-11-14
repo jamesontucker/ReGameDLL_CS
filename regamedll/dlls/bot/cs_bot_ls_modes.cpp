@@ -948,9 +948,11 @@ bool CCSBot::LsModeCares(int kind, int prio, const Vector &at, float infl)
 			risk += 0.35f;
 	}
 	risk = Q_min(1.0f, risk);
+	// (holding a place is the job whatever's about - a defence is where the creatures come; an errand
+	// into danger isn't)
 	if (kind == LS_GOAL_FLEE)
 		chance = Q_min(1.0f, chance + 0.3f * risk);
-	else
+	else if (kind == LS_GOAL_LOOT || kind == LS_GOAL_USE || kind == LS_GOAL_INVESTIGATE || kind == LS_GOAL_RIDE || kind == LS_GOAL_HUNT)
 		chance *= 1.0f - 0.5f * risk * (1.0f - LsAggro());
 	// (one that matters - prio 80 up - is always taken up unless its personality has the full say)
 	if (prio >= 80)
@@ -995,6 +997,10 @@ void CCSBot::LsModeSetGoal(int kind, const Vector &at, float radius, int ent, in
 	// (the same one again - a mode re-sends its goals - keeps its start)
 	bool again = g.kind == kind && (kind == LS_GOAL_HUNT ? g.ent == ent : (g.at - at).IsLengthLessThan(64.0f));
 	float startAt = g.startAt;
+	// (the same kind of job again - a hold moved to another spot, a goal re-sent - keeps its answer:
+	// rolled again each time, a fifth of the defenders dropped their spot at every reassignment)
+	bool sameKind = g.kind == kind && g.ent == ent;
+	bool care = g.care;
 	g = LsModeGoal();
 	g.kind = kind;
 	g.at = at;
@@ -1005,7 +1011,7 @@ void CCSBot::LsModeSetGoal(int kind, const Vector &at, float radius, int ent, in
 	g.prio = prio;
 	g.until = LsModeUntil(secs);
 	g.infl = infl;
-	g.care = LsModeCares(kind, prio, at, infl);
+	g.care = (sameKind && prio < 80) ? care : LsModeCares(kind, prio, at, infl);
 	// (on its way after a moment - the less skilled, the longer; a must-do one at once)
 	g.startAt = again ? startAt
 		: (prio >= 90 ? 0.0f : gpGlobals->time + LsModeSway(infl) * (1.0f - LsSkill()) * RANDOM_FLOAT(0.4f, 1.2f));
