@@ -174,6 +174,7 @@ static bool GroundBelow(const Vector &from, float depth, float *z, Vector *norma
 // a floor to land on that's flat enough, not a deadly trigger, not a fall that hurts much
 static bool GapJumpVec(const Vector &p, Vector2D d, bool runup, Vector *land, Vector *landNormal, bool say);
 static bool s_jumpRelaxed = false;	// (a runner with no other way: the full running jump's landing isn't checked)
+static float s_jumpSpeed = 0.0f;		// (a hop at this speed along rather than a full running jump: 0 = full)
 
 static bool GapJumpAt(const Vector &p, int dir, bool runup, Vector *land, Vector *landNormal, bool say)
 {
@@ -203,7 +204,7 @@ static bool GapJumpVec(const Vector &p, Vector2D d, bool runup, Vector *land, Ve
 		return false;
 	}
 
-	const float vh = 240.0f, vz = 268.0f, g = 800.0f;
+	const float vh = s_jumpSpeed > 0.0f ? s_jumpSpeed : 240.0f, vz = 268.0f, g = 800.0f;
 	for (float L = 2.0f * GenerationStepSize; L <= 9.0f * GenerationStepSize + 0.1f; L += GenerationStepSize)
 	{
 		Vector col(p.x + d.x * L, p.y + d.y * L, p.z + 64.0f);
@@ -247,7 +248,9 @@ static bool GapJumpVec(const Vector &p, Vector2D d, bool runup, Vector *land, Ve
 		if (dz < -180.0f)
 			continue;
 		// where a full running jump really comes down at that height (it doesn't stop at the near
-		// edge: a jump onto a small block overshoots it) - floor there too, at about that height
+		// edge: a jump onto a small block overshoots it) - floor there too: about that height, or a
+		// little lower (it lands on a lip or a step and drops onto the floor behind: dojo's walkways
+		// have a raised edge), or a wall it's stopped by (it comes down at the wall's foot) - not a hole
 		{
 			float disc = vz * vz - 2.0f * g * (dz - (duck ? 18.0f : 0.0f));
 			float tDown = disc > 0.0f ? (vz + sqrtf(disc)) / g : t;
@@ -258,7 +261,9 @@ static bool GapJumpVec(const Vector &p, Vector2D d, bool runup, Vector *land, Ve
 				float rz;
 				Vector rn;
 				Vector rc(p.x + d.x * (reach + off), p.y + d.y * (reach + off), gz + 40.0f);
-				if (!GroundBelow(rc, 60.0f, &rz, &rn) || Q_fabs(rz - gz) > 20.0f || DeadlyAt(s_learnHurts, Vector(rc.x, rc.y, rz)))
+				if (UTIL_PointContents(rc) == CONTENTS_SOLID)
+					continue;	// (a wall there: it's stopped short of it)
+				if (!GroundBelow(rc, 40.0f + 120.0f, &rz, &rn) || rz > gz + 20.0f || rz < gz - 120.0f || DeadlyAt(s_learnHurts, Vector(rc.x, rc.y, rz)))
 					solid = false;
 			}
 			if (!solid && s_jumpRelaxed)
@@ -387,8 +392,10 @@ CNavNode *LsCourseSeedSearch()
 			if (s_scanned[id] & (1 << dir))
 				continue;
 			s_scanned[id] |= (1 << dir);
+			// (a step onto deadly floor - lava, a hurt pit level with the walkway - is no way on either:
+			// on such maps the walkways' edges only ever led into it, and no jump was looked for)
 			const CNavNode *adj = node->GetConnectedNode((NavDirType)dir);
-			if (adj && adj->GetPosition()->z > node->GetPosition()->z - 60.0f)
+			if (adj && adj->GetPosition()->z > node->GetPosition()->z - 60.0f && !DeadlyAt(s_learnHurts, *adj->GetPosition()))
 				continue;
 			if (DeadlyAt(s_learnHurts, *node->GetPosition()))
 				continue;
@@ -980,6 +987,7 @@ struct Runner
 	bool duckJump = false;
 	float backUntil = 0.0f;			// backing up for a run-up
 	bool tele = false;				// walking into a teleport rather than jumping
+	float hopSpeed = 0.0f;			// a hop at this pace (small blocks), 0: a full running jump
 	Vector lastGround;
 	bool lastGroundSet = false;
 	bool alive = false;
@@ -1303,8 +1311,16 @@ bool CCSBot::LsDrTick()
 		return false;
 	}
 
-	// a fight (the terrorist in sight) is the brain's
-	if (IsAttacking() || m_isEnemyVisible || IsOnLadder() || !LsFree())
+	// a fight (the terrorist in sight) is the brain's - when he's near enough to fight. One seen far
+	// across the course (open maps: from the start, over the pit) doesn't take a runner off the course:
+	// the stock hunt walks straight at him, off the edge
+	bool fightNear = false;
+	if (IsAttacking() || m_isEnemyVisible)
+	{
+		CBasePlayer *pEnemy = static_cast<CBasePlayer *>(GetEnemy());
+		fightNear = !pEnemy || (pEnemy->pev->origin - pev->origin).IsLengthLessThan(600.0f);
+	}
+	if (fightNear || IsOnLadder() || !LsFree())
 		return false;
 
 	// waiting short of a trap (or for the floor ahead)
@@ -1625,6 +1641,15 @@ void CCSBot::LsDrPostUpdate()
 		if (r.done || now >= r.holdUntil || m_isEnemyVisible)
 			return;
 		ClearMovement();
+		// (waiting on a floor that carries you - a conveyor, a push, a moving platform's edge - isn't
+		// standing still: walk against the drift so the wait doesn't end in the pit it carries you to)
+		Vector2D drift = pev->basevelocity.Make2D();
+		if (drift.IsLengthGreaterThan(1.0f) && (pev->flags & FL_ONGROUND))
+		{
+			Vector2D up = -drift.Normalize() * 48.0f;
+			Vector against(pev->origin.x + up.x, pev->origin.y + up.y, pev->origin.z);
+			MoveTowardsPosition(&against);
+		}
 		ResetStuckMonitor();
 		SetLookAt("Loner-Strike: deathrun wait", &r.holdLook, PRIORITY_MEDIUM, 0.5f);
 		return;
@@ -1707,10 +1732,10 @@ static bool LsDrFloorThere(const CNavArea *area, const Vector &nearPos, float st
 // when it was last there, when it went, the longest it's been seen gone before it came back, and
 // whether it was seen moving. A wait lasts as long as the evidence says it comes back: its own
 // cycle (and a bit), 8 s for a floor never seen to move or return - then it's gone: another way
-struct FloorLog { float there = -999.0f, goneSince = -1.0f, cycle = 0.0f; bool moves = false; };
+struct FloorLog { float there = -999.0f, goneSince = -1.0f, cycle = 0.0f; bool moves = false, breaks = false; };
 static std::vector<FloorLog> s_floorLog;
 
-static void LsDrFloorSeen(const CNavArea *area, bool there, bool moving = false)
+static void LsDrFloorSeen(const CNavArea *area, bool there, bool moving = false, bool breaks = false)
 {
 	int i = Index(area);
 	if (i < 0)
@@ -1722,9 +1747,10 @@ static void LsDrFloorSeen(const CNavArea *area, bool there, bool moving = false)
 	if (f.there > now)
 		f = FloorLog();	// (a new map: the clock went back)
 	f.moves = f.moves || moving;
+	f.breaks = f.breaks || breaks;
 	if (there)
 	{
-		if (f.goneSince >= 0.0f)
+		if (f.goneSince >= 0.0f && !f.breaks)	// (a breakable's back at the next round: no cycle)
 		{
 			f.cycle = Q_max(f.cycle, now - f.goneSince);
 			f.moves = true;
@@ -1742,9 +1768,29 @@ static float LsDrFloorPatience(const CNavArea *area)
 	if (i < 0 || size_t(i) >= s_floorLog.size())
 		return 8.0f;
 	const FloorLog &f = s_floorLog[i];
+	if (f.breaks)
+		return 2.0f;	// (a broken floor doesn't come back this round: no waiting for it)
 	if (f.cycle > 0.0f)
 		return Q_min(30.0f, 1.3f * f.cycle + 1.0f);
 	return 8.0f;
+}
+
+static bool LsDrFloorBroke(const CNavArea *area)
+{
+	int i = Index(area);
+	return i >= 0 && size_t(i) < s_floorLog.size() && s_floorLog[i].breaks;
+}
+
+// Is the floor under this area a breakable (a trap floor that, once broken, is gone for the round)
+static bool LsDrFloorBreakable(const CNavArea *area)
+{
+	const Vector *c = area->GetCenter();
+	float z;
+	Vector n;
+	edict_t *hit = nullptr;
+	if (!GroundBelow(Vector(c->x, c->y, c->z + 40.0f), 100.0f, &z, &n, &hit) || !hit || FNullEnt(hit) || hit == INDEXENT(0))
+		return false;
+	return FClassnameIs(VARS(hit), "func_breakable");
 }
 
 // Is the floor under this spot a moving thing right now (a train, a turning door)
@@ -1834,6 +1880,7 @@ void CCSBot::LsDrPathTick()
 				if ((pev->origin - tl.at).Make2D().IsLengthLessThan(200.0f))
 				{
 					r.gapArmed = true;
+					r.hopSpeed = 0.0f;
 					r.armedAt = now;
 					r.landing = tl.at;
 					r.jumpedAt = -9.0f;
@@ -1874,7 +1921,7 @@ void CCSBot::LsDrPathTick()
 		land.z = B->GetZ(&land);
 		// (the floor over there isn't there right now - a platform away, a trap floor open: wait)
 		bool there = LsDrFloorThere(B, land);
-		LsDrFloorSeen(B, there, there && LsDrFloorMoving(B));
+		LsDrFloorSeen(B, there, there && LsDrFloorMoving(B), there && LsDrFloorBreakable(B));
 		// (and still there by the time it lands: a moving platform's timed, not jumped at blindly)
 		if (there && !LsDrFloorThere(B, land, 0.6f))
 			there = false;
@@ -1898,6 +1945,7 @@ void CCSBot::LsDrPathTick()
 		}
 		r.floorWaitSince = 0.0f;
 		r.gapArmed = true;
+		r.hopSpeed = 0.0f;
 		r.armedAt = now;
 		r.takeoff = takeoff;
 		r.landing = land;
@@ -1917,7 +1965,7 @@ void CCSBot::LsDrPathTick()
 		if ((pev->origin - m_path[i].pos).Make2D().IsLengthGreaterThan(120.0f))
 			break;
 		bool there = LsDrFloorThere(B, m_path[i].pos);
-		LsDrFloorSeen(B, there, there && LsDrFloorMoving(B));
+		LsDrFloorSeen(B, there, there && LsDrFloorMoving(B), there && LsDrFloorBreakable(B));
 		if (there && !LsDrFloorThere(B, m_path[i].pos, 0.4f))
 			there = false;
 		if (!there)
@@ -1981,12 +2029,27 @@ bool CCSBot::LsDrJumpGap(int i)
 		Vector take(pev->origin.x + d.x * Q_max(0.0f, edge - 12.0f), pev->origin.y + d.y * Q_max(0.0f, edge - 12.0f), feet);
 		Vector land, n;
 		s_learnHurts = s_hurts;
-		if (!GapJumpVec(take, d, true, &land, &n, false))
+		// a full running jump, or else a hop at walking pace: small blocks with gaps between them (temple's
+		// strip) are hopped one at a time - a full run carries past them into the next hole
+		static const float speeds[] = { 0.0f, 150.0f, 130.0f, 110.0f };
+		float hop = -1.0f;
+		for (float sp : speeds)
+		{
+			s_jumpSpeed = sp;
+			bool ok = GapJumpVec(take, d, true, &land, &n, false);
+			s_jumpSpeed = 0.0f;
+			if (!ok)
+				continue;
+			Vector at = land + Vector(0, 0, 8.0f);
+			int li = Index(TheNavAreaGrid.GetNavArea(&at));
+			if (li < 0 || s_deadly[li] || (hereToEnd >= 0.0f && s_toEnd[li] >= 0.0f && s_toEnd[li] >= hereToEnd))
+				continue;
+			hop = sp;
+			break;
+		}
+		if (hop < 0.0f)
 			continue;
-		Vector at = land + Vector(0, 0, 8.0f);
-		int li = Index(TheNavAreaGrid.GetNavArea(&at));
-		if (li < 0 || s_deadly[li] || (hereToEnd >= 0.0f && s_toEnd[li] >= 0.0f && s_toEnd[li] >= hereToEnd))
-			continue;
+		r.hopSpeed = hop;
 		r.gapArmed = true;
 		r.tele = false;
 		r.armedAt = now;
@@ -1997,7 +2060,7 @@ bool CCSBot::LsDrJumpGap(int i)
 		m_goalPosition = land;
 		SetLookAt("Loner-Strike: the jump", &land, PRIORITY_HIGH, 0.3f);
 		if (!s_jumpRelaxed)
-			LsWhy("deathrun: jumps the gap");	// (no other way: the caller says so)
+			LsWhy(hop > 0.0f ? "deathrun: hops the gap" : "deathrun: jumps the gap");	// (no other way: the caller says so)
 		return true;
 	}
 	return false;
@@ -2053,7 +2116,8 @@ bool CCSBot::LsDrFloorGone(int i, const CNavArea *B)
 		bool fell = DeathsNear(pev->origin, 150.0f, &trapDeath) >= 2 && !trapDeath;
 		int fi = Index(B);
 		bool seen = fi >= 0 && size_t(fi) < s_floorLog.size() && s_floorLog[fi].cycle > 0.0f;
-		LsWhy(fell ? "deathrun: no other way, people fell jumping here: waits for the floor"
+		LsWhy(LsDrFloorBroke(B) ? "deathrun: no other way, the floor's broken for the round"
+			: fell ? "deathrun: no other way, people fell jumping here: waits for the floor"
 			: seen ? "deathrun: no other way, no jump in reach: waits out the floor's cycle"
 			: "deathrun: no other way, no jump in reach: waits till the floor comes back");
 		r.noWayLogAt = now;
@@ -2106,9 +2170,17 @@ void LsDrDrive(CBasePlayer *bot, float *forward, float *strafe, unsigned short *
 			wish = (r.landing.Make2D() - o);
 			float len = wish.Length();
 			wish = len > 1.0f ? wish / len : r.gapDir;
-			if (toEdge < 14.0f + 0.06f * Q_max(0.0f, speed) && toEdge > -20.0f && now - r.jumpedAt > 0.8f)
+			// (takes off as late as the jump needs: a long one - stepping stones near a running jump's
+			// limit - from the very edge; a short one may go early, with room to spare)
+			float pace = r.hopSpeed > 0.0f ? r.hopSpeed : 250.0f;
+			float need = DotProduct(r.landing.Make2D(), r.gapDir) - r.edge;
+			float slack = 0.66f * pace - need;
+			float early = Q_min(14.0f + 0.06f * Q_max(0.0f, speed), Q_max(3.0f, 0.5f * slack));
+			if (toEdge < early && toEdge > -20.0f && now - r.jumpedAt > 0.8f)
 			{
-				if (speed > 200.0f)
+				// (a full jump wants a run at it; a hop its own pace, give or take)
+				bool paced = r.hopSpeed > 0.0f ? (speed > 0.6f * r.hopSpeed && speed < 1.35f * r.hopSpeed) : speed > 200.0f;
+				if (paced)
 				{
 					if (me->IsCrouching())
 						me->StandUp();
@@ -2133,7 +2205,7 @@ void LsDrDrive(CBasePlayer *bot, float *forward, float *strafe, unsigned short *
 	// the move in the world, into forward and strafe for where it's looking
 	float yaw = bot->pev->v_angle.y * float(M_PI / 180.0);
 	float c = cosf(yaw), s = sinf(yaw);
-	float speed = 250.0f;
+	float speed = (!r.tele && r.hopSpeed > 0.0f) ? r.hopSpeed : 250.0f;
 	float wx = wish.x * speed, wy = wish.y * speed;
 	*forward = wx * c + wy * s;
 	*strafe = wx * s - wy * c;
