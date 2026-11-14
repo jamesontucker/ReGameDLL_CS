@@ -957,26 +957,18 @@ void Host_Say(edict_t *pEntity, BOOL teamonly)
 		}
 	}
 
-	// Loner-Strike: a '#' in chat is drawn as the fullwidth sign, so other players' games don't
-	// look it up as a localization string ("#Cstrike_..." tricks that crash or fake messages): what
-	// relocalizebugfix did, which no longer loads on current ReHLDS (its API version check)
+	// Loner-Strike: chat that starts with '#' starts with the fullwidth sign instead, so other
+	// players' games don't look it up as a localization string ("#Cstrike_..." tricks that crash or
+	// fake messages): what relocalizebugfix did, which doesn't load on ReHLDS API 3. A '#' further
+	// in isn't looked up, and stays
+	if (p && p[0] == '#')
 	{
 		static char szSafe[256];
-		size_t n = 0;
-		for (const char *c = p; c && *c && n + 4 < sizeof(szSafe); c++)
-		{
-			if (*c == '#')
-			{
-				szSafe[n++] = char(0xEF);
-				szSafe[n++] = char(0xBC);
-				szSafe[n++] = char(0x83);
-			}
-			else
-				szSafe[n++] = *c;
-		}
-		szSafe[n] = '\0';
-		if (p && Q_strchr(p, '#'))
-			p = szSafe;
+		szSafe[0] = char(0xEF);
+		szSafe[1] = char(0xBC);
+		szSafe[2] = char(0x83);
+		Q_strlcpy(szSafe + 3, p + 1, sizeof(szSafe) - 3);
+		p = szSafe;
 	}
 
 	SendSayMessage(pPlayer, pcmd, teamonly, p, pszFormat, pszConsoleFormat, bSenderDead, placeName, consoleUsesPlaceName);
