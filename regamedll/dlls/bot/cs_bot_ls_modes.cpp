@@ -694,7 +694,9 @@ bool CCSBot::LsModeShootTick()
 	CBaseEntity *pTarget = m_lsModeTarget;
 	if (now >= m_lsModeScanAt || !LsModeTargetOk(pTarget))
 	{
-		m_lsModeScanAt = now + 0.3f;
+		// (a scan: lines of sight to the nearest few; every half second - the one it's on is
+		// checked every think anyway)
+		m_lsModeScanAt = now + 0.5f;
 		// the ones in range, nearest first; the lines of sight checked for the nearest few only
 		int order[LS_MODE_TARGETS];
 		float ranges[LS_MODE_TARGETS];
@@ -720,7 +722,7 @@ bool CCSBot::LsModeShootTick()
 		CBaseEntity *pBest = nullptr;
 		float bestScore = 0.0f;
 		int traces = 0;
-		for (int n = 0; n < count && traces < 8; n++)
+		for (int n = 0; n < count && traces < 4; n++)
 		{
 			int k = order[n];
 			CBaseEntity *pEntity = s_lsTarget[k];
@@ -804,10 +806,18 @@ bool CCSBot::LsModeShootTick()
 	// no shot that can't reach it: the bullet's own line from the gun - a barricade, boards, a
 	// fence that stops bullets in the way and the trigger stays off (it keeps watching; after a
 	// moment it moves for another angle, or waits for them to break through)
-	TraceResult shot;
-	UTIL_TraceLine(GetGunPosition(), pos, dont_ignore_monsters, dont_ignore_glass, ENT(pev), &shot);
-	CBaseEntity *pInWay = (shot.flFraction < 1.0f && shot.pHit != pTarget->edict()) ? CBaseEntity::Instance(shot.pHit) : nullptr;
-	if (shot.flFraction < 1.0f && shot.pHit != pTarget->edict() && !(pInWay && (LsModeShootThrough(pInWay) || LsModeIsTarget(pInWay))))
+	// (a trace with monsters in it: costly in a crowd of creatures and players, so kept 0.15 s for
+	// the same target)
+	if (now >= m_lsModeShotAt + 0.15f || m_lsModeShotFor != pTarget->entindex())
+	{
+		TraceResult shot;
+		UTIL_TraceLine(GetGunPosition(), pos, dont_ignore_monsters, dont_ignore_glass, ENT(pev), &shot);
+		CBaseEntity *pInWay = (shot.flFraction < 1.0f && shot.pHit != pTarget->edict()) ? CBaseEntity::Instance(shot.pHit) : nullptr;
+		m_lsModeShotBlocked = shot.flFraction < 1.0f && shot.pHit != pTarget->edict() && !(pInWay && (LsModeShootThrough(pInWay) || LsModeIsTarget(pInWay)));
+		m_lsModeShotAt = now;
+		m_lsModeShotFor = pTarget->entindex();
+	}
+	if (m_lsModeShotBlocked)
 	{
 		if (m_lsModeBlockedSince < 0.0f)
 		{
@@ -1100,6 +1110,7 @@ static int LsModeLayer(const Vector &spot)
 // bold ones go where the best loot (and the fights) are (-1: anywhere, the richest)
 int CCSBot::LsModeLayerWant()
 {
+	LS_PROF("LsModeLayerWant");
 	// (the mode's say first: Battle Royale spreads its players over the layers)
 	int told = entindex() >= 1 && entindex() <= MAX_CLIENTS ? s_lsLayer[entindex()] : -1;
 	if (told >= 0)
@@ -1796,6 +1807,7 @@ void CCSBot::LsModeGoalTick(LsModeGoal &g)
 // The hide it's in is the one a station gave it (nothing since has changed its state)
 bool CCSBot::LsModeOursHiding() const
 {
+	LS_PROF("LsModeOursHiding");
 	return IsHiding() && m_lsModeHideState >= 0.0f && Q_fabs(m_stateTimestamp - m_lsModeHideState) < 0.05f;
 }
 

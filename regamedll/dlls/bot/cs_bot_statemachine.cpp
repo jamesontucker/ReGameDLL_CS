@@ -119,6 +119,7 @@ void CCSBot::UseEntity(CBaseEntity *pEntity)
 // If 'searchFromArea' is non-NULL, hiding spots are looked for from that area first.
 void CCSBot::Hide(CNavArea *searchFromArea, float duration, float hideRange, bool holdPosition)
 {
+	LS_PROF("Hide");
 	DestroyPath();
 
 	CNavArea *source;
@@ -212,6 +213,7 @@ void CCSBot::Hide(const Vector *hidingSpot, float duration, bool holdPosition)
 // If 'searchFromArea' is non-NULL, hiding spots are looked for from that area first.
 bool CCSBot::TryToHide(CNavArea *searchFromArea, float duration, float hideRange, bool holdPosition, bool useNearest)
 {
+	LS_PROF("TryToHide");
 	CNavArea *source;
 	Vector sourcePos;
 	if (searchFromArea)

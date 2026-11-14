@@ -53,6 +53,7 @@ void IdleState::OnEnter(CCSBot *me)
 // Determine what we should do next
 void IdleState::OnUpdate(CCSBot *me)
 {
+	LS_PROF("OnUpdate");
 	// all other states assume GetLastKnownArea() is valid, ensure that it is
 	if (!me->GetLastKnownArea() && me->StayOnNavMesh() == false)
 		return;

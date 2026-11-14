@@ -3515,6 +3515,7 @@ LINK_HOOK_VOID_CHAIN(PM_Move, (struct playermove_s *ppmove, int server), ppmove,
 // and client. This will ensure that prediction behaves appropriately.
 void EXT_FUNC __API_HOOK(PM_Move)(struct playermove_s *ppmove, int server)
 {
+	LS_PROF("PM_Move");
 	DbgAssert(pm_shared_initialized);
 
 	pmove = ppmove;

@@ -1267,6 +1267,7 @@ LINK_HOOK_CLASS_CHAIN(VectorRef, CBaseEntity, FireBullets3, (VectorRef vecSrc, V
 // This version is used by Players, uses the random seed generator to sync client and server side shots.
 VectorRef CBaseEntity::__API_HOOK(FireBullets3)(VectorRef vecSrc, VectorRef vecDirShooting, float vecSpread, float flDistance, int iPenetration, int iBulletType, int iDamage, float flRangeModifier, entvars_t *pevAttacker, bool bPistol, int shared_rand)
 {
+	LS_PROF("FireBullets3");
 	static Vector vecRet;
 
 	int iOriginalPenetration = iPenetration;

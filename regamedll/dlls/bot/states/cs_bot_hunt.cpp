@@ -48,6 +48,7 @@ void HuntState::OnEnter(CCSBot *me)
 // Hunt down our enemies
 void HuntState::OnUpdate(CCSBot *me)
 {
+	LS_PROF("OnUpdate");
 	// if we've been hunting for a long time, drop into Idle for a moment to
 	// select something else to do
 	const float huntingTooLongTime = 30.0f;

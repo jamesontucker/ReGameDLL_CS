@@ -174,6 +174,7 @@ void AttackState::StopAttacking(CCSBot *me)
 // Perform attack behavior
 void AttackState::OnUpdate(CCSBot *me)
 {
+	LS_PROF("OnUpdate");
 	// can't be stuck while attacking
 	me->ResetStuckMonitor();
 	me->StopRapidFire();

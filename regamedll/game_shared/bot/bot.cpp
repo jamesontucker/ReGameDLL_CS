@@ -265,6 +265,7 @@ void LsDrDrive(CBasePlayer *bot, float *forward, float *strafe, unsigned short *
 
 void CBot::ExecuteCommand()
 {
+	LS_PROF("bot ExecuteCommand");
 	byte adjustedMSec;
 
 	// Adjust msec to command time interval

@@ -1764,6 +1764,9 @@ private:
 	float m_lsModeStrafeUntil = 0.0f;				// a sidestep between bursts till then
 	bool m_lsModeStrafeLeft = false;
 	float m_lsModeBlockedSince = -1.0f;				// its mode enemy's been behind something bullets stop since
+	float m_lsModeShotAt = -1.0f;					// the bullet line to its mode enemy, last checked (a trace through the crowd: every 0.15 s)
+	int m_lsModeShotFor = 0;
+	bool m_lsModeShotBlocked = false;
 	float m_lsModeAngleAt = 0.0f;					// next move for another angle
 	void LsModePeaceTick();
 	void LsModeRoomTick(float reach);				// room from anyone close (a peace, gearing up)

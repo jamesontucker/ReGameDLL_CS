@@ -31,6 +31,7 @@
 // Move to a potentially far away position.
 void MoveToState::OnEnter(CCSBot *me)
 {
+	LS_PROF("OnEnter");
 	if (me->IsUsingKnife() && me->IsWellPastSafe() && !me->IsHurrying())
 	{
 		me->Walk();
@@ -65,6 +66,7 @@ void MoveToState::OnEnter(CCSBot *me)
 // Move to a potentially far away position.
 void MoveToState::OnUpdate(CCSBot *me)
 {
+	LS_PROF("OnUpdate");
 	me->LsSneak();	// Loner-Strike
 	// assume that we are paying attention and close enough to know our enemy died
 	if (me->GetTask() == CCSBot::MOVE_TO_LAST_KNOWN_ENEMY_POSITION)

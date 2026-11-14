@@ -32,6 +32,7 @@
 // NOTE: Do not forget this state may include a very long "move-to" time to get to our hidey spot!
 void HideState::OnEnter(CCSBot *me)
 {
+	LS_PROF("OnEnter");
 	m_isAtSpot = false;
 
 	// if duration is "infinite", set it to a reasonably long time to prevent infinite camping
@@ -70,6 +71,7 @@ void HideState::OnEnter(CCSBot *me)
 // NOTE: Do not forget this state may include a very long "move-to" time to get to our hidey spot!
 void HideState::OnUpdate(CCSBot *me)
 {
+	LS_PROF("OnUpdate");
 	me->LsSneak();	// Loner-Strike
 	// wait until finished reloading to leave hide state
 	if (!me->IsActiveWeaponReloading())

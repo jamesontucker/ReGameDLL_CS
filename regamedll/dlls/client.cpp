@@ -3907,6 +3907,7 @@ void EXT_FUNC ServerActivate(edict_t *pEdictList, int edictCount, int clientMax)
 
 void EXT_FUNC PlayerPreThink(edict_t *pEntity)
 {
+	LS_PROF("PlayerPreThink");
 	entvars_t *pev = &pEntity->v;
 	CBasePlayer *pPlayer = (CBasePlayer *)GET_PRIVATE(pEntity);
 
@@ -3918,6 +3919,7 @@ void EXT_FUNC PlayerPreThink(edict_t *pEntity)
 
 void EXT_FUNC PlayerPostThink(edict_t *pEntity)
 {
+	LS_PROF("PlayerPostThink");
 	entvars_t *pev = &pEntity->v;
 	CBasePlayer *pPlayer = (CBasePlayer *)GET_PRIVATE(pEntity);
 

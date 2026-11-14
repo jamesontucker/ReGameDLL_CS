@@ -916,6 +916,7 @@ void CCSBot::OnTouchingWeapon(CWeaponBox *box)
 // TODO: Check more rays for safety.
 bool CCSBot::IsFriendInLineOfFire()
 {
+	LS_PROF("IsFriendInLineOfFire");
 	if (CSGameRules()->IsFreeForAll())
 		return false;
 

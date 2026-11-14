@@ -57,6 +57,7 @@ void InvestigateNoiseState::OnEnter(CCSBot *me)
 // Use TravelDistance instead of distance...
 void InvestigateNoiseState::OnUpdate(CCSBot *me)
 {
+	LS_PROF("OnUpdate");
 	float newNoiseDist;
 	if (me->ShouldInvestigateNoise(&newNoiseDist))
 	{

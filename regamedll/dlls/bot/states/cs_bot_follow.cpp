@@ -102,6 +102,7 @@ void FollowState::ComputeLeaderMotionState(float leaderSpeed)
 // TODO: Clean up this nasty mess
 void FollowState::OnUpdate(CCSBot *me)
 {
+	LS_PROF("OnUpdate");
 	// if we lost our leader, give up
 	if (!m_leader || !m_leader->IsAlive())
 	{
