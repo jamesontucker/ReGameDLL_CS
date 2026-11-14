@@ -1668,6 +1668,9 @@ void CCSBot::LsModeTick()
 	// (a healing item, at a moment of its own choosing - and still while it works)
 	if (LsModeHealTick())
 		return;
+	// (Battle Royale: strayed well away from its squad - back toward them, over a mode's errand)
+	if (!gearing && !s_lsPeace && s_lsRing.on && (LsModeSquadTick(true) || (gpGlobals->time < m_lsModeSquadUntil && LsModeHeadedTo(m_lsModeMoveTo))))
+		return;
 
 	// the goal to act on: the most important it cares about (the nearer of two alike); spent
 	// ones (run out, their entity gone) go
@@ -1702,7 +1705,7 @@ void CCSBot::LsModeTick()
 			return;
 		// (Battle Royale after the gearing up: a fight between others near by - in on it or away
 		// from it - and back toward its squad when it's strayed)
-		if (!gearing && !s_lsPeace && s_lsRing.on && (LsModeThirdTick() || LsModeSquadTick()))
+		if (!gearing && !s_lsPeace && s_lsRing.on && (LsModeThirdTick() || LsModeSquadTick(false)))
 			return;
 		// (geared up and a high-ground player: a sightline held a while, then the next along)
 		if (!gearing && !s_lsPeace && s_lsPeaceEndAt >= 0.0f && !shooting && LsModeLayerWant() == 2 && LsModePerchTick())
@@ -1759,12 +1762,17 @@ bool CCSBot::LsModeHealTick()
 
 // Battle Royale, a squad: back toward the nearest squad mate who's up when it's strayed - a team
 // player keeps close, a loner wanders far (true: on its way)
-bool CCSBot::LsModeSquadTick()
+bool CCSBot::LsModeSquadTick(bool overGoal)
 {
 	float now = gpGlobals->time;
 	if (!g_lsModeTies || now < m_lsModeSquadAt || now < m_lsModePushUntil || IsOnLadder() || !m_repathTimer.IsElapsed())
 		return false;
 	m_lsModeSquadAt = now + RANDOM_FLOAT(3.0f, 5.0f);
+	// (over a goal: only a light one - a crate, a camping spot; a revive or anything that matters goes on)
+	if (overGoal)
+		for (int i = 0; i < LS_MODE_GOALS; i++)
+			if (m_lsModeGoal[i].kind != LS_GOAL_NONE && m_lsModeGoal[i].care && m_lsModeGoal[i].prio >= 60)
+				return false;
 	CBasePlayer *pMate = nullptr;
 	float mateDist = 4000.0f;
 	LsForTeammates(this, [&](CBasePlayer *pPlayer) {
@@ -1777,7 +1785,9 @@ bool CCSBot::LsModeSquadTick()
 			pMate = pPlayer;
 		}
 	});
-	float leash = 350.0f + 1500.0f * (1.0f - LsTeamwork());
+	// (a squad stays in reach of each other - a knocked one bleeds out in 45 s; over an errand of the
+	// mode's own - a crate, a camping spot - only when it's strayed well beyond that)
+	float leash = (300.0f + 900.0f * (1.0f - LsTeamwork())) * (overGoal ? 1.6f : 1.0f);
 	if (!pMate || mateDist < leash)
 		return false;
 	Vector spot;
@@ -1787,6 +1797,7 @@ bool CCSBot::LsModeSquadTick()
 		return false;
 	LsModeMove(spot, mateDist > 1500.0f);
 	m_lsModePushUntil = now + 6.0f;
+	m_lsModeSquadUntil = overGoal ? now + 6.0f : 0.0f;
 	LsWhy("mode squad: back to the squad");
 	return true;
 }
@@ -2114,7 +2125,8 @@ void CCSBot::LsModeGoalTick(LsModeGoal &g)
 	Vector to = g.at - pev->origin;
 	float dist = to.Make2D().Length();
 	bool there = dist < Q_max(g.radius * 0.8f, 48.0f) && Q_fabs(to.z) < 100.0f;
-	bool hurry = g.prio >= 80 || g.kind == LS_GOAL_EXTRACT || g.kind == LS_GOAL_FLEE;
+	bool hurry = g.prio >= 80 || g.kind == LS_GOAL_EXTRACT || g.kind == LS_GOAL_FLEE
+		|| (g.kind == LS_GOAL_USE && g.ent > 0 && g.thing.IsValid() && ((CBaseEntity *)g.thing)->IsPlayer());	// (a teammate bleeding out)
 	// (a moment before it gets going: the less skilled react later)
 	if (now < g.startAt)
 		return;

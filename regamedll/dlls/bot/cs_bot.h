@@ -1737,8 +1737,9 @@ public:
 	bool LsModeHealTick();							// a healing item used at a moment of its own choosing (BR)
 	float m_lsModeHealAt = 0.0f;					// next heal decision
 	float m_lsModeHealUntil = 0.0f;					// healing (standing still) till then
-	bool LsModeSquadTick();							// back toward its squad when it's strayed too far (BR)
+	bool LsModeSquadTick(bool overGoal);							// back toward its squad when it's strayed too far (BR)
 	float m_lsModeSquadAt = 0.0f;
+	float m_lsModeSquadUntil = 0.0f;				// back toward the squad over the mode's errand till then
 	bool LsModeThirdTick();							// a fight between others near by: in on it, or away from it
 	void LsModeHuntTick(LsModeGoal &g);				// hunting a player down: toward where they are now
 	void LsModeHuntPrefer();						// the hunted one in sight: the fight is with them
