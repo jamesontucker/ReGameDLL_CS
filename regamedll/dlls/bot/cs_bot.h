@@ -1772,6 +1772,7 @@ public:
 	bool LsDrTick();								// each think (cs_bot_update.cpp): true while it's standing still on purpose
 	void LsDrPostUpdate();							// after the state machine: waiting, stepping up to a button, pressing it
 	void LsDrPathTick();							// in path movement: a gap to jump, a teleport, a floor not there yet
+	bool LsDrJumpArmed() const;						// the deathrun brain has a gap jump armed (stock early jumps wait)
 	bool LsDrRunner() const;						// a runner (deathrun players pass through each other: no queueing)
 private:
 	bool LsDrActivatorTick();

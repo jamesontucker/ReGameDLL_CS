@@ -1462,6 +1462,17 @@ float LsDrAreaCost(const CNavArea *area)
 
 using namespace LsDr;
 
+// The deathrun brain has a jump armed for the gap ahead (timed at its edge by LsDrDrive): the stock
+// path-following's early gap jumps stand back for it
+bool CCSBot::LsDrJumpArmed() const
+{
+	int idx = const_cast<CCSBot *>(this)->entindex();
+	if (idx < 1 || idx > MAX_CLIENTS)
+		return false;
+	const Runner &r = s_run[idx];
+	return r.gapArmed && !r.tele && gpGlobals->time - r.armedAt < 0.4f;
+}
+
 bool CCSBot::LsDrRunner() const
 {
 	return LsDrOn() && s_ready && m_iTeam == CT;
