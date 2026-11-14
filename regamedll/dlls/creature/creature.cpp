@@ -54,6 +54,7 @@ cvar_t ls_creature_adaptive  = { "ls_creature_adaptive", "1", 0, 1.0f, nullptr }
 cvar_t ls_creature_fps_low   = { "ls_creature_fps_low", "0.6", 0, 0.6f, nullptr };	// below this (part of sys_ticrate, or fps when > 1) for 2 s: lower the cap
 cvar_t ls_creature_fps_ok    = { "ls_creature_fps_ok", "0.85", 0, 0.85f, nullptr };	// at or above this for 10 s: raise it again
 cvar_t ls_creature_cap_now   = { "ls_creature_cap_now", "0", 0, 0.0f, nullptr };		// the live cap now (read-only: ls_creature_max, lowered while fps is low)
+cvar_t ls_creature_friendly_max = { "ls_creature_friendly_max", "8", 0, 8.0f, nullptr };	// friendly creatures (bought turrets) alive at once, apart from ls_creature_max
 cvar_t ls_perf               = { "ls_perf", "0", 0, 0.0f, nullptr };		// seconds between performance lines in the log (0 = off)
 cvar_t ls_crash_quiet        = { "ls_crash_quiet", "1", 0, 1.0f, nullptr };		// a dedicated server's crash: log and end, no dialog (Windows/Wine)		// seconds without a frame before the marks are written (0 = off)
 
@@ -205,7 +206,7 @@ static void LsPerfReport(double now, double span)
 // tries again), nobody is removed, and difficulty is untouched: only how many at once.
 static struct { double secondStart; int frames, low, good; float cap; } s_adapt;
 
-static int LsAliveCount();
+static int LsAliveCount(bool friendly = false);
 
 float LsCreatureCapNow()
 {
@@ -532,6 +533,7 @@ void LsCreatures_RegisterCVars()
 	CVAR_REGISTER(&ls_crash_quiet);
 	CVAR_REGISTER(&ls_perf);
 	CVAR_REGISTER(&ls_creature_adaptive);
+	CVAR_REGISTER(&ls_creature_friendly_max);
 	CVAR_REGISTER(&ls_creature_fps_low);
 	CVAR_REGISTER(&ls_creature_fps_ok);
 	CVAR_REGISTER(&ls_creature_cap_now);
@@ -736,6 +738,7 @@ static void LsTypeDefaults(LsCreatureType *t, const char *name)
 	Q_strlcpy(t->sound[LSS_MISS], "zombie/claw_miss1.wav zombie/claw_miss2.wav | weapons/knife_slash1.wav weapons/knife_slash2.wav");
 	Q_strlcpy(t->sound[LSS_PAIN], "zombie/zo_pain1.wav zombie/zo_pain2.wav | player/pl_pain2.wav player/pl_pain4.wav");
 	Q_strlcpy(t->sound[LSS_DIE], "zombie/zo_pain2.wav | player/die1.wav player/die3.wav");
+	t->friendly = false;
 	t->enrageBelow = 0.0f;
 	t->enrageSpeed = 1.35f;
 	t->enrageDamage = 1.3f;
@@ -1249,6 +1252,7 @@ static void LsSetTypeKey(LsCreatureType *t, const char *key, const char *value)
 	else if (!Q_stricmp(key, "shot_fx")) t->shotFx = !Q_stricmp(value, "zap") ? 1 : !Q_stricmp(value, "none") ? 2 : 0;
 	else if (!Q_stricmp(key, "hops")) t->hops = LsNum(value, 0.0f, 1.0f, t->hops);
 	else if (!Q_stricmp(key, "flank")) t->flank = Q_atoi(value) != 0;
+	else if (!Q_stricmp(key, "friendly")) t->friendly = Q_atoi(value) != 0;
 	else if (!Q_stricmp(key, "enrage_below")) t->enrageBelow = LsNum(value, 0.0f, 0.95f, t->enrageBelow);
 	else if (!Q_stricmp(key, "enrage_speed")) t->enrageSpeed = LsNum(value, 1.0f, 3.0f, t->enrageSpeed);
 	else if (!Q_stricmp(key, "enrage_damage")) t->enrageDamage = LsNum(value, 1.0f, 5.0f, t->enrageDamage);
@@ -1944,21 +1948,37 @@ ILsCreature *LsCreatureOf(CBaseEntity *pEntity)
 	return nullptr;
 }
 
-static int LsAliveCount()
+// (friendly ones - bought turrets - have their own small cap and don't count here)
+static int LsAliveCount(bool friendly)
 {
 	int alive = 0;
 	for (int i = 0; i < s_listCount; i++)
 	{
 		ILsCreature *c = LsCreatureAt(i);
-		if (c && c->IsAlive())
+		if (c && c->IsAlive() && LsCreatureIsFriendly(c->Entity()) == friendly)
 			alive++;
 	}
 	return alive;
 }
 
+static int s_friendlyAlive = 0;
+
+bool LsCreatureIsFriendly(CBaseEntity *pEntity)
+{
+	ILsCreature *c = pEntity ? LsCreatureOf(pEntity) : nullptr;
+	return c && !Q_strcmp(c->Provider(), "ls") && static_cast<CLsCreature *>(c->Entity())->Friendly();
+}
+
+static CLsCreature *LsNativeOf(CBaseEntity *pEntity)
+{
+	ILsCreature *c = pEntity ? LsCreatureOf(pEntity) : nullptr;
+	return (c && c->Entity() && !Q_strcmp(c->Provider(), "ls")) ? static_cast<CLsCreature *>(c->Entity()) : nullptr;
+}
+
 static void LsUpdateAliveCount()
 {
 	int alive = LsAliveCount();
+	s_friendlyAlive = LsAliveCount(true);
 
 	if (int(ls_creature_alive.value) != alive)
 		CVAR_SET_FLOAT("ls_creature_alive", alive);
@@ -2152,15 +2172,8 @@ public:
 			return nullptr;
 		}
 
-		int alive = 0;
-		for (int i = 0; i < LsCreatureCount(); i++)
-		{
-			ILsCreature *c = LsCreatureAt(i);
-			if (c && c->IsAlive())
-				alive++;
-		}
-
-		if (alive >= int(LsCreatureCapNow()))
+		int alive = LsAliveCount(false);
+		if (alive >= int(LsCreatureCapNow()) && !Q_strstr(keys ? keys : "", "friendly=1") && !t->friendly)
 		{
 			CONSOLE_ECHO("ls_creature: %d alive already (ls_creature_max %.0f, live cap now %.0f)\n", alive, ls_creature_max.value, LsCreatureCapNow());
 			return nullptr;
@@ -2344,6 +2357,10 @@ void CLsCreature::KeyValue(KeyValueData *pkvd)
 		m_keyHates = LsHatesFromString(value) + 1;
 	else if (FStrEq(key, "persist"))
 		m_persist = Q_atoi(value) != 0;
+	else if (FStrEq(key, "friendly"))
+		m_keyFriendly = Q_atoi(value) ? 2 : 1;
+	else if (FStrEq(key, "owner"))
+		m_ownerIndex = Q_atoi(value);
 	else if (FStrEq(key, "tier"))
 	{
 		// (0 or 1 = normal; also takes effect on one already spawned: a plugin's DispatchKeyValue after the spawn)
@@ -2404,9 +2421,20 @@ void CLsCreature::Spawn()
 
 	// the live cap holds for every new one, however it's made (a plugin's create_entity +
 	// DispatchSpawn too, not only "ls_creature spawn"); placed in the map ones always come
-	if (!m_improv && !m_fromMap)
+	bool friendly = m_keyFriendly ? m_keyFriendly == 2 : GetType()->friendly;
+	if (!m_improv && !m_fromMap && friendly)
 	{
-		int alive = LsAliveCount();
+		int alive = LsAliveCount(true);
+		if (alive >= int(ls_creature_friendly_max.value))
+		{
+			CONSOLE_ECHO("ls_creature: %d friendly ones alive already (ls_creature_friendly_max): not spawned\n", alive);
+			pev->flags |= FL_KILLME;
+			return;
+		}
+	}
+	else if (!m_improv && !m_fromMap)
+	{
+		int alive = LsAliveCount(false);
 		if (alive >= int(LsCreatureCapNow()))
 		{
 			if (ls_creature_debug.value > 0.0f)
@@ -2467,6 +2495,8 @@ void CLsCreature::Setup()
 
 	m_enraged = false;
 	m_animScale = 1.0f;
+	m_friendly = m_keyFriendly ? m_keyFriendly == 2 : t->friendly;
+	pev->team = m_friendly ? 1 : 0;		// (plugins: pev_team 1 = friendly)
 	ApplyLook();
 
 	m_bloodColor = t->bloodColor;
@@ -2768,9 +2798,17 @@ void CLsCreature::UpdateStuck()
 	s_stuckTeleports++;
 }
 
+// Players by its "hates"; a friendly one (a bought turret) only the other creatures, and they it
 bool CLsCreature::IsHostileTo(CBaseEntity *pOther) const
 {
-	return const_cast<CLsCreature *>(this)->IsAlive() && LsIsHostilePlayer(pOther, m_hates);
+	if (!const_cast<CLsCreature *>(this)->IsAlive() || !pOther || pOther == this)
+		return false;
+	CLsCreature *pCreature = LsNativeOf(pOther);
+	if (pCreature)
+		return pCreature->m_friendly != m_friendly && pCreature->IsAlive();
+	if (m_friendly)
+		return false;
+	return LsIsHostilePlayer(pOther, m_hates);
 }
 
 bool CLsCreature::LastNoise(Vector *pos, float *when, float *range) const
@@ -3188,7 +3226,7 @@ void CLsCreature::UpdateSenses()
 
 	// (only the nearest few in range get sight traces - and whom it's after, always)
 	const int maxLooks = 4;
-	CBasePlayer *looks[maxLooks + 1];
+	CBaseEntity *looks[maxLooks + 1];
 	float lookDist[maxLooks + 1];
 	int lookCount = 0;
 	float range = m_detect * 1.5f;
@@ -3217,21 +3255,50 @@ void CLsCreature::UpdateSenses()
 			lookDist[k] = lookDist[k - 1];
 		}
 
-		looks[at] = static_cast<CBasePlayer *>(pPlayer);
+		looks[at] = pPlayer;
 		lookDist[at] = dist;
 		lookCount = Q_min(lookCount + 1, maxLooks);
 	}
 
-	if (pCurrent && pCurrent->IsPlayer())
+	// creatures on the other side: a friendly one (a bought turret) looks for creatures, the
+	// rest for friendly ones (only while there are any: nothing extra otherwise)
+	if (m_friendly || s_friendlyAlive > 0)
 	{
-		looks[lookCount] = static_cast<CBasePlayer *>(pCurrent);
+		for (int i = 0; i < s_listCount; i++)
+		{
+			ILsCreature *c = LsCreatureAt(i);
+			CBaseEntity *pOther = c ? c->Entity() : nullptr;
+			if (!pOther || pOther == pCurrent || !c->IsAlive() || !IsHostileTo(pOther))
+				continue;
+			float dist = (pOther->pev->origin - pev->origin).Length();
+			if (dist > range)
+				continue;
+			int at = lookCount;
+			while (at > 0 && lookDist[at - 1] > dist)
+				at--;
+			if (at >= maxLooks)
+				continue;
+			for (int k = Q_min(lookCount, maxLooks - 1); k > at; k--)
+			{
+				looks[k] = looks[k - 1];
+				lookDist[k] = lookDist[k - 1];
+			}
+			looks[at] = pOther;
+			lookDist[at] = dist;
+			lookCount = Q_min(lookCount + 1, maxLooks);
+		}
+	}
+
+	if (pCurrent)
+	{
+		looks[lookCount] = pCurrent;
 		lookDist[lookCount] = (pCurrent->pev->origin - pev->origin).Length();
 		lookCount++;
 	}
 
 	for (int l = 0; l < lookCount; l++)
 	{
-		CBasePlayer *pPlayer = looks[l];
+		CBaseEntity *pPlayer = looks[l];
 		float dist = lookDist[l];
 
 		if (!CanSee(pPlayer, alert || pPlayer == pCurrent, pPlayer == pCurrent))
@@ -3435,8 +3502,11 @@ BOOL CLsCreature::TakeDamage(entvars_t *pevInflictor, entvars_t *pevAttacker, fl
 
 	CBaseEntity *pAttacker = pevAttacker ? CBaseEntity::Instance(pevAttacker) : nullptr;
 
-	// creatures don't hurt each other (a brute's swing past a runner)
-	if (pAttacker && pAttacker != this && LsCreatureOf(pAttacker))
+	// creatures don't hurt each other (a brute's swing past a runner), but do a friendly one (a
+	// bought turret) and it them; players don't hurt a friendly one
+	if (pAttacker && pAttacker != this && LsCreatureOf(pAttacker) && !IsHostileTo(pAttacker))
+		return FALSE;
+	if (m_friendly && pAttacker && pAttacker->IsPlayer())
 		return FALSE;
 
 	pev->health -= flDamage;
@@ -3466,7 +3536,7 @@ BOOL CLsCreature::TakeDamage(entvars_t *pevInflictor, entvars_t *pevAttacker, fl
 		m_improv->Stop();
 	}
 
-	if (pAttacker && pAttacker->IsPlayer() && IsHostileTo(pAttacker))
+	if (pAttacker && (pAttacker->IsPlayer() || LsNativeOf(pAttacker)) && IsHostileTo(pAttacker))
 	{
 		m_lastAttacker = pAttacker;
 
@@ -3520,6 +3590,14 @@ void CLsCreature::Killed(entvars_t *pevAttacker, int iGib)
 
 	// the killer's reward and the log line plugins can read (register_logevent)
 	CBaseEntity *pKiller = pevAttacker ? CBaseEntity::Instance(pevAttacker) : nullptr;
+	// (killed by a bought turret: the player who placed it gets the kill)
+	CLsCreature *pByCreature = LsNativeOf(pKiller);
+	if (pByCreature && pByCreature->m_friendly && pByCreature->m_ownerIndex > 0)
+	{
+		CBasePlayer *pOwner = UTIL_PlayerByIndex(pByCreature->m_ownerIndex);
+		if (pOwner && pOwner->IsAlive())
+			pKiller = pOwner;
+	}
 	if (pKiller && pKiller->IsPlayer() && pKiller != this)
 	{
 		CBasePlayer *pPlayer = static_cast<CBasePlayer *>(pKiller);
@@ -3996,7 +4074,8 @@ void CLsCreature::LandAttack()
 		UTIL_TraceLine(eyes, eyes + dir * (t->attackRange * 1.2f), dont_ignore_monsters, ENT(pev), &tr);
 
 		CBaseEntity *pHit = tr.pHit ? CBaseEntity::Instance(tr.pHit) : nullptr;
-		if (pHit && pHit->pev->takedamage != DAMAGE_NO && !LsCreatureOf(pHit))
+		// (a creature only when it's on the other side; a friendly one's shot never hurts a player)
+		if (pHit && pHit->pev->takedamage != DAMAGE_NO && (LsCreatureOf(pHit) ? IsHostileTo(pHit) : !(m_friendly && pHit->IsPlayer())))
 		{
 			ClearMultiDamage();
 			pHit->TraceAttack(pev, m_damage, dir, &tr, DMG_BULLET);
