@@ -2220,21 +2220,25 @@ void CCSBot::LsDrPathTick()
 			}
 		if (r.tele)
 			return;
-		// a door between the two: open, walk through; shut, its button or a wait (LsDrTick)
+		// a door between the two (a linked door, whichever pair of areas the path crosses it by): shut, its
+		// button or a wait (LsDrTick)
+		if (!s_doorLinks.empty() && (pev->origin - *B->GetCenter()).Make2D().IsLengthLessThan(400.0f))
 		{
-			bool door = false;
-			for (size_t k = 0; k < s_doorLinks.size(); k++)
+			Vector a = *A->GetCenter() + Vector(0, 0, HalfHumanHeight + 4.0f), b = *B->GetCenter() + Vector(0, 0, HalfHumanHeight + 4.0f);
+			TraceResult tr;
+			UTIL_TraceHull(a, b, ignore_monsters, human_hull, nullptr, &tr);
+			if (tr.flFraction < 1.0f && tr.pHit)
 			{
-				const DoorLink &dl = s_doorLinks[k];
-				if (dl.from != ia || dl.to != ib)
-					continue;
-				door = true;
-				if (DoorShut(dl) && (pev->origin - dl.at).Make2D().IsLengthLessThan(400.0f))
-					r.openDoor = int(k);
-				break;
+				for (size_t k = 0; k < s_doorLinks.size(); k++)
+				{
+					CBaseEntity *pDoor = s_doorLinks[k].door;
+					if (pDoor && pDoor->edict() == tr.pHit)
+					{
+						r.openDoor = int(k);
+						return;
+					}
+				}
 			}
-			if (door)
-				return;
 		}
 		// a gap: run at the edge, jump, land a little way in
 		Vector2D d;
