@@ -1732,6 +1732,8 @@ public:
 	float m_lsModeDownAt = 0.0f;
 	int m_lsModeOfferKind = 0;						// the offer it's on its way to use (LS_OFFER_*)
 	float m_lsModeOfferInfl = -1.0f;				// ...and that offer's personality influence
+	void LsModeOfferGiveUp(int ent, float secs);	// an offer out of reach: not tried for a while
+	float m_lsModeTrapNearSince = -1.0f;			// by the trap's switch, not yet in reach, since then
 	int m_lsModeOfferCost = 0;						// ...its price
 	int m_lsModeOfferMoney = -1;
 	int m_lsModeUseMoney = -1;						// the money it had as it began a use (any kind)					// ...the money it had as it began to use it (-1 not yet)

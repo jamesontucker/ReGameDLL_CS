@@ -1414,6 +1414,17 @@ bool CCSBot::LsModeOfferTick()
 	return true;
 }
 
+// An offer it can't take (out of reach): not tried again for a while
+void CCSBot::LsModeOfferGiveUp(int ent, float secs)
+{
+	int me = entindex();
+	if (me < 1 || me > MAX_CLIENTS)
+		return;
+	for (int k = 0; k < LS_MODE_OFFERS; k++)
+		if (s_lsOffer[me][k].kind != LS_OFFER_NONE && s_lsOffer[me][k].ent == ent)
+			s_lsOffer[me][k].nextTry = gpGlobals->time + secs;
+}
+
 // Knocked down (Last Stand, Battle Royale): the mode lays the player down - no-target, the view a
 // hand above the floor - with only a pistol, at a crawl
 bool CCSBot::LsModeDowned() const
@@ -2466,6 +2477,31 @@ void CCSBot::LsModeGoalTick(LsModeGoal &g)
 		bool brRevive = revive && s_lsRing.on;
 		if (brRevive)
 			handy = (pGoalThing->pev->origin - pev->origin).Length() < 70.0f;
+		// (the trap's switch: the mode's reach is 80 u, origin to origin; one it can't get that close to -
+		// beyond the gate, say - is given up for a while instead of USE held in vain)
+		if (g.kind == LS_GOAL_OFFER && m_lsModeOfferKind == LS_OFFER_TRAP && pThing)
+		{
+			float reach = (pThing->pev->origin - pev->origin).Length();
+			handy = reach < 75.0f;
+			if (reach < 200.0f && !handy)
+			{
+				if (m_lsModeTrapNearSince < 0.0f)
+					m_lsModeTrapNearSince = now;
+				else if (now - m_lsModeTrapNearSince > 4.0f)
+				{
+					LsModeOfferGiveUp(g.ent, 90.0f);
+					m_lsModeTrapNearSince = -1.0f;
+					LsModeClearGoals(g.kind, 0);
+					LsWhy("mode offer: the trap's switch out of reach");
+					return;
+				}
+				m_lsModeStepTo = pThing->pev->origin;
+				m_lsModeStepUntil = now + 0.3f;
+				return;
+			}
+			if (reach >= 200.0f)
+				m_lsModeTrapNearSince = -1.0f;
+		}
 		if (g.phase == 1)
 		{
 			if (brRevive && !handy && now < g.phaseUntil && (pGoalThing->pev->origin - pev->origin).IsLengthLessThan(200.0f))
