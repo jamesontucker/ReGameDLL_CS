@@ -116,7 +116,7 @@ enum LsCreatureSound
 
 const int LS_CREATURE_MAX_TYPES = 48;
 const int LS_CREATURE_MAX_SOUNDS = 6;		// per kind
-const int LS_CREATURE_MAX_LIST = 128;		// registered creatures (alive or dead), all providers
+const int LS_CREATURE_MAX_LIST = 512;		// registered creatures (alive, and bodies until they go), all providers
 
 // One creature type: what creatures.ini says about it (or the built-in defaults)
 struct LsCreatureType
@@ -586,7 +586,7 @@ LsCreatureType *LsCreatureTypeAt(int index);
 bool LsCreaturePrecacheType(int index);							// only during map load; true when ready
 CBaseEntity *LsCreatureSpawn(const char *type, const Vector &origin, float yaw, const char *keys);
 
-void LsCreatureRegister(ILsCreature *pCreature);				// the list owns it
+bool LsCreatureRegister(ILsCreature *pCreature);				// the list owns it (false: the list is full, it was deleted)
 void LsCreatureUnregister(CBaseEntity *pEntity);
 int LsCreatureCount();											// registered, alive or dead (iterate with LsCreatureAt)
 ILsCreature *LsCreatureAt(int i);								// null for a gone one
