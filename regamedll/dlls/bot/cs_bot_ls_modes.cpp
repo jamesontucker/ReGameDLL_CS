@@ -1226,6 +1226,11 @@ int CCSBot::LsModeLayerWant()
 		return told;
 	if (LsModeKitted())
 		return 2;
+	// (sniper-minded - the awper's style, a sniper rifle in hand - or bold and good: the rooftops)
+	int mainId = m_rgpPlayerItems[PRIMARY_WEAPON_SLOT] ? m_rgpPlayerItems[PRIMARY_WEAPON_SLOT]->m_iId : 0;
+	if (LsStyle() == LS_STYLE_AWPER || mainId == WEAPON_AWP || mainId == WEAPON_SCOUT || mainId == WEAPON_G3SG1 || mainId == WEAPON_SG550
+		|| (LsAggro() > 0.6f && LsSkill() > 0.6f && LsTrait(216) < 0.5f))
+		return 2;
 	float taste = LsTrait(210);
 	if (LsAggro() > 0.65f && taste < 0.35f)
 		return -1;
@@ -1765,6 +1770,9 @@ void CCSBot::LsModeTick()
 
 	if (best < 0)
 	{
+		// (gearing up, armed and a high-ground player: up to a sightline rather than more loot)
+		if (gearing && !s_lsPeace && !shooting && m_rgpPlayerItems[PRIMARY_WEAPON_SLOT] && LsModeLayerWant() == 2 && LsModePerchTick())
+			return;
 		// (gearing up: off to loot rather than hunting)
 		if ((gearing || s_lsPeace) && !shooting && LsModeAttractTick(true))
 			return;
@@ -1899,6 +1907,13 @@ bool CCSBot::LsModeSquadTick(bool overGoal, bool loose)
 	// (a squad stays in reach of each other - a knocked one bleeds out in 45 s; over an errand of the
 	// mode's own - a crate, a camping spot - only when it's strayed well beyond that)
 	float leash = (300.0f + 900.0f * (1.0f - LsTeamwork())) * (overGoal ? 1.6f : 1.0f) * (loose ? 1.5f : 1.0f);
+	// (a high-ground player covers its squad from above: a longer leash, and height doesn't count -
+	// the squad's pull kept bringing them down off the roofs)
+	if (pMate && LsModeLayerWant() == 2)
+	{
+		leash *= 2.5f;
+		mateDist = LsModeDist2D(pMate->pev->origin, pev->origin);
+	}
 	if (!pMate || mateDist < leash)
 		return false;
 	Vector spot;
