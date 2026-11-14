@@ -440,6 +440,14 @@ bool CCSBot::LsModeLetsBe(CBasePlayer *pPlayer)
 		if (!threat && d > 500.0f + 250.0f * m_lsModeHuntSway * LsAggro())
 			return true;
 	}
+	if (gpGlobals->time < m_lsModeRevivingUntil)
+	{
+		float d = (pPlayer->pev->origin - pev->origin).Length();
+		bool threat = (pPlayer == GetAttacker() && GetTimeSinceAttacked() < 5.0f)
+			|| (pPlayer->IsBot() && static_cast<CCSBot *>(pPlayer)->GetEnemy() == this && static_cast<CCSBot *>(pPlayer)->IsAttacking());
+		if (!threat && d > 700.0f)
+			return true;
+	}
 	if (!LsModeGearing())
 		return false;
 	// (another bot: only once it's going for this one - two at one crate who bump or glance at each
@@ -1676,7 +1684,7 @@ void CCSBot::LsModeTick()
 	{
 		m_lsModeMateDownAt = gpGlobals->time + RANDOM_FLOAT(1.5f, 3.0f);
 		CBasePlayer *pDown = nullptr;
-		float downDist = 1500.0f;
+		float downDist = 1500.0f + 1000.0f * LsTeamwork();
 		LsForTeammates(this, [&](CBasePlayer *pPlayer) {
 			if (!LsModeIsDown(pPlayer))
 				return;
@@ -1767,13 +1775,24 @@ void CCSBot::LsModeTick()
 	CBaseEntity *pBestThing = gb.ent > 0 ? (CBaseEntity *)gb.thing : nullptr;
 	bool reviveBest = (gb.kind == LS_GOAL_USE || gb.kind == LS_GOAL_HOLD) && pBestThing && pBestThing->IsPlayer();
 	bool reviveClose = reviveBest && LsModeDist2D(gb.at, pev->origin) < 160.0f;
+	// (on its way to a squad mate bleeding out, for the vision: enemies a way off who aren't after it are
+	// left be a moment - it keeps going; anyone close or shooting at it is a fight as usual)
+	m_lsModeRevivingUntil = reviveBest ? gpGlobals->time + 1.0f : 0.0f;
+	CBasePlayer *pFoe = GetEnemy();
+	bool farFight = reviveBest && m_isEnemyVisible && pFoe && (pFoe->pev->origin - pev->origin).IsLengthGreaterThan(700.0f)
+		&& GetTimeSinceAttacked() > 2.0f;
+	if (farFight && IsAttacking())
+	{
+		StopAttacking();
+		LsWhy("mode revive: leaving a far fight for them");
+	}
 	// (a fight it's lost sight of, with a squad mate bleeding out: it breaks off and goes to them)
 	if (reviveBest && IsAttacking() && !m_isEnemyVisible && GetTimeSinceAttacked() > 2.0f && GetTimeSinceLastSawEnemy() > 1.5f)
 	{
 		StopAttacking();
 		LsWhy("mode revive: breaking off a fight for them");
 	}
-	if (!LsFree() || (m_isEnemyVisible && !reviveClose) || IsOnLadder())
+	if (!LsFree() || (m_isEnemyVisible && !reviveClose && !farFight) || IsOnLadder())
 		return;
 	if (LsModePushTick(m_lsModeGoal[best]))
 		return;
