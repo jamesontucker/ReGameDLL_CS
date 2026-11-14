@@ -51,8 +51,8 @@ cvar_t ls_creature_frags     = { "ls_creature_frags", "0", 0, 0.0f, nullptr };		
 
 cvar_t ls_watchdog           = { "ls_watchdog", "10", 0, 10.0f, nullptr };
 cvar_t ls_creature_adaptive  = { "ls_creature_adaptive", "1", 0, 1.0f, nullptr };	// lower the live cap while the server's fps is low (players never see it)
-cvar_t ls_creature_fps_low   = { "ls_creature_fps_low", "0.6", 0, 0.6f, nullptr };	// below this (part of sys_ticrate, or fps when > 1) for 2 s: lower the cap
-cvar_t ls_creature_fps_ok    = { "ls_creature_fps_ok", "0.85", 0, 0.85f, nullptr };	// at or above this for 10 s: raise it again
+cvar_t ls_creature_fps_floor = { "ls_creature_fps_floor", "90", 0, 90.0f, nullptr };	// server fps under this for 2 s: lower the cap
+cvar_t ls_creature_fps_ok    = { "ls_creature_fps_ok", "110", 0, 110.0f, nullptr };	// at or above this for 10 s: raise it again
 cvar_t ls_creature_cap_now   = { "ls_creature_cap_now", "0", 0, 0.0f, nullptr };		// the live cap now (read-only: ls_creature_max, lowered while fps is low)
 cvar_t ls_creature_friendly_max = { "ls_creature_friendly_max", "8", 0, 8.0f, nullptr };	// friendly creatures (bought turrets) alive at once, apart from ls_creature_max
 cvar_t ls_perf               = { "ls_perf", "0", 0, 0.0f, nullptr };		// seconds between performance lines in the log (0 = off)
@@ -233,11 +233,13 @@ static void LsAdaptFrame()
 	s_adapt.secondStart = now;
 	s_adapt.frames = 0;
 
+	// absolute fps (a server at sys_ticrate 300 or 1000 never reaches a share of it); a server
+	// whose tick rate is under them is judged against 80 % / 95 % of it instead
 	float tic = CVAR_GET_FLOAT("sys_ticrate");
 	if (tic <= 0.0f)
 		tic = 100.0f;
-	float low = ls_creature_fps_low.value > 1.0f ? ls_creature_fps_low.value : tic * ls_creature_fps_low.value;
-	float ok = ls_creature_fps_ok.value > 1.0f ? ls_creature_fps_ok.value : tic * ls_creature_fps_ok.value;
+	float low = Q_min(ls_creature_fps_floor.value, tic * 0.8f);
+	float ok = Q_max(low + 5.0f, Q_min(ls_creature_fps_ok.value, tic * 0.95f));
 	float limit = ls_creature_max.value;
 	if (s_adapt.cap <= 0.0f || s_adapt.cap > limit)
 		s_adapt.cap = limit;
@@ -534,7 +536,7 @@ void LsCreatures_RegisterCVars()
 	CVAR_REGISTER(&ls_perf);
 	CVAR_REGISTER(&ls_creature_adaptive);
 	CVAR_REGISTER(&ls_creature_friendly_max);
-	CVAR_REGISTER(&ls_creature_fps_low);
+	CVAR_REGISTER(&ls_creature_fps_floor);
 	CVAR_REGISTER(&ls_creature_fps_ok);
 	CVAR_REGISTER(&ls_creature_cap_now);
 	LsWatchdogStart();
