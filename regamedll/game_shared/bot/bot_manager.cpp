@@ -136,7 +136,7 @@ void CBotManager::RestartRound()
 // Invoked at the start of each frame
 void CBotManager::StartFrame()
 {
-	LS_PROF("StartFrame");
+	LS_PROF("bots think (all)");
 	// debug smoke grenade visualization
 	if (cv_bot_debug.value == 5)
 	{

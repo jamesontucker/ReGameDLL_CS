@@ -143,7 +143,7 @@ void CCSBotManager::RestartRound()
 // Called each frame
 void CCSBotManager::StartFrame()
 {
-	LS_PROF("StartFrame");
+	LS_PROF("bot manager frame");
 	// EXTEND
 	CBotManager::StartFrame();
 	MonitorBotCVars();

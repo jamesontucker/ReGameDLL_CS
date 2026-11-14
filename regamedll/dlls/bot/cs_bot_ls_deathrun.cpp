@@ -1156,6 +1156,7 @@ static CBasePlayer *TheActivator()
 // Each frame: who died where, and which buttons went down (to tell a trap's death from a fall)
 void LsDrStep()
 {
+	LS_PROF("LsDrStep");
 	using namespace LsDr;
 	if (!LsDrOn() || !Ready())
 		return;

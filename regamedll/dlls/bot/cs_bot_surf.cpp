@@ -1270,6 +1270,7 @@ static void Locate(SurfBot &b, const Vector &o, float *off)
 // The surf maps' exploring, a little each frame (CCSBotManager::StartFrame)
 void LsSurfStep()
 {
+	LS_PROF("LsSurfStep");
 	using namespace LsSurf;
 	if (cv_bot_ls_surf.value <= 0.0f || !gpGlobals->mapname)
 		return;

@@ -473,6 +473,7 @@ bool CCSBot::IsBuying() const
 // Move to potentially distant position
 void CCSBot::MoveTo(const Vector *pos, RouteType route)
 {
+	LS_PROF("MoveTo");
 	m_moveToState.SetGoalPosition(*pos);
 	m_moveToState.SetRouteType(route);
 	SetState(&m_moveToState);

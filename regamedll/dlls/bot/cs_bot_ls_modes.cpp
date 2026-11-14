@@ -335,6 +335,7 @@ bool CCSBot::LsModeKitted()
 // drop). Over for anyone once it's hit
 bool CCSBot::LsModeGearing()
 {
+	LS_PROF("LsModeGearing");
 	if (s_lsPeace || s_lsPeaceEndAt < 0.0f)
 		return false;
 	// (a new peace's end: a new gearing up)
@@ -364,6 +365,7 @@ bool CCSBot::LsModeGearing()
 // (then it's a fight, and the gearing up is over)
 bool CCSBot::LsModeLetsBe(CBasePlayer *pPlayer)
 {
+	LS_PROF("LsModeLetsBe");
 	if (!LsModeGearing())
 		return false;
 	// (another bot: only once it's going for this one - two at one crate who bump or glance at each
@@ -409,6 +411,7 @@ bool CCSBot::LsModeLetsBe(CBasePlayer *pPlayer)
 // from anyone close (looting, not crowding the others for the moment the fighting starts)
 void CCSBot::LsModePeaceTick()
 {
+	LS_PROF("LsModePeaceTick");
 	if (IsAttacking())
 		StopAttacking();
 	if (IsFollowing())
@@ -420,6 +423,7 @@ void CCSBot::LsModePeaceTick()
 // Room from anyone close: now and then it walks away from the nearest one within reach
 void CCSBot::LsModeRoomTick(float reach)
 {
+	LS_PROF("LsModeRoomTick");
 	float now = gpGlobals->time;
 	if (now < m_lsModePeaceMoveAt || IsOnLadder() || IsAttacking())
 		return;
@@ -548,6 +552,7 @@ static bool LsModeTargetOk(CBaseEntity *pEntity)
 
 static void LsModeRefreshTargets()
 {
+	LS_PROF("LsModeRefreshTargets");
 	float now = gpGlobals->time;
 	if (now < s_lsTargetsAt && now > s_lsTargetsAt - 1.0f)
 		return;
@@ -590,6 +595,7 @@ static bool LsModeSeeThrough(CBaseEntity *pThing)
 // it takes for one to be a threat close up
 static bool LsModeReachable(CBaseEntity *pFrom, CBaseEntity *pTo)
 {
+	LS_PROF("LsModeReachable");
 	TraceResult tr;
 	UTIL_TraceHull(pFrom->pev->origin, pTo->Center(), dont_ignore_monsters, head_hull, pFrom->edict(), &tr);
 	return tr.flFraction == 1.0f || tr.pHit == pTo->edict();
@@ -955,6 +961,7 @@ bool CCSBot::LsModeHeadedTo(const Vector &to) const
 
 bool CCSBot::LsModeMove(const Vector &to, bool hurry)
 {
+	LS_PROF("LsModeMove");
 	if (LsModeHeadedTo(to))
 		return false;
 	m_lsModeMoveTo = to;
@@ -966,6 +973,7 @@ bool CCSBot::LsModeMove(const Vector &to, bool hurry)
 // A spot on the nav mesh near a point (the point itself if there's no mesh)
 static Vector LsModeOnMesh(const Vector &pos)
 {
+	LS_PROF("LsModeOnMesh");
 	CNavArea *area = TheNavAreaGrid.GetNearestNavArea(&pos, true);
 	if (!area)
 		return pos;
@@ -978,6 +986,7 @@ static Vector LsModeOnMesh(const Vector &pos)
 // anything but a fight - a person's order and the mode's own goals wait (true: on its way)
 bool CCSBot::LsModeEscape()
 {
+	LS_PROF("LsModeEscape");
 	if (IsAttacking() || m_isEnemyVisible || IsOnLadder() || LsOrderBusy())
 		return false;
 	float now = gpGlobals->time;
@@ -1089,6 +1098,7 @@ int CCSBot::LsModeLayerWant()
 // next along the route) when it's already up high
 bool CCSBot::LsModePickHigh(Vector *out)
 {
+	LS_PROF("LsModePickHigh");
 	bool onHigh = LsModeLayer(pev->origin) == 2;
 	float reach = onHigh ? 1200.0f : 2500.0f;
 	float bestScore = -1.0f;
@@ -1130,6 +1140,7 @@ bool CCSBot::LsModePickHigh(Vector *out)
 // and then. The zone, an empty gun and a fight take it off (true: holding or on its way)
 bool CCSBot::LsModePerchTick()
 {
+	LS_PROF("LsModePerchTick");
 	float now = gpGlobals->time;
 	if (LsModeOursHiding() && now < m_lsModePerchUntil)
 		return true;
@@ -1167,6 +1178,7 @@ bool CCSBot::LsModePerchTick()
 // worth the trip
 bool CCSBot::LsModeAttractTick(bool gearing)
 {
+	LS_PROF("LsModeAttractTick");
 	float now = gpGlobals->time;
 	if (!IsHunting() || now < m_lsModeAttractAt)
 		return false;
@@ -1330,6 +1342,7 @@ void CCSBot::LsModeTick()
 // its living teammates (false: alone)
 bool CCSBot::LsModeHome(Vector *home)
 {
+	LS_PROF("LsModeHome");
 	Vector held(0, 0, 0), all(0, 0, 0);
 	int nHeld = 0, nAll = 0;
 	LsForTeammates(this, [&](CBasePlayer *pPlayer) {
@@ -1508,6 +1521,7 @@ bool CCSBot::LsModePushTick(const LsModeGoal &g)
 // then what the kind does there. A spot it can't get to rests a while before it tries again
 void CCSBot::LsModeGoalTick(LsModeGoal &g)
 {
+	LS_PROF("LsModeGoalTick");
 	float now = gpGlobals->time;
 	Vector to = g.at - pev->origin;
 	float dist = to.Make2D().Length();
@@ -1668,6 +1682,7 @@ const Vector *CCSBot::LsModeSpot() const
 // covered one a little likelier, a near one a little likelier (false: nothing in the area)
 bool CCSBot::LsModePickSpot(const Vector &center, float radius, Vector *out)
 {
+	LS_PROF("LsModePickSpot");
 	Vector taken[MAX_CLIENTS];
 	int nTaken = 0;
 	LsForTeammates(this, [&](CBasePlayer *pPlayer) {
@@ -1715,6 +1730,7 @@ bool CCSBot::LsModePickSpot(const Vector &center, float radius, Vector *out)
 // person
 void CCSBot::LsModeStationTick(LsModeGoal &g, float dist)
 {
+	LS_PROF("LsModeStationTick");
 	float now = gpGlobals->time;
 	bool tight = g.kind == LS_GOAL_CAPTURE || g.kind == LS_GOAL_EXTRACT || g.kind == LS_GOAL_MEETING;
 	float leash = tight ? g.radius : 2.0f * g.radius + 300.0f;
@@ -1802,6 +1818,7 @@ void CCSBot::LsModeStationTick(LsModeGoal &g, float dist)
 // moment (on a moving platform the hide's spot would walk it off)
 void CCSBot::LsModePostUpdate()
 {
+	LS_PROF("LsModePostUpdate");
 	float now = gpGlobals->time;
 	bool strafe = now < m_lsModeStrafeUntil && !IsOnLadder();
 	bool still = now < m_lsModeStillUntil && !strafe, step = now < m_lsModeStepUntil, back = now < m_lsModeBackUntil && !IsOnLadder();

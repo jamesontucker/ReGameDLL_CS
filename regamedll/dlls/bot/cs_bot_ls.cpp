@@ -4319,6 +4319,7 @@ bool LsSkyInPlay()
 // A little more of the map's knowledge, within this frame's budget (CCSBotManager::StartFrame)
 void LsSightStep()
 {
+	LS_PROF("LsSightStep");
 	if (!LsFight() || TheNavAreaList.empty() || !gpGlobals->mapname)
 		return;
 	// (bots learning the map: its nav is still being built; the knowledge waits for the finished one)

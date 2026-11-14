@@ -64,6 +64,7 @@ Vector CBot::GetAutoaimVector(float flDelta)
 
 void CBot::BotThink()
 {
+	LS_PROF("BotThink");
 	if (gpGlobals->time >= m_flNextBotThink)
 	{
 		m_flNextBotThink = gpGlobals->time + g_flBotCommandInterval;
