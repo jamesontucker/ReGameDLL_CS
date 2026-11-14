@@ -1738,9 +1738,10 @@ public:
 	bool LsModeHealTick();							// a healing item used at a moment of its own choosing (BR)
 	float m_lsModeHealAt = 0.0f;					// next heal decision
 	float m_lsModeHealUntil = 0.0f;					// healing (standing still) till then
-	bool LsModeSquadTick(bool overGoal);							// back toward its squad when it's strayed too far (BR)
+	bool LsModeSquadTick(bool overGoal, bool loose);							// back toward its squad when it's strayed too far (BR)
 	float m_lsModeSquadAt = 0.0f;
-	float m_lsModeMateDownAt = 0.0f;				// next look for a squad mate down near by
+	float m_lsModeMateDownAt = 0.0f;
+	float m_lsModeRevivingUntil = 0.0f;				// on its way to a revive (the vision leaves far enemies be)				// next look for a squad mate down near by
 	float m_lsModeSquadUntil = 0.0f;				// back toward the squad over the mode's errand till then
 	bool LsModeThirdTick();							// a fight between others near by: in on it, or away from it
 	void LsModeHuntTick(LsModeGoal &g);				// hunting a player down: toward where they are now
@@ -1755,6 +1756,8 @@ public:
 	bool LsModeOfferTick();							// a perk, the bench, the box, the trap, a turret: when to take one
 	float m_lsModeOfferAt = 0.0f;
 	float m_lsModeReviveBackUntil = 0.0f;			// backed off a revive under fire till then
+	float m_lsModeReviveHeldAt = 0.0f;				// (testing) next "revive held" note
+	float m_lsModeReviveNoteAt = 0.0f;				// (testing) next revive note in the trace
 	int m_lsModeReviveFor = 0;						// the downed one its revive is for...
 	float m_lsModeReviveWaitFrom = 0.0f;			// ...and since when
 	float m_lsModeSmokeAt = -100.0f;				// its smoke for a revive, thrown then...

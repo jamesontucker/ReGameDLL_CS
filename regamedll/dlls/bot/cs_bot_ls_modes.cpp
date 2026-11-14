@@ -442,6 +442,14 @@ bool CCSBot::LsModeLetsBe(CBasePlayer *pPlayer)
 		if (!threat && d > 500.0f + 250.0f * m_lsModeHuntSway * LsAggro())
 			return true;
 	}
+	if (gpGlobals->time < m_lsModeRevivingUntil)
+	{
+		float d = (pPlayer->pev->origin - pev->origin).Length();
+		bool threat = (pPlayer == GetAttacker() && GetTimeSinceAttacked() < 5.0f)
+			|| (pPlayer->IsBot() && static_cast<CCSBot *>(pPlayer)->GetEnemy() == this && static_cast<CCSBot *>(pPlayer)->IsAttacking());
+		if (!threat && d > 700.0f)
+			return true;
+	}
 	if (!LsModeGearing())
 		return false;
 	// (another bot: only once it's going for this one - two at one crate who bump or glance at each
@@ -1703,7 +1711,7 @@ void CCSBot::LsModeTick()
 	{
 		m_lsModeMateDownAt = gpGlobals->time + RANDOM_FLOAT(1.5f, 3.0f);
 		CBasePlayer *pDown = nullptr;
-		float downDist = 1500.0f;
+		float downDist = 1500.0f + 1000.0f * LsTeamwork();
 		LsForTeammates(this, [&](CBasePlayer *pPlayer) {
 			if (!LsModeIsDown(pPlayer))
 				return;
@@ -1725,7 +1733,8 @@ void CCSBot::LsModeTick()
 		}
 	}
 	// (Battle Royale: strayed well away from its squad - back toward them, over a mode's errand)
-	if (!gearing && !s_lsPeace && s_lsRing.on && (LsModeSquadTick(true) || (gpGlobals->time < m_lsModeSquadUntil && LsModeHeadedTo(m_lsModeMoveTo))))
+	// (gearing up too, a looser leash: squads loot near each other)
+	if (!s_lsPeace && s_lsRing.on && (LsModeSquadTick(true, gearing) || (gpGlobals->time < m_lsModeSquadUntil && LsModeHeadedTo(m_lsModeMoveTo))))
 		return;
 
 	// the goal to act on: the most important it cares about (the nearer of two alike); spent
@@ -1761,7 +1770,7 @@ void CCSBot::LsModeTick()
 			return;
 		// (Battle Royale after the gearing up: a fight between others near by - in on it or away
 		// from it - and back toward its squad when it's strayed)
-		if (!gearing && !s_lsPeace && s_lsRing.on && (LsModeThirdTick() || LsModeSquadTick(false)))
+		if (!gearing && !s_lsPeace && s_lsRing.on && (LsModeThirdTick() || LsModeSquadTick(false, false)))
 			return;
 		// (geared up and a high-ground player: a sightline held a while, then the next along)
 		if (!gearing && !s_lsPeace && s_lsPeaceEndAt >= 0.0f && !shooting && LsModeLayerWant() == 2 && LsModePerchTick())
@@ -1772,13 +1781,45 @@ void CCSBot::LsModeTick()
 		return;
 	}
 	// (a fight, a person's order, a plugin's habit, the bomb: the goal waits)
+	// (testing: a revive it holds and whether it's on it now, every 2 s)
+	if (cv_bot_ls_trace.value > 0.0f && gpGlobals->time >= m_lsModeReviveHeldAt)
+		for (int i = 0; i < LS_MODE_GOALS; i++)
+		{
+			const LsModeGoal &rg = m_lsModeGoal[i];
+			CBaseEntity *pR = rg.ent > 0 ? (CBaseEntity *)rg.thing : nullptr;
+			if (rg.kind != LS_GOAL_USE || !pR || !pR->IsPlayer())
+				continue;
+			m_lsModeReviveHeldAt = gpGlobals->time + 2.0f;
+			static char note[160];
+			Q_snprintf(note, sizeof(note), "revive-held d=%d care=%d chosen=%d free=%d enemyvis=%d atk=%d dist=%.0f state=%s", rg.ent, rg.care ? 1 : 0,
+				best == i ? 1 : 0, LsFree() ? 1 : 0, m_isEnemyVisible ? 1 : 0, IsAttacking() ? 1 : 0, (pR->pev->origin - pev->origin).Length(),
+				m_state ? m_state->GetName() : "-");
+			LsTraceNote(note);
+		}
 	// (a revive right by the downed one goes on with an enemy in sight - whether that's a risk it
 	// takes is the revive's own weighing, by who it is)
 	const LsModeGoal &gb = m_lsModeGoal[best];
 	CBaseEntity *pBestThing = gb.ent > 0 ? (CBaseEntity *)gb.thing : nullptr;
-	bool reviveClose = (gb.kind == LS_GOAL_USE || gb.kind == LS_GOAL_HOLD) && pBestThing && pBestThing->IsPlayer()
-		&& LsModeDist2D(gb.at, pev->origin) < 160.0f;
-	if (!LsFree() || (m_isEnemyVisible && !reviveClose) || IsOnLadder())
+	bool reviveBest = (gb.kind == LS_GOAL_USE || gb.kind == LS_GOAL_HOLD) && pBestThing && pBestThing->IsPlayer();
+	bool reviveClose = reviveBest && LsModeDist2D(gb.at, pev->origin) < 160.0f;
+	// (on its way to a squad mate bleeding out, for the vision: enemies a way off who aren't after it are
+	// left be a moment - it keeps going; anyone close or shooting at it is a fight as usual)
+	m_lsModeRevivingUntil = reviveBest ? gpGlobals->time + 1.0f : 0.0f;
+	CBasePlayer *pFoe = GetEnemy();
+	bool farFight = reviveBest && m_isEnemyVisible && pFoe && (pFoe->pev->origin - pev->origin).IsLengthGreaterThan(700.0f)
+		&& GetTimeSinceAttacked() > 2.0f;
+	if (farFight && IsAttacking())
+	{
+		StopAttacking();
+		LsWhy("mode revive: leaving a far fight for them");
+	}
+	// (a fight it's lost sight of, with a squad mate bleeding out: it breaks off and goes to them)
+	if (reviveBest && IsAttacking() && !m_isEnemyVisible && GetTimeSinceAttacked() > 2.0f && GetTimeSinceLastSawEnemy() > 1.5f)
+	{
+		StopAttacking();
+		LsWhy("mode revive: breaking off a fight for them");
+	}
+	if (!LsFree() || (m_isEnemyVisible && !reviveClose && !farFight) || IsOnLadder())
 		return;
 	if (LsModePushTick(m_lsModeGoal[best]))
 		return;
@@ -1826,7 +1867,7 @@ bool CCSBot::LsModeHealTick()
 
 // Battle Royale, a squad: back toward the nearest squad mate who's up when it's strayed - a team
 // player keeps close, a loner wanders far (true: on its way)
-bool CCSBot::LsModeSquadTick(bool overGoal)
+bool CCSBot::LsModeSquadTick(bool overGoal, bool loose)
 {
 	float now = gpGlobals->time;
 	if (!g_lsModeTies || now < m_lsModeSquadAt || now < m_lsModePushUntil || IsOnLadder() || !m_repathTimer.IsElapsed())
@@ -1851,7 +1892,7 @@ bool CCSBot::LsModeSquadTick(bool overGoal)
 	});
 	// (a squad stays in reach of each other - a knocked one bleeds out in 45 s; over an errand of the
 	// mode's own - a crate, a camping spot - only when it's strayed well beyond that)
-	float leash = (300.0f + 900.0f * (1.0f - LsTeamwork())) * (overGoal ? 1.6f : 1.0f);
+	float leash = (300.0f + 900.0f * (1.0f - LsTeamwork())) * (overGoal ? 1.6f : 1.0f) * (loose ? 1.5f : 1.0f);
 	if (!pMate || mateDist < leash)
 		return false;
 	Vector spot;
@@ -2265,6 +2306,13 @@ void CCSBot::LsModeGoalTick(LsModeGoal &g)
 	// the goal once it's open, or they're up)
 	CBaseEntity *pGoalThing = g.ent > 0 ? (CBaseEntity *)g.thing : nullptr;
 	bool revive = (g.kind == LS_GOAL_HOLD || g.kind == LS_GOAL_USE) && pGoalThing && pGoalThing->IsPlayer();
+	// (a downed one crawls: the way there follows where they lie now)
+	if (revive && (pGoalThing->pev->origin - g.onMesh).IsLengthGreaterThan(100.0f) && LsModeIsDown(pGoalThing))
+	{
+		g.at = pGoalThing->pev->origin;
+		g.onMesh = LsModeOnMesh(g.at);
+		g.nextTry = 0.0f;
+	}
 	// (up again, or gone: nothing to revive)
 	if (revive && g.kind == LS_GOAL_USE && (!pGoalThing->IsAlive() || !LsModeIsDown(pGoalThing)))
 	{
@@ -2300,14 +2348,27 @@ void CCSBot::LsModeGoalTick(LsModeGoal &g)
 				continue;
 			TraceResult tr;
 			UTIL_TraceLine(pPlayer->pev->origin + pPlayer->pev->view_ofs, mate + Vector(0, 0, 8), ignore_monsters, pPlayer->edict(), &tr);
+			// (one busy fighting someone else is less of a worry: close by, one; a way off, none)
+			bool busy = pPlayer->IsBot() && static_cast<CCSBot *>(pPlayer)->IsAttacking() && static_cast<CCSBot *>(pPlayer)->GetEnemy()
+				&& static_cast<CCSBot *>(pPlayer)->GetEnemy() != this && static_cast<CCSBot *>(pPlayer)->GetEnemy() != pGoalThing;
 			if (tr.flFraction == 1.0f || tr.pHit == pGoalThing->edict())
-				reviveThreat += d < 350.0f ? 2 : 1;
+				reviveThreat += busy ? (d < 350.0f ? 1 : 0) : (d < 350.0f ? 2 : 1);
 		}
 		// (its own smoke on them a moment ago: they can't see in)
 		if (now - m_lsModeSmokeAt < 12.0f && (m_lsModeSmokeOn - mate).IsLengthLessThan(200.0f))
 			reviveThreat = 0;
 	}
 	float sway = LsModeSway(g.infl);
+	// (testing: how a revive goes, every 2 s)
+	if (revive && now >= m_lsModeReviveNoteAt)
+	{
+		m_lsModeReviveNoteAt = now + 2.0f;
+		static char note[160];
+		Q_snprintf(note, sizeof(note), "revive-state d=%d dist=%.0f threat=%d phase=%d atk=%d vis=%d hp=%.0f brave=%.2f", pGoalThing->entindex(),
+			(pGoalThing->pev->origin - pev->origin).Length(), reviveThreat, g.phase, IsAttacking() ? 1 : 0, m_isEnemyVisible ? 1 : 0,
+			LsHealth(), 0.5f * LsAggro() + 0.5f * LsTeamwork());
+		LsTraceNote(note);
+	}
 	if (revive && g.prio < 90 && sway > 0.0f)
 	{
 		// (one enemy a way off is a risk most take; the bold take one close by, or two further off;
@@ -2379,14 +2440,23 @@ void CCSBot::LsModeGoalTick(LsModeGoal &g)
 		Vector toThing = at - pev->origin;
 		float gap = toThing.Make2D().Length();
 		bool handy = gap < 120.0f && Q_fabs(toThing.z) < 100.0f;
+		// (a revive needs it right by them - within 80 u, origin to origin, for 4 s: close in, stay)
+		if (revive)
+			handy = (pGoalThing->pev->origin - pev->origin).Length() < 70.0f;
 		if (g.phase == 1)
 		{
+			if (revive && !handy && now < g.phaseUntil && (pGoalThing->pev->origin - pev->origin).IsLengthLessThan(200.0f))
+			{
+				m_lsModeStepTo = pGoalThing->pev->origin;
+				m_lsModeStepUntil = now + 0.3f;
+				return;
+			}
 			if (now >= g.phaseUntil || !handy)
 			{
 				LsModeClearGoals(g.kind, 0);
 				return;
 			}
-			if (gap > 48.0f)
+			if (gap > (revive ? 30.0f : 48.0f))
 			{
 				m_lsModeStepTo = at;
 				m_lsModeStepUntil = now + 0.3f;
@@ -2439,6 +2509,15 @@ void CCSBot::LsModeGoalTick(LsModeGoal &g)
 				g.phaseUntil = Q_min(g.phaseUntil, g.until);
 			g.tries = 0;
 			LsWhy("mode use");
+			return;
+		}
+		// (close: straight up to where they lie now - they may have crawled from where they fell)
+		if (revive && (pGoalThing->pev->origin - pev->origin).IsLengthLessThan(300.0f) && Q_fabs(toThing.z) < 60.0f)
+		{
+			if (IsAttacking())
+				StopAttacking();
+			m_lsModeStepTo = pGoalThing->pev->origin;
+			m_lsModeStepUntil = now + 0.3f;
 			return;
 		}
 		// (far: on its way, below)
