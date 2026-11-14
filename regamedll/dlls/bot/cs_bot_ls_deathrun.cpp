@@ -889,12 +889,14 @@ static void Build()
 				dir2 = dir2.Normalize();
 				Vector land = pb + dir2 * 24.0f;
 				land.z = B->GetZ(&land);
+				// (a duck-jump goes up tucked: the crouched hull, so a low corridor over the ledge is fine -
+				// starwars' start corridor is barely taller than a standing player)
 				TraceResult tr;
-				Vector up(pa.x, pa.y, pb.z + HalfHumanHeight + 20.0f), top(land.x, land.y, land.z + HalfHumanHeight + 2.0f);
-				UTIL_TraceHull(top, top, ignore_monsters, human_hull, nullptr, &tr);
+				Vector up(pa.x, pa.y, pb.z + HalfHumanHeight * 0.5f + 2.0f), top(land.x, land.y, land.z + HalfHumanHeight * 0.5f + 2.0f);
+				UTIL_TraceHull(top, top, ignore_monsters, head_hull, nullptr, &tr);
 				if (tr.fStartSolid || tr.fAllSolid)
 					continue;
-				UTIL_TraceHull(up, top, ignore_monsters, human_hull, nullptr, &tr);
+				UTIL_TraceHull(up, top, ignore_monsters, head_hull, nullptr, &tr);
 				if (tr.fStartSolid || tr.flFraction < 1.0f)
 					continue;
 				NavDirType dir = Q_fabs(dir2.x) > Q_fabs(dir2.y) ? (dir2.x > 0 ? EAST : WEST) : (dir2.y > 0 ? SOUTH : NORTH);
