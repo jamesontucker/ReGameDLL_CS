@@ -1605,7 +1605,15 @@ bool CCSBot::LsDrTick()
 					CBaseEntity *pBtn = t.button;
 					Vector o = pev->origin, lo = pBtn->pev->absmin, hi = pBtn->pev->absmax;
 					Vector gap(Q_max(Q_max(lo.x - o.x, 0.0f), o.x - hi.x), Q_max(Q_max(lo.y - o.y, 0.0f), o.y - hi.y), Q_max(Q_max(lo.z - o.z, 0.0f), o.z - hi.z));
-					if (gap.Length() > 52.0f)
+					// (within use reach first; still not gone after a second: right up to it - a trigger in front of
+					// a button can be what clears the way to it, as a person walking up would touch it)
+					bool closer = r.pressSince > 0.0f && now - r.pressSince > 1.0f;
+					if (closer && gap.Length() > 14.0f && gap.Length() <= 80.0f)
+					{
+						Vector step(t.btn.x, t.btn.y, pev->origin.z);
+						MoveTowardsPosition(&step);
+					}
+					if (gap.Length() > 52.0f && !closer)
 					{
 						if (r.moveState != m_stateTimestamp || !HasPath())
 						{
@@ -1637,7 +1645,8 @@ bool CCSBot::LsDrTick()
 							UseEnvironment();
 						LsWhy("deathrun: opens the door");
 					}
-					ClearMovement();
+					if (!(closer && gap.Length() > 14.0f))
+						ClearMovement();
 					return true;
 				}
 			}
