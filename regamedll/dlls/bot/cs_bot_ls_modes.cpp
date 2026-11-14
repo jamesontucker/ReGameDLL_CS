@@ -130,7 +130,16 @@ static float LsModeInflArg(int i)
 }
 // what a mode offers each player to use (ls_mode offer): perk machines, the upgrade bench, the mystery
 // box, a trap switch, a turret to place; the bot decides when to take one
-enum { LS_OFFER_NONE, LS_OFFER_PERK, LS_OFFER_BENCH, LS_OFFER_BOX, LS_OFFER_TRAP, LS_OFFER_TURRET };
+enum { LS_OFFER_NONE, LS_OFFER_PERK, LS_OFFER_BENCH, LS_OFFER_BOX, LS_OFFER_TRAP, LS_OFFER_TURRET,
+	LS_OFFER_USE };	// (use: an interactable bots may use - a lever, a button, a door switch; no price)
+
+// The point on a thing's bounds nearest a spot (where a USE aimed at it from there lands)
+static Vector LsModeNearestOn(CBaseEntity *pThing, const Vector &from)
+{
+	return Vector(Q_max(pThing->pev->absmin.x, Q_min(from.x, pThing->pev->absmax.x)),
+		Q_max(pThing->pev->absmin.y, Q_min(from.y, pThing->pev->absmax.y)),
+		Q_max(pThing->pev->absmin.z, Q_min(from.z, pThing->pev->absmax.z)));
+}
 struct LsModeOffer
 {
 	int kind = LS_OFFER_NONE;
@@ -1327,7 +1336,7 @@ bool CCSBot::LsModeOfferTick()
 			if (pressure >= Q_max(2, int(most + 0.5f)) && m_iAccount >= o.cost)
 				rank = 0;	// (urgent: even mid-fight)
 		}
-		else if (calm && m_iAccount >= o.cost + spare)
+		else if (calm && m_iAccount >= o.cost + (o.kind == LS_OFFER_USE ? 0 : spare))
 		{
 			if (o.kind == LS_OFFER_PERK)
 			{
@@ -1347,6 +1356,14 @@ bool CCSBot::LsModeOfferTick()
 				rank = int(30.0f + sway * 15.0f * tilt);
 			else if (o.kind == LS_OFFER_TURRET)
 				rank = int(40.0f - sway * 15.0f * tilt);
+			else if (o.kind == LS_OFFER_USE)
+			{
+				// (an interactable: a roll every half minute or so - the team-minded likelier)
+				if (RANDOM_FLOAT(0.0f, 1.0f) < 0.55f + sway * 0.6f * (team - 0.5f))
+					rank = 50;
+				else
+					o.nextTry = now + RANDOM_FLOAT(25.0f, 50.0f);
+			}
 			else if (o.kind == LS_OFFER_BOX)
 			{
 				// (now and then: a roll a minute or so, the greedier the likelier)
@@ -1382,7 +1399,7 @@ bool CCSBot::LsModeOfferTick()
 	else
 	{
 		// (the trap's x y z is the gate it covers: the switch is the entity - that's where it goes)
-		if (pBest->kind == LS_OFFER_TRAP && pBest->ent > 0)
+		if ((pBest->kind == LS_OFFER_TRAP || pBest->kind == LS_OFFER_USE) && pBest->ent > 0)
 		{
 			edict_t *pEdict = INDEXENT(pBest->ent);
 			if (pEdict && !pEdict->free && pEdict->pvPrivateData)
@@ -1392,7 +1409,7 @@ bool CCSBot::LsModeOfferTick()
 	}
 	LsWhy(pBest->kind == LS_OFFER_PERK ? "mode offer: a perk" : pBest->kind == LS_OFFER_BENCH ? "mode offer: the bench"
 		: pBest->kind == LS_OFFER_BOX ? "mode offer: the box" : pBest->kind == LS_OFFER_TRAP ? "mode offer: the trap, gate under pressure"
-		: "mode offer: placing a turret");
+		: pBest->kind == LS_OFFER_USE ? "mode offer: using something" : "mode offer: placing a turret");
 	return true;
 }
 
@@ -2482,10 +2499,15 @@ void CCSBot::LsModeGoalTick(LsModeGoal &g)
 			handy = (pGoalThing->pev->origin - pev->origin).Length() < 70.0f;
 		// (the trap's switch: the mode's reach is 80 u, origin to origin; one it can't get that close to -
 		// beyond the gate, say - is given up for a while instead of USE held in vain)
-		if (g.kind == LS_GOAL_OFFER && m_lsModeOfferKind == LS_OFFER_TRAP && pThing)
+		bool useOffer = g.kind == LS_GOAL_OFFER && m_lsModeOfferKind == LS_OFFER_USE && pThing;
+		// (an interactable: within its reach - the mode measures from the eyes to the nearest point of it,
+		// 96 u by default - and in plain sight of it)
+		if (useOffer)
+			at = LsModeNearestOn(pThing, GetEyePosition());
+		if (g.kind == LS_GOAL_OFFER && (m_lsModeOfferKind == LS_OFFER_TRAP || useOffer) && pThing)
 		{
-			float reach = (pThing->pev->origin - pev->origin).Length();
-			handy = reach < 75.0f;
+			float reach = useOffer ? (at - GetEyePosition()).Length() : (pThing->pev->origin - pev->origin).Length();
+			handy = reach < (useOffer ? 80.0f : 75.0f);
 			if (reach < 200.0f && !handy)
 			{
 				if (m_lsModeTrapNearSince < 0.0f)
@@ -2495,10 +2517,10 @@ void CCSBot::LsModeGoalTick(LsModeGoal &g)
 					LsModeOfferGiveUp(g.ent, 90.0f);
 					m_lsModeTrapNearSince = -1.0f;
 					LsModeClearGoals(g.kind, 0);
-					LsWhy("mode offer: the trap's switch out of reach");
+					LsWhy(useOffer ? "mode offer: out of reach" : "mode offer: the trap's switch out of reach");
 					return;
 				}
-				m_lsModeStepTo = pThing->pev->origin;
+				m_lsModeStepTo = useOffer ? Vector(at.x, at.y, pev->origin.z) : pThing->pev->origin;
 				m_lsModeStepUntil = now + 0.3f;
 				return;
 			}
@@ -2549,6 +2571,25 @@ void CCSBot::LsModeGoalTick(LsModeGoal &g)
 					return;
 				}
 			}
+			// (an interactable: one press - the mode acts on the press, not on USE held - then it's done,
+			// not tried again for a while)
+			if (useOffer)
+			{
+				float since = now - m_lsModeUseStart;
+				if (since > 0.8f)
+				{
+					LsModeOfferGiveUp(g.ent, RANDOM_FLOAT(40.0f, 70.0f));
+					LsModeClearGoals(g.kind, 0);
+					LsWhy("mode offer: used it");
+					return;
+				}
+				if (since > 0.15f && since < 0.45f)
+				{
+					UseEnvironment();
+					m_lsModePressed |= 2;
+				}
+				return;
+			}
 			// (the bench upgrades the gun in hand: the main gun out first)
 			if (g.kind == LS_GOAL_OFFER && m_lsModeOfferKind == LS_OFFER_BENCH && m_rgpPlayerItems[PRIMARY_WEAPON_SLOT]
 				&& !(m_pActiveItem && m_pActiveItem == m_rgpPlayerItems[PRIMARY_WEAPON_SLOT]))
@@ -2564,6 +2605,7 @@ void CCSBot::LsModeGoalTick(LsModeGoal &g)
 				StopAttacking();
 			g.phase = 1;
 			m_lsModeUseMoney = m_iAccount;
+			m_lsModeUseStart = now;
 			// (a revive or a crate as long as the goal lasts, at most 15 s; a plain use - a shop, a
 			// button - a few seconds)
 			g.phaseUntil = now + (g.ent > 0 ? 15.0f : 6.0f);
@@ -2979,7 +3021,7 @@ void Bot_LsModeCommand()
 	{
 		const char *kn = CMD_ARGV(3);
 		int kind = FStrEq(kn, "perk") ? LS_OFFER_PERK : FStrEq(kn, "bench") ? LS_OFFER_BENCH : FStrEq(kn, "box") ? LS_OFFER_BOX
-			: FStrEq(kn, "trap") ? LS_OFFER_TRAP : FStrEq(kn, "turret") ? LS_OFFER_TURRET : LS_OFFER_NONE;
+			: FStrEq(kn, "trap") ? LS_OFFER_TRAP : FStrEq(kn, "turret") ? LS_OFFER_TURRET : FStrEq(kn, "use") ? LS_OFFER_USE : LS_OFFER_NONE;
 		int n = LsModeWho(CMD_ARGV(2), who, true);
 		if (FStrEq(what, "offer_clear"))
 		{
@@ -2998,8 +3040,15 @@ void Bot_LsModeCommand()
 		float infl = LsModeInflArg(10);
 		if (!kind || CMD_ARGC() < 9 || LsModeBadArgs())
 		{
-			CONSOLE_ECHO("ls_mode offer <who> <perk|bench|box|trap|turret> <x> <y> <z> <ent> <cost> [order] [influence 0-100]\n");
+			CONSOLE_ECHO("ls_mode offer <who> <perk|bench|box|trap|turret|use> <x> <y> <z> <ent> <cost> [order] [influence 0-100]\n");
 			return;
+		}
+		// (gm_components offers an interactable as a free "box": it's a use - a lever, a button)
+		if (kind == LS_OFFER_BOX && cost <= 0 && ent > 0)
+		{
+			edict_t *pEdict = INDEXENT(ent);
+			if (pEdict && !pEdict->free && (FClassnameIs(&pEdict->v, "ls_interactable") || FClassnameIs(&pEdict->v, "ls_interactable_brush")))
+				kind = LS_OFFER_USE;
 		}
 		for (int i = 0; i < n; i++)
 		{
