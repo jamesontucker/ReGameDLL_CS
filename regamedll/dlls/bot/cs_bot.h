@@ -1724,6 +1724,9 @@ public:
 	bool LsModePeace();								// a mode's peace (a loot-up), or the moment after it: no player enemies
 	bool LsModeGearing();							// just after the peace: gearing up before hunting
 	bool LsModeKitted();							// armor, a pistol and a spare magazine beside a main gun
+	bool LsModeDowned() const;						// knocked down by the mode (no-target, lying)
+	void LsModeDownTick();							// down: crawl to a teammate or cover, still for a revive
+	float m_lsModeDownAt = 0.0f;
 	bool LsModeOfferTick();							// a perk, the bench, the box, the trap, a turret: when to take one
 	float m_lsModeOfferAt = 0.0f;
 	float m_lsModeReviveBackUntil = 0.0f;			// backed off a revive under fire till then

@@ -1204,6 +1204,72 @@ bool CCSBot::LsModeOfferTick()
 	return true;
 }
 
+// Knocked down (Last Stand, Battle Royale): the mode lays the player down - no-target, the view a
+// hand above the floor - with only a pistol, at a crawl
+bool CCSBot::LsModeDowned() const
+{
+	return (pev->flags & FL_NOTARGET) && pev->view_ofs.z < 20.0f;
+}
+
+// A spot that's no place to crawl to: outside the safe zone, or with a creature close by
+static bool LsModeBadCrawl(const Vector &spot)
+{
+	if (s_lsRing.on && LsModeDist2D(spot, s_lsRing.at) > s_lsRing.r - 100.0f)
+		return true;
+	for (int k = 0; k < s_lsTargetCount; k++)
+		if (LsModeTargetOk(s_lsTarget[k]) && (s_lsTarget[k]->pev->origin - spot).IsLengthLessThan(300.0f))
+			return true;
+	return false;
+}
+
+// Down as a person is down: a teammate right by it (reviving) - still, not a crawl that breaks it;
+// else, now and then, a crawl toward the nearest teammate who's up, or to cover close by - not into
+// the open, the zone or creatures, and nothing if there's nowhere better. The pistol fights as usual
+void CCSBot::LsModeDownTick()
+{
+	float now = gpGlobals->time;
+	CBasePlayer *pMate = nullptr;
+	float mateDist = 1500.0f;
+	LsForTeammates(this, [&](CBasePlayer *pPlayer) {
+		// (a teammate who's down too is no help)
+		if ((pPlayer->pev->flags & FL_NOTARGET) && pPlayer->pev->view_ofs.z < 20.0f)
+			return;
+		float d = (pPlayer->pev->origin - pev->origin).Length();
+		if (d < mateDist)
+		{
+			mateDist = d;
+			pMate = pPlayer;
+		}
+	});
+	if (pMate && mateDist < 90.0f)
+	{
+		m_lsModeStillUntil = now + 0.5f;
+		if (m_lsWhy == nullptr || Q_strcmp(m_lsWhy, "mode down: still for the revive"))
+			LsWhy("mode down: still for the revive");
+		return;
+	}
+	if (IsAttacking() || now < m_lsModeDownAt || IsOnLadder() || !m_repathTimer.IsElapsed())
+		return;
+	m_lsModeDownAt = now + RANDOM_FLOAT(2.5f, 4.0f);
+	Vector to;
+	bool go = false;
+	if (pMate && mateDist > 150.0f)
+	{
+		// (a stretch toward them: they'll come the rest of the way)
+		to = LsModeOnMesh(pev->origin + LsModeDir2D(pev->origin, pMate->pev->origin) * Q_min(300.0f, mateDist - 100.0f));
+		go = !LsModeBadCrawl(to);
+	}
+	if (!go && LsModePickSpot(pev->origin, 300.0f, &to))
+		go = !LsModeBadCrawl(to);
+	if (!go)
+	{
+		m_lsModeStillUntil = now + 1.0f;
+		return;
+	}
+	LsModeMove(to, false);
+	LsWhy(pMate ? "mode down: crawling toward a teammate" : "mode down: crawling to cover");
+}
+
 // A spot on high ground to hold: a hiding spot (one with a view - a sniper spot - likelier) or the
 // middle of an open area, on the high layer, inside the zone, not where others are; near (the
 // next along the route) when it's already up high
@@ -1389,6 +1455,14 @@ void CCSBot::LsModeTick()
 	// people spread out early)
 	if (gearing || (!s_lsPeace && s_lsPeaceEndAt >= 0.0f && gpGlobals->time - s_lsPeaceEndAt < 60.0f && !IsAttacking()))
 		LsModeRoomTick(300.0f);
+
+	// (knocked down: crawling, shooting back, or lying still for a revive - nothing else)
+	if (LsModeDowned())
+	{
+		LsModeShootTick();
+		LsModeDownTick();
+		return;
+	}
 
 	bool shooting = LsModeShootTick();
 
