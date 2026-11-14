@@ -962,6 +962,7 @@ void CCSBot::LsPuppetUpdate()
 // up after a fight; it ends when it's done, runs out, the leader's gone, or "nvm"
 void CCSBot::LsOrderTick()
 {
+	LS_PROF("LsOrderTick");
 	// handing the bomb over: walk to them, face them, drop it at their feet
 	if (m_lsGiveTo.IsValid())
 	{
@@ -2721,6 +2722,7 @@ void LsTraceMark()
 
 void CCSBot::LsTrace()
 {
+	LS_PROF("LsTrace");
 	if (cv_bot_ls_trace.value <= 0.0f || !IsAlive() || gpGlobals->time < m_lsTraceAt)
 		return;
 	m_lsTraceAt = gpGlobals->time + 0.5f;
@@ -4960,6 +4962,7 @@ bool CCSBot::LsScanAngles(bool holding)
 // person feels that and turns round. A good player at once, a newer one after a moment
 void CCSBot::LsBumpCheck()
 {
+	LS_PROF("LsBumpCheck");
 	if (!LsFight() || !IsAlive())
 		return;
 	float now = gpGlobals->time;
@@ -5069,6 +5072,7 @@ float CCSBot::LsSafeSide(const CNavArea *area, NavDirType dir)
 // soon as anything happens. Never in deathmatch, never in a hurry
 void CCSBot::LsCrouchWalk()
 {
+	LS_PROF("LsCrouchWalk");
 	auto stop = [this]() {
 		if (m_lsCrouchWalking)
 		{
@@ -5174,6 +5178,7 @@ static float s_breakTriedAt[MAX_EDICTS];
 
 void CCSBot::LsDoorButton()
 {
+	LS_PROF("LsDoorButton");
 	if (!LsFight() || !IsAlive() || IsAttacking() || IsUsingLadder() || LsPuppetActive())
 		return;
 	float now = gpGlobals->time;
@@ -5671,6 +5676,7 @@ void CCSBot::LsHeardBreak(CBaseEntity *pBreak)
 // standing head there is out of the threat's sight: it runs there
 bool CCSBot::LsTakeCoverFrom(const Vector &threat, float minMove, bool fromFight, float holdSecs)
 {
+	LS_PROF("LsTakeCoverFrom");
 	if (!m_lastKnownArea || IsUsingLadder() || (IsAttacking() && !fromFight))
 		return false;
 	// (it picked a spot a moment ago and is on its way: that stands - two reasons for cover at
@@ -6203,6 +6209,7 @@ bool CCSBot::LsRushed(const Vector *threat)
 // been quiet a few seconds (none of them seen or heard running at it)
 void CCSBot::LsRushHoldTick()
 {
+	LS_PROF("LsRushHoldTick");
 	float now = gpGlobals->time;
 	if (m_lsRushHoldUntil <= 0.0f || now < m_lsRushHoldCheckAt)
 		return;
@@ -6498,6 +6505,7 @@ bool LsKnownHurt(CBasePlayer *pEnemy, int team, float *hp, Vector *where, float 
 // team player, goes after them - to where they were, quickly (newer players don't listen)
 void CCSBot::LsHurtCallTick()
 {
+	LS_PROF("LsHurtCallTick");
 	float now = gpGlobals->time;
 	if (!LsFight() || LsSolo() || now - m_lsHurtPushAt < 6.0f || !LsFree() || IsHiding() || LsRushing() || TheCSBots()->IsBombPlanted()
 		|| pev->health < 65.0f - 30.0f * LsAggro())
@@ -6574,6 +6582,7 @@ static void LsScanFlashes()
 // handles when it throws): the better players turn their back to it; newer ones eat it
 void CCSBot::LsFlashWatch()
 {
+	LS_PROF("LsFlashWatch");
 	float now = gpGlobals->time;
 	// back round once it has popped, to where it came from: whoever threw it comes in behind it
 	if (m_lsFlashBackAt > 0.0f && now >= m_lsFlashBackAt)
@@ -6757,6 +6766,7 @@ void CCSBot::LsTold(const Vector &at)
 // 4 running from the bomb, 8 a plugin hold on, 16 hiding
 void CCSBot::LsPublishState()
 {
+	LS_PROF("LsPublishState");
 	LsPublishSites();
 	int flags = 0;
 	if (LsFight())
@@ -6867,6 +6877,7 @@ void CCSBot::LsCoverPeekTick()
 // one called hurt); rushers hold least, careful players most. Nothing once it's near their spawn
 void CCSBot::LsAimMapTick()
 {
+	LS_PROF("LsAimMapTick");
 	float now = gpGlobals->time;
 	int kind = LsMapKind();
 	if (!LsFight() || LsSolo() || now < m_lsAimMapAt || (kind != LSMAP_AIM && kind != LSMAP_FY && kind != LSMAP_AWP))
@@ -6904,6 +6915,7 @@ void CCSBot::LsAimMapTick()
 // The smoke for an AWP's lane, thrown once it's in cover (if it still has one, and isn't fighting)
 void CCSBot::LsSmokeLaneTick()
 {
+	LS_PROF("LsSmokeLaneTick");
 	if (m_lsSmokeLaneAt <= 0.0f || gpGlobals->time < m_lsSmokeLaneAt)
 		return;
 	m_lsSmokeLaneAt = 0.0f;
@@ -7061,6 +7073,7 @@ bool CCSBot::LsAboutToEnter()
 // Where it's been: a spot every few seconds, the last eight (about half a minute)
 void CCSBot::LsNoteWhereItIs()
 {
+	LS_PROF("LsNoteWhereItIs");
 	float now = gpGlobals->time;
 	if (now < m_lsRecentAt && now >= m_lsRecentAt - 10.0f)
 		return;

@@ -590,4 +590,21 @@ void LsPerfAddCreature(double seconds);
 void LsPerfAddBots(double seconds);
 void LsPerfFrame();
 float LsCreatureCapNow();						// ls_creature_max, lowered while the server's fps is low (ls_creature_adaptive)						// StartFrame: a frame came
+
+// ls_perf sections: time spent in a named piece of code, summed over a report window (LS_PROF("name")
+// at the top of a block). Nothing is measured while ls_perf is 0 (the clock isn't read).
+int LsProfRegister(const char *name);
+void LsProfAdd(int slot, double seconds);
+class LsProfScope
+{
+public:
+	LsProfScope(int slot) : m_slot(slot), m_t0(LsPerfClock()) {}
+	~LsProfScope() { if (m_t0 > 0.0) LsProfAdd(m_slot, LsPerfClock() - m_t0); }
+private:
+	int m_slot;
+	double m_t0;
+};
+#define LS_PROF_CAT2(a, b) a##b
+#define LS_PROF_CAT(a, b) LS_PROF_CAT2(a, b)
+#define LS_PROF(name) static int LS_PROF_CAT(s_lsProfSlot, __LINE__) = LsProfRegister(name); LsProfScope LS_PROF_CAT(lsProfScope, __LINE__)(LS_PROF_CAT(s_lsProfSlot, __LINE__))
 void LsWatchdogStart();						// GameDLLInit

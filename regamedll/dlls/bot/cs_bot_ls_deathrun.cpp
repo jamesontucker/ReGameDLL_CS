@@ -1254,6 +1254,7 @@ bool CCSBot::LsDrRunner() const
 // waiting at a trap, at a button), LsDrPostUpdate keeps it there
 bool CCSBot::LsDrTick()
 {
+	LS_PROF("LsDrTick");
 	if (!LsDrOn() || !Ready() || !IsAlive())
 		return false;
 	if (CSGameRules() && CSGameRules()->IsFreezePeriod())

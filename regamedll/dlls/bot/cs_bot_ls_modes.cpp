@@ -609,6 +609,7 @@ static bool LsModeIsTarget(CBaseEntity *pThing)
 // stops on its own surface, which counts). *at gets the point seen; *traces counts the lines
 bool CCSBot::LsModeSees(CBaseEntity *pEntity, bool testFOV, Vector *at, int *traces)
 {
+	LS_PROF("LsModeSees");
 	const Vector eye = GetEyePosition();
 	const Vector lo = pEntity->pev->absmin, hi = pEntity->pev->absmax;
 	Vector points[2];
@@ -653,6 +654,7 @@ bool CCSBot::LsModeSees(CBaseEntity *pEntity, bool testFOV, Vector *at, int *tra
 // threatening one for the distance is picked, and kept a moment (not flicking between them)
 bool CCSBot::LsModeShootTick()
 {
+	LS_PROF("LsModeShootTick");
 	if (s_lsClassCount <= 0 || IsAttacking() || m_isEnemyVisible || IsOnLadder() || IsBlind() || LsNadeBusy() || m_isWaitingToTossGrenade)
 	{
 		m_lsModeTarget = nullptr;
@@ -1247,6 +1249,7 @@ bool CCSBot::LsModeAttractTick(bool gearing)
 // mode; with nothing to do here, hunting may be pulled toward an attract
 void CCSBot::LsModeTick()
 {
+	LS_PROF("LsModeTick");
 	m_lsModePressed = 0;
 	// (a peace ends any fight, also one carried over from before it in a state the rest of this
 	// skips - a bot still in the buy state kept "attacking" from the round start, and set its
@@ -1358,6 +1361,7 @@ bool CCSBot::LsModeHome(Vector *home)
 // than across the map; between waves now and then it tags along with a person (true: sent)
 bool CCSBot::LsModeRoamTick()
 {
+	LS_PROF("LsModeRoamTick");
 	float now = gpGlobals->time;
 	if (now < m_lsModeRoamAt || now < m_lsModePushUntil || IsFollowing())
 		return false;
@@ -1469,6 +1473,7 @@ bool CCSBot::LsModeRoamTick()
 // not far from what they're defending)
 bool CCSBot::LsModePushTick(const LsModeGoal &g)
 {
+	LS_PROF("LsModePushTick");
 	float now = gpGlobals->time;
 	if (now < m_lsModePushAt || (g.kind != LS_GOAL_DEFEND && g.kind != LS_GOAL_HOLD) || s_lsTargetCount == 0
 		|| m_lsModeTarget.IsValid() || now - m_lsModeSawAt < 4.0f || LsHealth() < 70.0f || IsFollowing())

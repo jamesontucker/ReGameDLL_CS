@@ -866,6 +866,7 @@ void CCSBot::LsStartOver()
 
 void CCSBot::LsTeleportCheck()
 {
+	LS_PROF("LsTeleportCheck");
 	float now = gpGlobals->time;
 	float gap = now - m_lsLastPosAt;
 	Vector was = m_lsLastPos;
@@ -945,6 +946,7 @@ void CCSBot::LsAreaStuck(const CNavArea *area, bool climb)
 // to where the trouble was
 bool CCSBot::LsBlindTick()
 {
+	LS_PROF("LsBlindTick");
 	if (!LsFight())
 		return false;
 	float now = gpGlobals->time;
@@ -1070,6 +1072,7 @@ bool CCSBot::LsOverwhelmed()
 // a moment (and in deathmatch and Gun Game too: being shot from the side is felt everywhere)
 void CCSBot::LsFlankCheck()
 {
+	LS_PROF("LsFlankCheck");
 	if (!LsFight() || !IsAttacking() || !IsAlive())
 		return;
 	float now = gpGlobals->time;

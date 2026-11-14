@@ -143,6 +143,7 @@ void CCSBotManager::RestartRound()
 // Called each frame
 void CCSBotManager::StartFrame()
 {
+	LS_PROF("StartFrame");
 	// EXTEND
 	CBotManager::StartFrame();
 	MonitorBotCVars();
@@ -1764,6 +1765,7 @@ CNavArea *CCSBotManager::GetRandomAreaInZone(const Zone *zone) const
 
 void CCSBotManager::OnEvent(GameEventType event, CBaseEntity *pEntity, CBaseEntity *pOther)
 {
+	LS_PROF("OnEvent");
 	switch (event)
 	{
 	case EVENT_BOMB_PLANTED:

@@ -248,6 +248,7 @@ void CCSBot::ComputeLadderEndpoint(bool isAscending)
 // TODO: Need Push() and Pop() for run/walk context to keep ladder speed contained.
 bool CCSBot::UpdateLadderMovement()
 {
+	LS_PROF("UpdateLadderMovement");
 	if (!m_pathLadder)
 		return false;
 
@@ -1292,6 +1293,7 @@ void CCSBot::FeelerReflexAdjustment(Vector *goalPosition)
 // Move along the path. Return false if end of path reached.
 CCSBot::PathResult CCSBot::UpdatePathMovement(bool allowSpeedChange)
 {
+	LS_PROF("UpdatePathMovement");
 	if (m_pathLength == 0)
 		return PATH_FAILURE;
 
@@ -1653,6 +1655,7 @@ void CCSBot::BuildTrivialPath(const Vector *goal)
 // If 'goalArea' is NULL, path will get as close as it can.
 bool CCSBot::ComputePath(CNavArea *goalArea, const Vector *goal, RouteType route)
 {
+	LS_PROF("ComputePath");
 	// Throttle re-pathing
 	if (!m_repathTimer.IsElapsed())
 		return false;

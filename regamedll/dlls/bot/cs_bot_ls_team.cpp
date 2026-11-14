@@ -370,6 +370,7 @@ static float LsEmptyDare(const CCSBot *me)
 
 void CCSBot::LsTeamTick()
 {
+	LS_PROF("LsTeamTick");
 	if (!LsFight() || !LsTeamGame() || !IsAlive())
 		return;
 	float now = gpGlobals->time;
@@ -1337,6 +1338,7 @@ bool CCSBot::LsExecuting()
 
 void CCSBot::LsExecuteTick()
 {
+	LS_PROF("LsExecuteTick");
 	if (!LsFight() || !LsTeamGame() || m_iTeam != TERRORIST || !IsAlive() || TheCSBots()->GetScenario() != CCSBotManager::SCENARIO_DEFUSE_BOMB
 		|| TheCSBots()->IsBombPlanted() || CSGameRules()->IsFreezePeriod() || LsOrderActive() || m_lsPlantOrderRound == LsRoundSerial())
 		return;
@@ -1892,6 +1894,7 @@ CCSBot *CCSBot::LsBombFetcher()
 // a round runs for the best one close by, as people sprint for the AK. One bot to a gun.
 void CCSBot::LsFloorGunTick()
 {
+	LS_PROF("LsFloorGunTick");
 	if (!LsFight() || LsSolo() || !IsAlive() || !CSGameRules() || CSGameRules()->IsFreezePeriod() || LsWeaponModeOn())
 		return;
 	int round = LsRoundSerial();
@@ -1964,6 +1967,7 @@ void CCSBot::LsFloorGunTick()
 // looking (sooner the bolder), and the last one alive on a side always does
 void CCSBot::LsStalemateTick()
 {
+	LS_PROF("LsStalemateTick");
 	float now = gpGlobals->time;
 	if (now < m_lsStaleCheckAt)
 		return;

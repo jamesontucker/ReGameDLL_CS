@@ -30,6 +30,7 @@
 
 void CCSBot::OnEvent(GameEventType event, CBaseEntity *pEntity, CBaseEntity *pOther)
 {
+	LS_PROF("OnEvent");
 	GetGameState()->OnEvent(event, pEntity, pOther);
 	GetChatter()->OnEvent(event, pEntity, pOther);
 

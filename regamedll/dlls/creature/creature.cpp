@@ -166,6 +166,56 @@ static int LsPerfViewCount(edict_t *host)
 	return n;
 }
 
+static const int LS_PROF_SLOTS = 64;
+static struct { const char *name; double sum, max, frameSum; int calls; } s_prof[LS_PROF_SLOTS];
+static int s_profCount = 0;
+
+int LsProfRegister(const char *name)
+{
+	for (int i = 0; i < s_profCount; i++)
+		if (!Q_strcmp(s_prof[i].name, name))
+			return i;
+	if (s_profCount >= LS_PROF_SLOTS)
+		return LS_PROF_SLOTS - 1;
+	s_prof[s_profCount].name = name;
+	return s_profCount++;
+}
+
+void LsProfAdd(int slot, double seconds)
+{
+	s_prof[slot].sum += seconds;
+	s_prof[slot].calls++;
+}
+
+static void LsProfReport(int frames)
+{
+	// the biggest first, as ms a frame and calls a frame
+	int order[LS_PROF_SLOTS];
+	int n = 0;
+	for (int i = 0; i < s_profCount; i++)
+		if (s_prof[i].calls)
+			order[n++] = i;
+	for (int a = 0; a < n; a++)
+		for (int b = a + 1; b < n; b++)
+			if (s_prof[order[b]].sum > s_prof[order[a]].sum)
+			{
+				int t = order[a]; order[a] = order[b]; order[b] = t;
+			}
+	char line[1024];
+	int len = Q_snprintf(line, sizeof(line), "ls_perf sections (ms/frame, calls/frame):");
+	for (int k = 0; k < n && k < 24 && len < (int)sizeof(line) - 64; k++)
+	{
+		const auto &p = s_prof[order[k]];
+		len += Q_snprintf(line + len, sizeof(line) - len, " %s %.2f/%.1f;", p.name, p.sum * 1000.0 / frames, double(p.calls) / frames);
+	}
+	UTIL_LogPrintf("%s\n", line);
+	for (int i = 0; i < s_profCount; i++)
+	{
+		s_prof[i].sum = 0.0;
+		s_prof[i].calls = 0;
+	}
+}
+
 static void LsPerfReport(double now, double span)
 {
 	int alive = 0, edicts = 0;
@@ -197,6 +247,7 @@ static void LsPerfReport(double now, double span)
 		LsCreatureCapNow(), alive, double(s_perf.thinks) / frames, s_perf.thinksMax, s_perf.creatureSum * 1000.0 / frames, s_perf.creatureMax * 1000.0,
 		s_perf.botsSum * 1000.0 / frames, s_perf.botsMax * 1000.0, edicts, gpGlobals->maxEntities,
 		bots ? double(viewSum) / bots : 0.0, viewMax, bots, viewFull);
+	LsProfReport(frames);
 }
 
 // The adaptive cap: each real second, the frames that came against the server's tick rate. Low
@@ -2269,6 +2320,7 @@ void LsCreaturesServerDeactivate()
 // Every game event the bots hear: creatures hear the same (shots, steps, breaking glass)
 void LsCreaturesOnEvent(GameEventType event, CBaseEntity *pEntity, CBaseEntity *pOther)
 {
+	LS_PROF("LsCreaturesOnEvent");
 	if (s_adoptCount > 0 && gpGlobals->time >= s_nextAdoptScan)
 	{
 		s_nextAdoptScan = gpGlobals->time + 1.0f;

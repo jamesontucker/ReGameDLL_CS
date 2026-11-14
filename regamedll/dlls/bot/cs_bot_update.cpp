@@ -31,6 +31,7 @@
 // Lightweight maintenance, invoked frequently
 void CCSBot::Upkeep()
 {
+	LS_PROF("Upkeep");
 	if (TheCSBots()->IsLearningMap() || !IsAlive())
 		return;
 
@@ -231,6 +232,7 @@ void CCSBot::Upkeep()
 // Heavyweight processing, invoked less often
 void CCSBot::Update()
 {
+	LS_PROF("Update");
 	if (TheCSBots()->IsAnalysisRequested() && m_processMode == PROCESS_NORMAL)
 	{
 		TheCSBots()->AckAnalysisRequest();
@@ -974,10 +976,12 @@ void CCSBot::Update()
 	// Execute state machine
 	if (m_isAttacking)
 	{
+		LS_PROF("state attack");
 		m_attackState.OnUpdate(this);
 	}
 	else
 	{
+		LS_PROF("state other");
 		m_state->OnUpdate(this);
 
 	// Loner-Strike: a look over the low cover it's hiding behind (after the hide state's crouch)

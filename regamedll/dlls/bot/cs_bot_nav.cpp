@@ -52,6 +52,7 @@ void CCSBot::ResetStuckMonitor()
 // Test if we have become stuck
 void CCSBot::StuckCheck()
 {
+	LS_PROF("StuckCheck");
 	if (m_isStuck)
 	{
 		// we are stuck - see if we have moved far enough to be considered unstuck

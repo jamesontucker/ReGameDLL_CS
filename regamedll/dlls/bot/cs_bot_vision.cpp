@@ -56,6 +56,7 @@ float StayOnLadderLine(CCSBot *me, const CNavLadder *ladder)
 // TODO: Make stiffness and turn rate constants timestep invariant.
 void CCSBot::UpdateLookAngles()
 {
+	LS_PROF("UpdateLookAngles");
 	const float deltaT = g_flBotCommandInterval;
 	float maxAccel;
 	float stiffness;
@@ -393,6 +394,7 @@ void CCSBot::UpdateLookAngles()
 // Return true if we can see the point
 bool CCSBot::IsVisible(const Vector *pos, bool testFOV) const
 {
+	LS_PROF("IsVisible");
 	// we can't see anything if we're blind
 	if (IsBlind())
 		return false;
@@ -634,6 +636,7 @@ void CCSBot::InhibitLookAround(float duration)
 // Update enounter spot timestamps, etc
 void CCSBot::UpdatePeripheralVision()
 {
+	LS_PROF("UpdatePeripheralVision");
 	// if we update at 10Hz, this ensures we test once every three
 	const float peripheralUpdateInterval = 0.29f;
 	if (gpGlobals->time - m_peripheralTimestamp < peripheralUpdateInterval)
@@ -692,6 +695,7 @@ float LsClearTo(const Vector &from, const Vector &to, edict_t *self)
 
 void CCSBot::UpdateLookAround(bool updateNow)
 {
+	LS_PROF("UpdateLookAround");
 	// check if looking around has been inhibited
 	// Moved inhibit to allow high priority enemy lookats to still occur
 	if (gpGlobals->time < m_inhibitLookAroundTimestamp)
@@ -1277,6 +1281,7 @@ bool CCSBot::BendLineOfSight(const Vector *eye, const Vector *point, Vector *ben
 
 CBasePlayer *CCSBot::FindMostDangerousThreat()
 {
+	LS_PROF("FindMostDangerousThreat");
 	// maximum number of simulataneously attendable threats
 #ifdef REGAMEDLL_FIXES
 	const int MAX_THREATS = MAX_CLIENTS;
@@ -1756,6 +1761,7 @@ CBasePlayer *CCSBot::FindMostDangerousThreat()
 // Update our reaction time queue
 void CCSBot::UpdateReactionQueue()
 {
+	LS_PROF("UpdateReactionQueue");
 	// zombies dont see any threats
 	if (cv_bot_zombie.value > 0.0f)
 		return;
@@ -2050,6 +2056,7 @@ bool CCSBot::IsNoticable(const CBasePlayer *pPlayer, unsigned char visibleParts)
 // that's open, else the longest open line near where it was looking.
 void CCSBot::LsWallSanity()
 {
+	LS_PROF("LsWallSanity");
 	if (!LsFight() || !IsAlive())
 		return;
 	// (on a ladder, a look of its own from before it got on lets go: the view decides the way it

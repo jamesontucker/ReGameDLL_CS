@@ -478,6 +478,7 @@ bool CCSBot::LsNadeGunUp()
 
 void CCSBot::LsNadeUpdate()
 {
+	LS_PROF("LsNadeUpdate");
 	float now = gpGlobals->time;
 	CBasePlayerWeapon *pWeapon = GetActiveWeapon();
 
@@ -1141,6 +1142,7 @@ void CCSBot::LsBuyExtras()
 // better players, and a few heroes never
 void CCSBot::LsSaveCheck()
 {
+	LS_PROF("LsSaveCheck");
 	if (LsWeaponMode())
 		return;
 	float now = gpGlobals->time;
@@ -1422,6 +1424,7 @@ bool CCSBot::LsBuyPistolRound()
 // a few seconds; newer players and campers wait longer (and some never make it in time)
 void CCSBot::LsPostPlantAware()
 {
+	LS_PROF("LsPostPlantAware");
 	if (m_iTeam != CT || !TheCSBots()->IsBombPlanted() || m_lsSaving || IsDefusingBomb() || IsAttacking() || !IsHiding()
 		|| LsWeaponMode() || LsOrderActive() || !IsDoingScenario())
 	{
