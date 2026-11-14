@@ -1550,6 +1550,29 @@ bool CCSBot::LsDrTick()
 					return true;
 				}
 			}
+			// (a door you open with use, no button: walk up to it and use it)
+			CBaseEntity *pDoor = dl.door;
+			if (!presser && pDoor && (pDoor->pev->spawnflags & SF_DOOR_USE_ONLY) && FStringNull(pDoor->pev->targetname))
+			{
+				Vector dm = (pDoor->pev->absmin + pDoor->pev->absmax) * 0.5f;
+				Vector o = pev->origin, lo = pDoor->pev->absmin, hi = pDoor->pev->absmax;
+				Vector gap(Q_max(Q_max(lo.x - o.x, 0.0f), o.x - hi.x), Q_max(Q_max(lo.y - o.y, 0.0f), o.y - hi.y), Q_max(Q_max(lo.z - o.z, 0.0f), o.z - hi.z));
+				SetLookAt("Loner-Strike: door", &dm, PRIORITY_HIGH, 0.5f, false, 3.0f);
+				if (gap.Length() > 40.0f)
+				{
+					Vector step(dm.x, dm.y, pev->origin.z);
+					MoveTowardsPosition(&step);
+				}
+				else
+				{
+					UTIL_MakeVectors(pev->v_angle);
+					Vector to = (dm - (pev->origin + pev->view_ofs)).Normalize();
+					if (DotProduct(to, gpGlobals->v_forward) > 0.8f)
+						UseEnvironment();
+				}
+				LsWhy("deathrun: opens the door (use)");
+				return true;
+			}
 			r.holdUntil = Q_max(r.holdUntil, now + 0.3f);
 			r.holdLook = dl.at;
 			LsWhy("deathrun: waits for the door");
