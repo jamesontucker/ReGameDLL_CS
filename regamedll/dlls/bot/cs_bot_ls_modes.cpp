@@ -1740,7 +1740,13 @@ void CCSBot::LsModeTick()
 		return;
 	}
 	// (a fight, a person's order, a plugin's habit, the bomb: the goal waits)
-	if (!LsFree() || m_isEnemyVisible || IsOnLadder())
+	// (a revive right by the downed one goes on with an enemy in sight - whether that's a risk it
+	// takes is the revive's own weighing, by who it is)
+	const LsModeGoal &gb = m_lsModeGoal[best];
+	CBaseEntity *pBestThing = gb.ent > 0 ? (CBaseEntity *)gb.thing : nullptr;
+	bool reviveClose = (gb.kind == LS_GOAL_USE || gb.kind == LS_GOAL_HOLD) && pBestThing && pBestThing->IsPlayer()
+		&& LsModeDist2D(gb.at, pev->origin) < 160.0f;
+	if (!LsFree() || (m_isEnemyVisible && !reviveClose) || IsOnLadder())
 		return;
 	if (LsModePushTick(m_lsModeGoal[best]))
 		return;
@@ -2328,6 +2334,9 @@ void CCSBot::LsModeGoalTick(LsModeGoal &g)
 			}
 			else
 				m_lsModeStillUntil = now + 0.3f;
+			// (reviving: it stays on it - the fight it would turn to waits, unless it's shot: above)
+			if (revive && IsAttacking())
+				StopAttacking();
 			SetLookAt("Loner-Strike: using", &at, PRIORITY_HIGH, 0.5f);
 			// (bought: done - holding USE on at the box bought it again a second later)
 			if (g.kind == LS_GOAL_OFFER)
@@ -2351,6 +2360,9 @@ void CCSBot::LsModeGoalTick(LsModeGoal &g)
 		}
 		if (handy)
 		{
+			// (a revive: the gun down - it can't shoot and get them up at once)
+			if (revive && IsAttacking())
+				StopAttacking();
 			g.phase = 1;
 			// (a revive or a crate as long as the goal lasts, at most 15 s; a plain use - a shop, a
 			// button - a few seconds)
