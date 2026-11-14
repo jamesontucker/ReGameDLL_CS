@@ -134,11 +134,11 @@ static int s_lsTargetCount = 0;
 static float s_lsTargetsAt = 0.0f;
 
 static const char *const s_lsGoalNames[LS_GOAL_KINDS] = { "", "go_hold", "defend", "capture", "extract", "loot", "use",
-	"ride", "investigate", "flee", "meeting", "offer" };
+	"ride", "investigate", "flee", "meeting", "offer", "hunt" };
 
 // what counts as there, by kind, when the mode doesn't say
 static const float s_lsGoalRadius[LS_GOAL_KINDS] = { 0.0f, 250.0f, 300.0f, 150.0f, 120.0f, 64.0f, 64.0f,
-	150.0f, 150.0f, 800.0f, 150.0f, 64.0f };
+	150.0f, 150.0f, 800.0f, 150.0f, 64.0f, 150.0f };
 
 static bool LsModeLive(const LsModeZone &z)
 {
@@ -926,6 +926,9 @@ bool CCSBot::LsModeCares(int kind, int prio, const Vector &at, float infl)
 	case LS_GOAL_FLEE:
 		lean = 1.0f - LsAggro();
 		break;
+	case LS_GOAL_HUNT:
+		lean = 0.5f + 0.5f * LsAggro();
+		break;
 	default:
 		lean = LsTeamwork();
 		break;
@@ -990,7 +993,7 @@ void CCSBot::LsModeSetGoal(int kind, const Vector &at, float radius, int ent, in
 	}
 	LsModeGoal &g = m_lsModeGoal[slot];
 	// (the same one again - a mode re-sends its goals - keeps its start)
-	bool again = g.kind == kind && (g.at - at).IsLengthLessThan(64.0f);
+	bool again = g.kind == kind && (kind == LS_GOAL_HUNT ? g.ent == ent : (g.at - at).IsLengthLessThan(64.0f));
 	float startAt = g.startAt;
 	g = LsModeGoal();
 	g.kind = kind;
@@ -1551,6 +1554,9 @@ void CCSBot::LsModeTick()
 		return;
 	}
 
+	// (a player it's hunting, in sight: the fight is with them, unless someone closer is on it)
+	LsModeHuntPrefer();
+
 	bool shooting = LsModeShootTick();
 
 	if (LsModeEscape())
@@ -1743,6 +1749,78 @@ bool CCSBot::LsModeThirdTick()
 	return false;
 }
 
+// Hunting a player down (a hunt goal: ent is the player) as a person would: toward where they are
+// now, the route picked again as they move; the bold push right in, the careful stop at range - a
+// covered spot their side of the target - and shoot from there (the influence scales that: at 0
+// every bot goes straight for them). Others in the way are fought as usual (the goal waits for any
+// fight); while the hunted one is dead, nothing (the plain brain plays on)
+void CCSBot::LsModeHuntTick(LsModeGoal &g)
+{
+	float now = gpGlobals->time;
+	CBaseEntity *pThing = g.ent > 0 ? (CBaseEntity *)g.thing : nullptr;
+	if (!pThing || !pThing->IsPlayer() || pThing == this || !pThing->IsAlive())
+		return;
+	CBasePlayer *pTarget = static_cast<CBasePlayer *>(pThing);
+	float d = (pTarget->pev->origin - pev->origin).Length();
+	float aggro = LsAggro();
+	float standoff = 150.0f + LsModeSway(g.infl) * 450.0f * (1.0f - aggro);
+	// (in range, in sight: that's where it fights from - the fight is the stock brain's)
+	if (d < standoff && IsVisible(pTarget, false))
+	{
+		m_lsModeStillUntil = now + 0.3f;
+		SetLookAt("Loner-Strike: the hunted one", &pTarget->pev->origin, PRIORITY_MEDIUM, 0.5f);
+		return;
+	}
+	// (on its way already, and they haven't gone far from where it's headed)
+	bool moved = (pTarget->pev->origin - m_lsModeMoveTo).IsLengthGreaterThan(Q_max(250.0f, standoff * 0.5f));
+	if (now < g.nextTry && LsModeHeadedTo(m_lsModeMoveTo) && !moved)
+		return;
+	if (!m_repathTimer.IsElapsed())
+		return;
+	g.nextTry = now + RANDOM_FLOAT(1.5f, 2.5f);
+	Vector to = LsModeOnMesh(pTarget->pev->origin);
+	if (standoff > 350.0f && d > standoff)
+	{
+		// (the careful: a covered spot at range on its side of them)
+		Vector atRange = pTarget->pev->origin + LsModeDir2D(pTarget->pev->origin, pev->origin) * (0.8f * standoff);
+		Vector spot;
+		if (LsModePickSpot(atRange, 300.0f, &spot))
+			to = spot;
+	}
+	m_lsModeMoveTo = to;
+	MoveTo(&to, (aggro > 0.5f || LsModeSway(g.infl) <= 0.0f) ? FASTEST_ROUTE : SAFEST_ROUTE);
+	m_lsModeMoveAt = m_stateTimestamp;
+	LsWhy("mode hunt");
+}
+
+// The hunted one in sight (in its view): it turns on them - unless the enemy it's fighting is right
+// on it (within 500 u and shooting at it); the less skilled notice a moment later
+void CCSBot::LsModeHuntPrefer()
+{
+	float now = gpGlobals->time;
+	if (now < m_lsModeHuntAt)
+		return;
+	m_lsModeHuntAt = now + 0.2f + 0.5f * (1.0f - LsSkill());
+	CBasePlayer *pTarget = nullptr;
+	for (int i = 0; i < LS_MODE_GOALS; i++)
+	{
+		const LsModeGoal &g = m_lsModeGoal[i];
+		CBaseEntity *pThing = g.ent > 0 ? (CBaseEntity *)g.thing : nullptr;
+		if (g.kind == LS_GOAL_HUNT && g.care && pThing && pThing->IsPlayer() && pThing != this && pThing->IsAlive()
+			&& (g.until <= 0.0f || now < g.until))
+			pTarget = static_cast<CBasePlayer *>(pThing);
+	}
+	if (!pTarget || GetEnemy() == pTarget || BotRelationship(pTarget) != BOT_ENEMY || (pTarget->pev->flags & FL_NOTARGET)
+		|| IsOnLadder() || !IsVisible(pTarget, true))
+		return;
+	CBasePlayer *pNow = GetEnemy();
+	if (pNow && pNow->IsAlive() && IsAttacking() && (pNow->pev->origin - pev->origin).IsLengthLessThan(500.0f)
+		&& GetTimeSinceAttacked() < 2.0f)
+		return;
+	Attack(pTarget);
+	LsWhy("mode hunt: the hunted one in sight");
+}
+
 // Where its side is based: the middle of the spots its teammates hold for the mode, or else of
 // its living teammates (false: alone)
 bool CCSBot::LsModeHome(Vector *home)
@@ -1931,6 +2009,11 @@ void CCSBot::LsModeGoalTick(LsModeGoal &g)
 	// (a moment before it gets going: the less skilled react later)
 	if (now < g.startAt)
 		return;
+	if (g.kind == LS_GOAL_HUNT)
+	{
+		LsModeHuntTick(g);
+		return;
+	}
 
 	// running from it: far enough is done
 	if (g.kind == LS_GOAL_FLEE)
@@ -2465,6 +2548,30 @@ void Bot_LsModeCommand()
 		return;
 	}
 
+	// hunt <who> <target> [prio] [until] [influence]: a hunt goal on that player (the same as goal
+	// <who> hunt 0 0 0 <target> [prio] [until] 0 [influence])
+	if (FStrEq(what, "hunt"))
+	{
+		int target = Q_atoi(CMD_ARGV(3));
+		CBasePlayer *pTarget = (target >= 1 && target <= gpGlobals->maxClients) ? UTIL_PlayerByIndex(target) : nullptr;
+		if (!pTarget || !UTIL_IsValidPlayer(pTarget))
+		{
+			CONSOLE_ECHO("ls_mode hunt <who> <target player index> [prio] [until] [influence 0-100]\n");
+			return;
+		}
+		int prio = int(LsModeArg(4, 60.0f));
+		float secs = LsModeArg(5), infl = LsModeInflArg(6);
+		if (LsModeBadArgs())
+			return;
+		int n = LsModeWho(CMD_ARGV(2), who, true);
+		for (int i = 0; i < n; i++)
+			if (who[i] != target)
+				static_cast<CCSBot *>(UTIL_PlayerByIndex(who[i]))->LsModeSetGoal(LS_GOAL_HUNT, pTarget->pev->origin, 0.0f, target, prio, secs, infl);
+		if (n > 0)
+			s_lsModeOn = true;
+		return;
+	}
+
 	// goal <who> <kind> <x> <y> <z> [ent] [prio] [until] [radius] [influence]
 	if (FStrEq(what, "goal"))
 	{
@@ -2472,7 +2579,7 @@ void Bot_LsModeCommand()
 		if (kind == LS_GOAL_NONE || CMD_ARGC() < 7)
 		{
 			CONSOLE_ECHO("ls_mode goal <who> <kind> <x> <y> <z> [ent] [prio] [until] [radius] [influence 0-100]\n"
-				"  kinds: go_hold defend capture extract loot use ride investigate flee meeting\n");
+				"  kinds: go_hold defend capture extract loot use ride investigate flee meeting hunt (ent: the player)\n");
 			return;
 		}
 		Vector at(LsModeArg(4), LsModeArg(5), LsModeArg(6));
@@ -2738,5 +2845,5 @@ void Bot_LsModeCommand()
 		return;
 	}
 
-	CONSOLE_ECHO("ls_mode: reset set status phase nobuy goal goal_clear offer offer_clear avoid attract forget block zone zone_clear layer role friend foe enemyclass enemyclass_clear heals heal\n");
+	CONSOLE_ECHO("ls_mode: reset set status phase nobuy goal hunt goal_clear offer offer_clear avoid attract forget block zone zone_clear layer role friend foe enemyclass enemyclass_clear heals heal\n");
 }
