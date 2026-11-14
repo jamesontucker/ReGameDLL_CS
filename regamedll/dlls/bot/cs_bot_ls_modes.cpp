@@ -1015,7 +1015,9 @@ bool CCSBot::LsModeCares(int kind, int prio, const Vector &at, float infl, int e
 	// into danger isn't)
 	if (kind == LS_GOAL_FLEE)
 		chance = Q_min(1.0f, chance + 0.3f * risk);
-	else if (kind == LS_GOAL_LOOT || kind == LS_GOAL_USE || kind == LS_GOAL_INVESTIGATE || kind == LS_GOAL_RIDE || kind == LS_GOAL_HUNT)
+	// (a revive's risk is weighed as it goes in - who's watching, how brave it is - not here)
+	else if ((kind == LS_GOAL_LOOT || kind == LS_GOAL_USE || kind == LS_GOAL_INVESTIGATE || kind == LS_GOAL_RIDE || kind == LS_GOAL_HUNT)
+		&& !(kind == LS_GOAL_USE && ent > 0 && ent <= gpGlobals->maxClients))
 		chance *= 1.0f - 0.5f * risk * (1.0f - LsAggro());
 	// (one that matters - prio 80 up - is always taken up unless its personality has the full say)
 	if (prio >= 80)
@@ -1695,6 +1697,33 @@ void CCSBot::LsModeTick()
 	// (a healing item, at a moment of its own choosing - and still while it works)
 	if (LsModeHealTick())
 		return;
+	// (Battle Royale: a squad mate down near by that the mode didn't send it to - it goes anyway, as
+	// people do: a team player more readily)
+	if (!s_lsPeace && s_lsRing.on && g_lsModeTies && gpGlobals->time >= m_lsModeMateDownAt)
+	{
+		m_lsModeMateDownAt = gpGlobals->time + RANDOM_FLOAT(1.5f, 3.0f);
+		CBasePlayer *pDown = nullptr;
+		float downDist = 1500.0f;
+		LsForTeammates(this, [&](CBasePlayer *pPlayer) {
+			if (!LsModeIsDown(pPlayer))
+				return;
+			float d = (pPlayer->pev->origin - pev->origin).Length();
+			if (d < downDist)
+			{
+				downDist = d;
+				pDown = pPlayer;
+			}
+		});
+		bool have = false;
+		for (int i = 0; i < LS_MODE_GOALS && pDown; i++)
+			if (m_lsModeGoal[i].kind == LS_GOAL_USE && m_lsModeGoal[i].ent == pDown->entindex())
+				have = true;
+		if (pDown && !have && !LsModeDowned() && RANDOM_FLOAT(0.0f, 1.0f) < 0.4f + 0.6f * LsTeamwork())
+		{
+			LsModeSetGoal(LS_GOAL_USE, pDown->pev->origin, 64.0f, pDown->entindex(), 75, 40.0f);
+			LsWhy("mode revive: a squad mate down near by");
+		}
+	}
 	// (Battle Royale: strayed well away from its squad - back toward them, over a mode's errand)
 	if (!gearing && !s_lsPeace && s_lsRing.on && (LsModeSquadTick(true) || (gpGlobals->time < m_lsModeSquadUntil && LsModeHeadedTo(m_lsModeMoveTo))))
 		return;
@@ -1777,6 +1806,14 @@ bool CCSBot::LsModeHealTick()
 	if (me < 1 || me > MAX_CLIENTS || s_lsHeals[me] <= 0 || now < m_lsModeHealAt || IsAttacking() || m_isEnemyVisible
 		|| IsOnLadder() || LsModeDowned())
 		return false;
+	// (a squad mate bleeding out comes first - unless it's badly hurt itself)
+	if (LsHealth() >= 30.0f)
+		for (int i = 0; i < LS_MODE_GOALS; i++)
+		{
+			const LsModeGoal &g = m_lsModeGoal[i];
+			if (g.kind == LS_GOAL_USE && g.care && g.ent > 0 && g.ent <= gpGlobals->maxClients)
+				return false;
+		}
 	m_lsModeHealAt = now + RANDOM_FLOAT(1.5f, 2.5f);
 	float aggro = LsAggro();
 	if (LsHealth() >= 50.0f + 40.0f * (1.0f - aggro) || GetTimeSinceAttacked() < 1.5f + 5.0f * aggro)
@@ -2228,6 +2265,12 @@ void CCSBot::LsModeGoalTick(LsModeGoal &g)
 	// the goal once it's open, or they're up)
 	CBaseEntity *pGoalThing = g.ent > 0 ? (CBaseEntity *)g.thing : nullptr;
 	bool revive = (g.kind == LS_GOAL_HOLD || g.kind == LS_GOAL_USE) && pGoalThing && pGoalThing->IsPlayer();
+	// (up again, or gone: nothing to revive)
+	if (revive && g.kind == LS_GOAL_USE && (!pGoalThing->IsAlive() || !LsModeIsDown(pGoalThing)))
+	{
+		LsModeClearGoals(g.kind, g.ent);
+		return;
+	}
 	// (a revive as people do it: not into a crowd. What's round the downed one: creatures close by,
 	// enemy players near with a line on them; the bolder go in with one about, the careful wait;
 	// a long way off with anyone about, not at all; a smoke on them first if it has one; hit
