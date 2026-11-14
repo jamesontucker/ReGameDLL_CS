@@ -160,6 +160,19 @@ struct LsCreatureType
 	Vector fallbackGlowColor;
 	int bloodColor;
 
+	// enraged below this part of its health (0 = never): faster, harder hits, quicker animation,
+	// with a tell (a deep roar and a pulsing red shell)
+	float enrageBelow;
+	float enrageSpeed;		// times its speeds
+	float enrageDamage;		// times its damage
+	float enrageAnim;		// times its attack rate and animation speed
+	// tiers 2 and 3 (tougher variants a mode asks for, spawn key tier=2|3): the same look on every
+	// type (tier 2 a yellow shell, tier 3 a red-orange shell and a little bigger), a skin or body
+	// where the model has one, and health times (1 = the mode decides)
+	int tierSkin[2];		// -1 = its own
+	int tierBody[2];
+	float tierHealth[2];
+
 	char anim[LSAN_COUNT][32];			// sequence names ("" = by activity)
 	char sound[LSS_COUNT][160];			// space separated lists, files that exist are kept
 	char say[LSS_COUNT][24];			// a sentence group instead (sentences.txt: HG_IDLE...): no precache slots
@@ -438,6 +451,7 @@ public:
 	// per-creature overrides from keys (0 = the type's)
 	float m_keyHealth, m_keySpeed, m_keyDamage, m_keyAggression, m_keyDetect;
 	int m_keyHates;
+	int m_tier;					// 1..3 (key "tier"; 0 = 1)
 
 	CCreatureImprov *m_improv;
 
@@ -494,6 +508,14 @@ private:
 	float m_aggression;
 	float m_detect;
 	int m_hates;
+	bool m_enraged;
+	float m_animScale;			// enraged: attacks and animation this much quicker
+
+	void ApplyLook();
+	void Enrage();
+public:
+	int Tier() const { return m_tier < 2 ? 1 : m_tier; }
+	bool Enraged() const { return m_enraged; }
 };
 
 // A barnacle: a ceiling hazard a mapper places ("ls_barnacle", Half-Life's barnacle.mdl). Its tongue
@@ -566,5 +588,6 @@ void LsWatchdogFrame();
 double LsPerfClock();							// ls_perf: now in seconds (0 while ls_perf is off)
 void LsPerfAddCreature(double seconds);
 void LsPerfAddBots(double seconds);
-void LsPerfFrame();						// StartFrame: a frame came
+void LsPerfFrame();
+float LsCreatureCapNow();						// ls_creature_max, lowered while the server's fps is low (ls_creature_adaptive)						// StartFrame: a frame came
 void LsWatchdogStart();						// GameDLLInit

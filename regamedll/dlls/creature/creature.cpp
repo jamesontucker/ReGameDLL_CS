@@ -30,7 +30,9 @@
 // ls_creature entity and its behaviours, and the ls_creature server command. See creature.h.
 
 #include "precompiled.h"
-#include <chrono>
+#ifndef _WIN32
+#include <sys/time.h>
+#endif
 #include <climits>
 
 cvar_t ls_creature_file      = { "ls_creature_file", "addons/amxmodx/configs/gamemodes/creatures.ini", 0, 0.0f, nullptr };
@@ -48,6 +50,10 @@ cvar_t ls_creature_precache_late = { "ls_creature_precache_late", "1", 0, 1.0f, 
 cvar_t ls_creature_frags     = { "ls_creature_frags", "0", 0, 0.0f, nullptr };		// 1 = kills add the type's frags to the score (counts toward mp_fraglimit)
 
 cvar_t ls_watchdog           = { "ls_watchdog", "10", 0, 10.0f, nullptr };
+cvar_t ls_creature_adaptive  = { "ls_creature_adaptive", "1", 0, 1.0f, nullptr };	// lower the live cap while the server's fps is low (players never see it)
+cvar_t ls_creature_fps_low   = { "ls_creature_fps_low", "0.6", 0, 0.6f, nullptr };	// below this (part of sys_ticrate, or fps when > 1) for 2 s: lower the cap
+cvar_t ls_creature_fps_ok    = { "ls_creature_fps_ok", "0.85", 0, 0.85f, nullptr };	// at or above this for 10 s: raise it again
+cvar_t ls_creature_cap_now   = { "ls_creature_cap_now", "0", 0, 0.0f, nullptr };		// the live cap now (read-only: ls_creature_max, lowered while fps is low)
 cvar_t ls_perf               = { "ls_perf", "0", 0, 0.0f, nullptr };		// seconds between performance lines in the log (0 = off)
 cvar_t ls_crash_quiet        = { "ls_crash_quiet", "1", 0, 1.0f, nullptr };		// a dedicated server's crash: log and end, no dialog (Windows/Wine)		// seconds without a frame before the marks are written (0 = off)
 
@@ -91,9 +97,22 @@ void LsWatchdogFrame()
 
 // ---- ls_perf: server frame rate, creature and bot think time, edicts, what a player would see ----
 
+// (a steady clock without std::chrono: the Linux build must run on old libstdc++)
 static double LsPerfNow()
 {
-	return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+#ifdef _WIN32
+	static LARGE_INTEGER freq;
+	if (!freq.QuadPart)
+		QueryPerformanceFrequency(&freq);
+	LARGE_INTEGER now;
+	QueryPerformanceCounter(&now);
+	return double(now.QuadPart) / double(freq.QuadPart);
+#else
+	// (gettimeofday: clock_gettime needs a newer glibc than the build allows)
+	struct timeval tv;
+	gettimeofday(&tv, nullptr);
+	return tv.tv_sec + tv.tv_usec * 1e-6;
+#endif
 }
 
 static struct
@@ -173,15 +192,91 @@ static void LsPerfReport(double now, double span)
 			viewFull++;
 	}
 	int frames = Q_max(s_perf.frames, 1);
-	UTIL_LogPrintf("ls_perf: %.0fs fps avg %.1f min %d (worst frame %.1f ms) | monsters alive %d, thinks %.1f/frame (max %d), think %.3f ms/frame avg %.2f max | bots %.3f ms/frame avg %.2f max | edicts %d of %d | view ents avg %.0f max %d over %d players, %d at 256+\n",
+	UTIL_LogPrintf("ls_perf: %.0fs fps avg %.1f min %d (worst frame %.1f ms) | cap now %.0f | monsters alive %d, thinks %.1f/frame (max %d), think %.3f ms/frame avg %.2f max | bots %.3f ms/frame avg %.2f max | edicts %d of %d | view ents avg %.0f max %d over %d players, %d at 256+\n",
 		span, s_perf.frames / span, s_perf.minSecondFrames == INT_MAX ? s_perf.frames : s_perf.minSecondFrames, s_perf.worstFrame * 1000.0,
-		alive, double(s_perf.thinks) / frames, s_perf.thinksMax, s_perf.creatureSum * 1000.0 / frames, s_perf.creatureMax * 1000.0,
+		LsCreatureCapNow(), alive, double(s_perf.thinks) / frames, s_perf.thinksMax, s_perf.creatureSum * 1000.0 / frames, s_perf.creatureMax * 1000.0,
 		s_perf.botsSum * 1000.0 / frames, s_perf.botsMax * 1000.0, edicts, gpGlobals->maxEntities,
 		bots ? double(viewSum) / bots : 0.0, viewMax, bots, viewFull);
 }
 
+// The adaptive cap: each real second, the frames that came against the server's tick rate. Low
+// for 2 seconds in a row: the cap drops to a little under what's alive (never under 12); good for
+// 10 in a row: it creeps up 4, never past ls_creature_max. Spawns past it wait (the wave spawner
+// tries again), nobody is removed, and difficulty is untouched: only how many at once.
+static struct { double secondStart; int frames, low, good; float cap; } s_adapt;
+
+static int LsAliveCount();
+
+float LsCreatureCapNow()
+{
+	float limit = ls_creature_max.value;
+	if (ls_creature_adaptive.value <= 0.0f || s_adapt.cap <= 0.0f)
+		return limit;
+	return Q_min(limit, s_adapt.cap);
+}
+
+static void LsAdaptFrame()
+{
+	double now = LsPerfNow();
+	if (s_adapt.secondStart == 0.0 || now - s_adapt.secondStart > 5.0)
+	{
+		s_adapt.secondStart = now;
+		s_adapt.frames = 0;
+		return;
+	}
+	s_adapt.frames++;
+	if (now - s_adapt.secondStart < 1.0)
+		return;
+
+	float fps = s_adapt.frames / float(now - s_adapt.secondStart);
+	s_adapt.secondStart = now;
+	s_adapt.frames = 0;
+
+	float tic = CVAR_GET_FLOAT("sys_ticrate");
+	if (tic <= 0.0f)
+		tic = 100.0f;
+	float low = ls_creature_fps_low.value > 1.0f ? ls_creature_fps_low.value : tic * ls_creature_fps_low.value;
+	float ok = ls_creature_fps_ok.value > 1.0f ? ls_creature_fps_ok.value : tic * ls_creature_fps_ok.value;
+	float limit = ls_creature_max.value;
+	if (s_adapt.cap <= 0.0f || s_adapt.cap > limit)
+		s_adapt.cap = limit;
+
+	if (ls_creature_adaptive.value > 0.0f && fps < low)
+	{
+		s_adapt.good = 0;
+		if (++s_adapt.low >= 2)
+		{
+			s_adapt.low = 0;
+			int alive = LsAliveCount();
+			float cap = Q_max(12.0f, Q_min(s_adapt.cap - 4.0f, floorf(alive * 0.85f)));
+			if (cap < s_adapt.cap)
+			{
+				UTIL_LogPrintf("ls_creature: server at %.0f fps (under %.0f): live cap %.0f -> %.0f\n", fps, low, s_adapt.cap, cap);
+				s_adapt.cap = cap;
+			}
+		}
+	}
+	else if (fps >= ok)
+	{
+		s_adapt.low = 0;
+		if (++s_adapt.good >= 10 && s_adapt.cap < limit)
+		{
+			s_adapt.good = 0;
+			float cap = Q_min(limit, s_adapt.cap + 4.0f);
+			UTIL_LogPrintf("ls_creature: server back at %.0f fps: live cap %.0f -> %.0f\n", fps, s_adapt.cap, cap);
+			s_adapt.cap = cap;
+		}
+	}
+	else
+		s_adapt.low = s_adapt.good = 0;
+
+	if (int(ls_creature_cap_now.value) != int(LsCreatureCapNow()))
+		CVAR_SET_FLOAT("ls_creature_cap_now", LsCreatureCapNow());
+}
+
 void LsPerfFrame()
 {
+	LsAdaptFrame();
 	if (ls_perf.value <= 0.0f)
 	{
 		s_perf.windowStart = 0.0;
@@ -436,6 +531,10 @@ void LsCreatures_RegisterCVars()
 	CVAR_REGISTER(&ls_watchdog);
 	CVAR_REGISTER(&ls_crash_quiet);
 	CVAR_REGISTER(&ls_perf);
+	CVAR_REGISTER(&ls_creature_adaptive);
+	CVAR_REGISTER(&ls_creature_fps_low);
+	CVAR_REGISTER(&ls_creature_fps_ok);
+	CVAR_REGISTER(&ls_creature_cap_now);
 	LsWatchdogStart();
 	CVAR_REGISTER(&ls_creature_file);
 	CVAR_REGISTER(&ls_creature_precache);
@@ -637,6 +736,13 @@ static void LsTypeDefaults(LsCreatureType *t, const char *name)
 	Q_strlcpy(t->sound[LSS_MISS], "zombie/claw_miss1.wav zombie/claw_miss2.wav | weapons/knife_slash1.wav weapons/knife_slash2.wav");
 	Q_strlcpy(t->sound[LSS_PAIN], "zombie/zo_pain1.wav zombie/zo_pain2.wav | player/pl_pain2.wav player/pl_pain4.wav");
 	Q_strlcpy(t->sound[LSS_DIE], "zombie/zo_pain2.wav | player/die1.wav player/die3.wav");
+	t->enrageBelow = 0.0f;
+	t->enrageSpeed = 1.35f;
+	t->enrageDamage = 1.3f;
+	t->enrageAnim = 1.25f;
+	t->tierSkin[0] = t->tierSkin[1] = -1;
+	t->tierBody[0] = t->tierBody[1] = -1;
+	t->tierHealth[0] = t->tierHealth[1] = 1.0f;
 }
 
 // (into the build list: see s_build)
@@ -686,6 +792,7 @@ static void LsBuiltinTypes()
 	Q_strlcpy(t->sound[LSS_DIE], "houndeye/he_die1.wav houndeye/he_die2.wav | player/die1.wav");
 
 	t = LsAddType("brute");
+	t->enrageBelow = 0.4f;			// a heavy: enraged below 40%
 	Q_strlcpy(t->display, "Brute");
 	t->health = 450.0f;
 	t->speed = 170.0f;
@@ -784,6 +891,7 @@ static void LsBuiltinTypes()
 	Q_strlcpy(t->sound[LSS_DIE], "turret/tu_die.wav turret/tu_die2.wav | weapons/debris1.wav");
 
 	t = LsAddType("boss");
+	t->enrageBelow = 0.4f;			// a heavy: enraged below 40%
 	Q_strlcpy(t->display, "Abomination");
 	t->category = LSC_BOSS;
 	t->health = 3000.0f;
@@ -856,6 +964,7 @@ static void LsBuiltinTypes()
 
 	// (Half-Life's own baby gargantua model isn't in the shared depot: the gargantua, smaller)
 	t = LsAddType("babygarg");
+	t->enrageBelow = 0.4f;			// a heavy: enraged below 40%
 	Q_strlcpy(t->display, "Baby gargantua");
 	t->category = LSC_BOSS;
 	t->health = 900.0f;
@@ -1015,6 +1124,7 @@ static void LsBuiltinTypes()
 	Q_strlcpy(t->sound[LSS_DIE], "hgrunt/gr_die1.wav hgrunt/gr_die2.wav hgrunt/gr_die3.wav | player/die1.wav");
 
 	t = LsAddType("gonarch");
+	t->enrageBelow = 0.4f;			// a heavy: enraged below 40%
 	Q_strlcpy(t->display, "Gonarch");
 	t->category = LSC_BOSS;
 	t->health = 3500.0f;
@@ -1139,6 +1249,13 @@ static void LsSetTypeKey(LsCreatureType *t, const char *key, const char *value)
 	else if (!Q_stricmp(key, "shot_fx")) t->shotFx = !Q_stricmp(value, "zap") ? 1 : !Q_stricmp(value, "none") ? 2 : 0;
 	else if (!Q_stricmp(key, "hops")) t->hops = LsNum(value, 0.0f, 1.0f, t->hops);
 	else if (!Q_stricmp(key, "flank")) t->flank = Q_atoi(value) != 0;
+	else if (!Q_stricmp(key, "enrage_below")) t->enrageBelow = LsNum(value, 0.0f, 0.95f, t->enrageBelow);
+	else if (!Q_stricmp(key, "enrage_speed")) t->enrageSpeed = LsNum(value, 1.0f, 3.0f, t->enrageSpeed);
+	else if (!Q_stricmp(key, "enrage_damage")) t->enrageDamage = LsNum(value, 1.0f, 5.0f, t->enrageDamage);
+	else if (!Q_stricmp(key, "enrage_anim")) t->enrageAnim = LsNum(value, 1.0f, 3.0f, t->enrageAnim);
+	else if (!Q_stricmp(key, "tier2_skin") || !Q_stricmp(key, "tier3_skin")) t->tierSkin[key[4] - '2'] = clamp(Q_atoi(value), -1, 255);
+	else if (!Q_stricmp(key, "tier2_body") || !Q_stricmp(key, "tier3_body")) t->tierBody[key[4] - '2'] = clamp(Q_atoi(value), -1, 255);
+	else if (!Q_stricmp(key, "tier2_hp") || !Q_stricmp(key, "tier3_hp")) t->tierHealth[key[4] - '2'] = LsNum(value, 0.1f, 20.0f, t->tierHealth[key[4] - '2']);
 	else if (!Q_stricmp(key, "frags")) t->frags = clamp(Q_atoi(value), -100, 100);
 	else if (!Q_stricmp(key, "money")) t->money = clamp(Q_atoi(value), -16000, 16000);
 	else if (!Q_stricmp(key, "model") || !Q_stricmp(key, "models")) Q_strlcpy(t->models, value);
@@ -1743,6 +1860,7 @@ void LsCreaturesServerActivate()
 {
 	LsPrecacheLate();
 	s_mapRunning = true;
+	Q_memset(&s_adapt, 0, sizeof(s_adapt));
 	LsCrashQuietInstall();
 }
 
@@ -1826,7 +1944,7 @@ ILsCreature *LsCreatureOf(CBaseEntity *pEntity)
 	return nullptr;
 }
 
-static void LsUpdateAliveCount()
+static int LsAliveCount()
 {
 	int alive = 0;
 	for (int i = 0; i < s_listCount; i++)
@@ -1835,6 +1953,12 @@ static void LsUpdateAliveCount()
 		if (c && c->IsAlive())
 			alive++;
 	}
+	return alive;
+}
+
+static void LsUpdateAliveCount()
+{
+	int alive = LsAliveCount();
 
 	if (int(ls_creature_alive.value) != alive)
 		CVAR_SET_FLOAT("ls_creature_alive", alive);
@@ -2036,9 +2160,9 @@ public:
 				alive++;
 		}
 
-		if (alive >= int(ls_creature_max.value))
+		if (alive >= int(LsCreatureCapNow()))
 		{
-			CONSOLE_ECHO("ls_creature: %d alive already (ls_creature_max)\n", alive);
+			CONSOLE_ECHO("ls_creature: %d alive already (ls_creature_max %.0f, live cap now %.0f)\n", alive, ls_creature_max.value, LsCreatureCapNow());
 			return nullptr;
 		}
 
@@ -2220,6 +2344,20 @@ void CLsCreature::KeyValue(KeyValueData *pkvd)
 		m_keyHates = LsHatesFromString(value) + 1;
 	else if (FStrEq(key, "persist"))
 		m_persist = Q_atoi(value) != 0;
+	else if (FStrEq(key, "tier"))
+	{
+		// (0 or 1 = normal; also takes effect on one already spawned: a plugin's DispatchKeyValue after the spawn)
+		int before = Tier();
+		m_tier = clamp(Q_atoi(value), 1, 3);
+		if (m_improv && IsAlive() && Tier() != before)
+		{
+			const LsCreatureType *t = GetType();
+			float ratio = (before >= 2 ? 1.0f / t->tierHealth[before - 2] : 1.0f) * (Tier() >= 2 ? t->tierHealth[Tier() - 2] : 1.0f);
+			pev->max_health *= ratio;
+			pev->health *= ratio;
+			ApplyLook();
+		}
+	}
 	else
 	{
 		CBaseMonster::KeyValue(pkvd);
@@ -2309,16 +2447,13 @@ void CLsCreature::Setup()
 	UTIL_SetSize(pev, t->hullMin, t->hullMax);
 	UTIL_SetOrigin(pev, pev->origin);
 
-	// a tint: the type's own, or the stand-in's (a hostage tinted green reads as "zombie")
-	pev->renderfx = kRenderFxNone;
-	pev->rendermode = kRenderNormal;
-	pev->renderamt = 0;
-	if (t->glow || (t->fallbackGlow && t->usingFallback))
-	{
-		pev->renderfx = kRenderFxGlowShell;
-		pev->rendercolor = t->glow ? t->glowColor : t->fallbackGlowColor;
-		pev->renderamt = 12;
-	}
+	// a tougher tier: more health when the type says so (the mode usually scales health itself)
+	if (Tier() >= 2)
+		pev->health = pev->max_health = pev->max_health * t->tierHealth[Tier() - 2];
+
+	m_enraged = false;
+	m_animScale = 1.0f;
+	ApplyLook();
 
 	m_bloodColor = t->bloodColor;
 	m_runSpeed = (m_keySpeed > 0.0f) ? m_keySpeed : t->speed;
@@ -2730,6 +2865,73 @@ void CLsCreature::ResolveAnims()
 			m_seq[LSAN_WALK], m_seqGround[LSAN_WALK], m_seq[LSAN_RUN], m_seqGround[LSAN_RUN], m_hasRun ? "" : " (no run: walk sped up)");
 }
 
+// How it looks: the type's tint (or the stand-in's: a hostage tinted green reads as "zombie"),
+// then the tier's, then enraged. The same on every type, no extra models: tier 2 a yellow shell,
+// tier 3 a red-orange shell and 8% bigger, enraged a pulsing bright red shell (UpdateAnimation).
+// Skins and bodies only where the type names them for the tier (the model has them).
+void CLsCreature::ApplyLook()
+{
+	const LsCreatureType *t = GetType();
+	pev->renderfx = kRenderFxNone;
+	pev->rendermode = kRenderNormal;
+	pev->renderamt = 0;
+	pev->skin = t->skin;
+	pev->body = t->body;
+	pev->scale = t->scale;
+	if (t->glow || (t->fallbackGlow && t->usingFallback))
+	{
+		pev->renderfx = kRenderFxGlowShell;
+		pev->rendercolor = t->glow ? t->glowColor : t->fallbackGlowColor;
+		pev->renderamt = 12;
+	}
+
+	int tier = Tier();
+	if (tier >= 2)
+	{
+		if (t->tierSkin[tier - 2] >= 0)
+			pev->skin = t->tierSkin[tier - 2];
+		if (t->tierBody[tier - 2] >= 0)
+			pev->body = t->tierBody[tier - 2];
+		pev->renderfx = kRenderFxGlowShell;
+		pev->rendercolor = (tier == 2) ? Vector(255, 200, 0) : Vector(255, 70, 10);
+		pev->renderamt = (tier == 2) ? 10 : 14;
+		if (tier == 3)
+			pev->scale = t->scale * 1.08f;
+	}
+
+	if (m_enraged)
+	{
+		pev->renderfx = kRenderFxGlowShell;
+		pev->rendercolor = Vector(255, 0, 0);
+		pev->renderamt = 20;
+	}
+}
+
+// Hurt below the type's enrage_below: faster, harder hits, quicker swings, once until it respawns.
+// The tell: a deep roar (its alert or pain sound at a low pitch: nothing new to precache) and the
+// pulsing red shell.
+void CLsCreature::Enrage()
+{
+	const LsCreatureType *t = GetType();
+	if (m_enraged || !t)
+		return;
+
+	m_enraged = true;
+	m_runSpeed *= t->enrageSpeed;
+	m_walkSpeed *= t->enrageSpeed;
+	m_damage *= t->enrageDamage;
+	m_animScale = t->enrageAnim;
+	ApplyLook();
+
+	int kind = t->soundCount[LSS_ALERT] > 0 ? LSS_ALERT : LSS_PAIN;
+	if (t->soundCount[kind] > 0)
+		EMIT_SOUND_DYN(edict(), CHAN_VOICE, STRING(t->iszSound[kind][RANDOM_LONG(0, t->soundCount[kind] - 1)]), VOL_NORM, ATTN_NORM * 0.5f, 0, 72);
+	MakeNoise(1500.0f);
+
+	if (ls_creature_debug.value > 0.0f)
+		CONSOLE_ECHO("ls_creature: %s#%d enraged at %.0f of %.0f health\n", t->name, entindex(), pev->health, pev->max_health);
+}
+
 void CLsCreature::SetAnim(int anim, bool restart)
 {
 	int seq = (anim <= LSAN_RUN) ? m_seq[anim] : PickSequence(anim);
@@ -2782,11 +2984,15 @@ void CLsCreature::UpdateAnimation()
 	}
 
 	// (moving or not, with a margin so it doesn't flicker between the two)
+	// enraged: the red shell pulses
+	if (m_enraged)
+		pev->renderamt = 16.0f + 12.0f * fabs(sinf(now * 5.0f));
+
 	m_animMoving = speed > (m_animMoving ? 8.0f : 20.0f);
 	if (!m_animMoving)
 	{
 		SetAnim(LSAN_IDLE);
-		pev->framerate = 1.0f;
+		pev->framerate = m_animScale;
 		return;
 	}
 
@@ -3229,7 +3435,9 @@ BOOL CLsCreature::TakeDamage(entvars_t *pevInflictor, entvars_t *pevAttacker, fl
 		return TRUE;
 	}
 
-	if (gpGlobals->time > m_painSoundAt + 0.6f)
+	if (t->enrageBelow > 0.0f && !m_enraged && pev->health < pev->max_health * t->enrageBelow)
+		Enrage();
+	else if (gpGlobals->time > m_painSoundAt + 0.6f)
 	{
 		m_painSoundAt = gpGlobals->time;
 		PlaySound(LSS_PAIN);
@@ -3721,8 +3929,8 @@ void CLsCreature::StartAttack()
 
 	// (the swing fits the attack rate: a long HL swing plays faster, never slower than made)
 	float duration = GetSequenceDuration();
-	float period = 1.0f / t->attackRate;
-	m_attackFramerate = (duration > 0.0f) ? clamp(duration / period, 1.0f, 3.0f) : 1.0f;
+	float period = 1.0f / (t->attackRate * m_animScale);
+	m_attackFramerate = (duration > 0.0f) ? clamp(duration / period, m_animScale, 3.0f) : m_animScale;
 	m_attackAnimEnd = gpGlobals->time + ((duration > 0.0f) ? duration / m_attackFramerate : period);
 	pev->framerate = m_attackFramerate;
 	PlaySound(LSS_ATTACK);
@@ -3877,10 +4085,10 @@ void CLsCreature::UpdateAttack()
 		return;
 	}
 
-	if (!m_attackLanded && now >= m_attackStart + t->attackDelay)
+	if (!m_attackLanded && now >= m_attackStart + t->attackDelay / m_animScale)
 	{
 		LandAttack();
-		m_nextAttack = m_attackStart + 1.0f / t->attackRate;
+		m_nextAttack = m_attackStart + 1.0f / (t->attackRate * m_animScale);
 	}
 
 	if (m_attackLanded && now >= m_nextAttack - 0.05f)
