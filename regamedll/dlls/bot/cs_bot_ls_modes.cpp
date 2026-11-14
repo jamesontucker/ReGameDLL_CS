@@ -1147,7 +1147,9 @@ bool CCSBot::LsModeOfferTick()
 		LsModeOffer &o = s_lsOffer[me][k];
 		if (o.kind == LS_OFFER_NONE || now < o.nextTry)
 			continue;
-		if (o.kind != LS_OFFER_PERK && o.kind != LS_OFFER_TRAP && m_iAccount < o.cost + perkCost + 200)
+		// (a turret is defense, bought when it can be: W1's at $2500 never came with a perk's price kept
+		// on top as well)
+		if ((o.kind == LS_OFFER_BOX || o.kind == LS_OFFER_BENCH) && m_iAccount < o.cost + perkCost + 200)
 			continue;
 		int rank = 1000;
 		if (o.kind == LS_OFFER_TRAP)
@@ -1694,22 +1696,64 @@ void CCSBot::LsModeGoalTick(LsModeGoal &g)
 	// the goal once it's open, or they're up)
 	CBaseEntity *pGoalThing = g.ent > 0 ? (CBaseEntity *)g.thing : nullptr;
 	bool revive = (g.kind == LS_GOAL_HOLD || g.kind == LS_GOAL_USE) && pGoalThing && pGoalThing->IsPlayer();
-	// (a revive as people do it: not into a crowd - two creatures near the downed one, or one right by
-	// them, and it fights from where it is till it's clear; a must-do one goes anyway)
-	if (revive && g.prio < 90)
+	// (a revive as people do it: not into a crowd. What's round the downed one: creatures close by,
+	// enemy players near with a line on them; the bolder go in with one about, the careful wait;
+	// a long way off with anyone about, not at all; a smoke on them first if it has one; hit
+	// mid-revive and hurt, or with several about, it backs off a moment and fights. A must-do
+	// one (prio 90) goes anyway)
+	int reviveThreat = 0;
+	if (revive)
 	{
-		int near2 = 0, close1 = 0;
+		const Vector mate = pGoalThing->pev->origin;
 		for (int k = 0; k < s_lsTargetCount; k++)
 		{
 			CBaseEntity *pEntity = s_lsTarget[k];
 			if (!LsModeTargetOk(pEntity))
 				continue;
-			float d = (pEntity->pev->origin - pGoalThing->pev->origin).Length();
-			near2 += d < 450.0f;
-			close1 += d < 250.0f;
+			float d = (pEntity->pev->origin - mate).Length();
+			reviveThreat += (d < 250.0f) ? 2 : (d < 450.0f ? 1 : 0);
 		}
-		if (near2 >= 2 || close1 >= 1)
+		for (int i = 1; i <= gpGlobals->maxClients; i++)
 		{
+			CBasePlayer *pPlayer = UTIL_PlayerByIndex(i);
+			if (!UTIL_IsValidPlayer(pPlayer) || !pPlayer->IsAlive() || pPlayer == pGoalThing || BotRelationship(pPlayer) != BOT_ENEMY)
+				continue;
+			float d = (pPlayer->pev->origin - mate).Length();
+			if (d > 900.0f)
+				continue;
+			TraceResult tr;
+			UTIL_TraceLine(pPlayer->pev->origin + pPlayer->pev->view_ofs, mate + Vector(0, 0, 8), ignore_monsters, pPlayer->edict(), &tr);
+			if (tr.flFraction == 1.0f || tr.pHit == pGoalThing->edict())
+				reviveThreat += d < 350.0f ? 2 : 1;
+		}
+		// (its own smoke on them a moment ago: they can't see in)
+		if (now - m_lsModeSmokeAt < 12.0f && (m_lsModeSmokeOn - mate).IsLengthLessThan(200.0f))
+			reviveThreat = 0;
+	}
+	if (revive && g.prio < 90)
+	{
+		int tolerance = LsAggro() > 0.65f ? 1 : 0;
+		float away = (pGoalThing->pev->origin - pev->origin).Length();
+		if (g.phase == 1 && GetTimeSinceAttacked() < 1.0f && (LsHealth() < 50.0f || reviveThreat >= 2))
+		{
+			g.phase = 0;
+			m_lsModeReviveBackUntil = now + RANDOM_FLOAT(3.0f, 6.0f);
+			LsWhy("mode revive: under fire, backing off");
+			return;
+		}
+		if (now < m_lsModeReviveBackUntil)
+			return;
+		if (reviveThreat > tolerance || (reviveThreat > 0 && away > 1600.0f))
+		{
+			// (a smoke on them, if it has one and isn't too far to throw it)
+			if (away < 1200.0f && LsHasNade(WEAPON_SMOKEGRENADE) && now - m_lsModeSmokeAt > 15.0f && !IsAttacking())
+			{
+				m_lsModeSmokeAt = now;
+				m_lsModeSmokeOn = pGoalThing->pev->origin;
+				LsAskThrow("weapon_smokegrenade", pGoalThing->pev->origin);
+				LsWhy("mode revive: smoke on them first");
+				return;
+			}
 			if (m_lsWhy == nullptr || Q_strcmp(m_lsWhy, "mode revive: waiting for it to clear"))
 				LsWhy("mode revive: waiting for it to clear");
 			return;
