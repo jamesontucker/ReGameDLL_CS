@@ -957,6 +957,28 @@ void Host_Say(edict_t *pEntity, BOOL teamonly)
 		}
 	}
 
+	// Loner-Strike: a '#' in chat is drawn as the fullwidth sign, so other players' games don't
+	// look it up as a localization string ("#Cstrike_..." tricks that crash or fake messages): what
+	// relocalizebugfix did, which no longer loads on current ReHLDS (its API version check)
+	{
+		static char szSafe[256];
+		size_t n = 0;
+		for (const char *c = p; c && *c && n + 4 < sizeof(szSafe); c++)
+		{
+			if (*c == '#')
+			{
+				szSafe[n++] = char(0xEF);
+				szSafe[n++] = char(0xBC);
+				szSafe[n++] = char(0x83);
+			}
+			else
+				szSafe[n++] = *c;
+		}
+		szSafe[n] = '\0';
+		if (p && Q_strchr(p, '#'))
+			p = szSafe;
+	}
+
 	SendSayMessage(pPlayer, pcmd, teamonly, p, pszFormat, pszConsoleFormat, bSenderDead, placeName, consoleUsesPlaceName);
 }
 
