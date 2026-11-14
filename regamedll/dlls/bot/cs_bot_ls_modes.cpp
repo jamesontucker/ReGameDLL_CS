@@ -91,6 +91,17 @@ static int s_lsLayer[MAX_CLIENTS + 1];
 static float s_lsLayerInfl[MAX_CLIENTS + 1];	// ...its personality influence, plus 1 (0: not given)
 static float s_lsPhaseInfl = 0.0f;				// the phase's personality influence, plus 1 (0: not given)
 static int s_lsHeals[MAX_CLIENTS + 1];			// healing items each player carries (ls_mode heals), -1 unknown
+static bool s_lsDown[MAX_CLIENTS + 1];			// knocked down (ls_mode down <who> 1|0)
+
+// Knocked down by the mode: the mode says so (ls_mode down), or the old sign - no-target with the view
+// a hand above the floor (with ls_down_finish the mode no longer hides them, so only the hint tells)
+static bool LsModeIsDown(CBaseEntity *pPlayer)
+{
+	int i = pPlayer ? pPlayer->entindex() : 0;
+	if (i >= 1 && i <= MAX_CLIENTS && s_lsDown[i])
+		return pPlayer->IsAlive();
+	return pPlayer && (pPlayer->pev->flags & FL_NOTARGET) && pPlayer->pev->view_ofs.z < 20.0f;
+}
 
 // How far a bot's own personality and skill count against what the mode asked (an order's
 // "influence", 0-100 as 0-1): 0 the order exactly as given, 1 the usual mix - an order sent
@@ -316,6 +327,7 @@ static void LsModeReset(bool all, bool bots = true)
 			s_lsLayer[i] = -1;
 			s_lsLayerInfl[i] = 0.0f;
 			s_lsHeals[i] = -1;
+			s_lsDown[i] = false;
 			for (int k = 0; k < LS_MODE_OFFERS; k++)
 				s_lsOffer[i][k] = LsModeOffer();
 		}
@@ -519,6 +531,7 @@ void LsModePlayerGone(int index)
 	s_lsLayer[index] = -1;
 	s_lsLayerInfl[index] = 0.0f;
 	s_lsHeals[index] = -1;
+	s_lsDown[index] = false;
 	for (int k = 0; k < LS_MODE_OFFERS; k++)
 		s_lsOffer[index][k] = LsModeOffer();
 	s_lsFriend[index] = s_lsFoe[index] = 0;
@@ -955,7 +968,7 @@ bool CCSBot::LsModeCares(int kind, int prio, const Vector &at, float infl, int e
 	for (int i = 1; i <= gpGlobals->maxClients; i++)
 	{
 		CBasePlayer *pPlayer = UTIL_PlayerByIndex(i);
-		if (UTIL_IsValidPlayer(pPlayer) && pPlayer->IsAlive() && !(pPlayer->pev->flags & FL_NOTARGET)
+		if (UTIL_IsValidPlayer(pPlayer) && pPlayer->IsAlive() && !LsModeIsDown(pPlayer)
 			&& BotRelationship(pPlayer) == BOT_ENEMY && (pPlayer->pev->origin - at).IsLengthLessThan(800.0f))
 			risk += 0.35f;
 	}
@@ -1344,7 +1357,7 @@ bool CCSBot::LsModeOfferTick()
 // hand above the floor - with only a pistol, at a crawl
 bool CCSBot::LsModeDowned() const
 {
-	return (pev->flags & FL_NOTARGET) && pev->view_ofs.z < 20.0f;
+	return LsModeIsDown(const_cast<CCSBot *>(this));
 }
 
 // A spot that's no place to crawl to: outside the safe zone, or with a creature close by
@@ -1368,7 +1381,7 @@ void CCSBot::LsModeDownTick()
 	float mateDist = 1500.0f;
 	LsForTeammates(this, [&](CBasePlayer *pPlayer) {
 		// (a teammate who's down too is no help)
-		if ((pPlayer->pev->flags & FL_NOTARGET) && pPlayer->pev->view_ofs.z < 20.0f)
+		if (LsModeIsDown(pPlayer))
 			return;
 		float d = (pPlayer->pev->origin - pev->origin).Length();
 		if (d < mateDist)
@@ -1730,7 +1743,7 @@ bool CCSBot::LsModeSquadTick()
 	CBasePlayer *pMate = nullptr;
 	float mateDist = 4000.0f;
 	LsForTeammates(this, [&](CBasePlayer *pPlayer) {
-		if ((pPlayer->pev->flags & FL_NOTARGET) && pPlayer->pev->view_ofs.z < 20.0f)
+		if (LsModeIsDown(pPlayer))
 			return;
 		float d = (pPlayer->pev->origin - pev->origin).Length();
 		if (d < mateDist)
@@ -2163,7 +2176,7 @@ void CCSBot::LsModeGoalTick(LsModeGoal &g)
 			CBasePlayer *pPlayer = UTIL_PlayerByIndex(i);
 			// (a downed enemy - flagged no-target - is no threat: knocks in a duel are often both ways)
 			if (!UTIL_IsValidPlayer(pPlayer) || !pPlayer->IsAlive() || pPlayer == pGoalThing || BotRelationship(pPlayer) != BOT_ENEMY
-				|| (pPlayer->pev->flags & FL_NOTARGET))
+				|| LsModeIsDown(pPlayer))
 				continue;
 			float d = (pPlayer->pev->origin - mate).Length();
 			if (d > 900.0f)
@@ -2593,6 +2606,16 @@ void Bot_LsModeCommand()
 		return;
 	}
 
+	// down <who> <1 | 0>: knocked down (crawling, waiting for a revive) or up again (also on death and
+	// a new round, from the mode)
+	if (FStrEq(what, "down"))
+	{
+		bool down = Q_atoi(CMD_ARGV(3)) != 0;
+		int n = LsModeWho(CMD_ARGV(2), who, false);
+		for (int i = 0; i < n; i++)
+			s_lsDown[who[i]] = down;
+		return;
+	}
 	// heals <who> <bandages> <medkits> <drinks>: the healing items a player carries (Battle Royale)
 	if (FStrEq(what, "heals"))
 	{
