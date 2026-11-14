@@ -1517,12 +1517,12 @@ bool CCSBot::LsModePickHigh(Vector *out)
 // High ground held like a person holds it: a sightline for a while (its patience: 20-60 s), watching
 // and taking the shots there are, then the next spot along the high route - or off hunting, now
 // and then. The zone, an empty gun and a fight take it off (true: holding or on its way)
-bool CCSBot::LsModePerchTick()
+bool CCSBot::LsModePerchTick(bool anyState)
 {
 	float now = gpGlobals->time;
 	if (LsModeOursHiding() && now < m_lsModePerchUntil)
 		return true;
-	if (now < m_lsModePerchAt || LsOutOfAmmo() || !(IsHunting() || m_state == &m_idleState || LsModeOursHiding()))
+	if (now < m_lsModePerchAt || LsOutOfAmmo() || !(anyState || IsHunting() || m_state == &m_idleState || LsModeOursHiding()))
 		return false;
 	m_lsModePerchAt = now + RANDOM_FLOAT(1.0f, 3.0f);
 	if (!m_repathTimer.IsElapsed())
@@ -1710,6 +1710,19 @@ void CCSBot::LsModeTick()
 	// (a healing item, at a moment of its own choosing - and still while it works)
 	if (LsModeHealTick())
 		return;
+	// (Battle Royale: told to hold the high ground and armed - up to a sightline over the mode's
+	// lighter errands (a crate, a camping spot); a revive or anything that matters comes first)
+	if (s_lsRing.on && !shooting && m_rgpPlayerItems[PRIMARY_WEAPON_SLOT] && !LsModeDowned())
+	{
+		int meIdx = entindex();
+		bool toldHigh = meIdx >= 1 && meIdx <= MAX_CLIENTS && s_lsLayer[meIdx] == 2;
+		bool weighty = false;
+		for (int i = 0; i < LS_MODE_GOALS; i++)
+			if (m_lsModeGoal[i].kind != LS_GOAL_NONE && m_lsModeGoal[i].care && m_lsModeGoal[i].prio >= 70)
+				weighty = true;
+		if (toldHigh && !weighty && !IsAttacking() && LsModePerchTick(true))
+			return;
+	}
 	// (Battle Royale: a squad mate down near by that the mode didn't send it to - it goes anyway, as
 	// people do: a team player more readily)
 	if (!s_lsPeace && s_lsRing.on && g_lsModeTies && gpGlobals->time >= m_lsModeMateDownAt)
