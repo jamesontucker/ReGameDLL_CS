@@ -1608,10 +1608,29 @@ bool CCSBot::LsDrTick()
 					// (within use reach first; still not gone after a second: right up to it - a trigger in front of
 					// a button can be what clears the way to it, as a person walking up would touch it)
 					bool closer = r.pressSince > 0.0f && now - r.pressSince > 1.0f;
-					if (closer && gap.Length() > 14.0f && gap.Length() <= 80.0f)
+					if (closer && gap.Length() > 14.0f && gap.Length() <= 120.0f)
 					{
-						Vector step(t.btn.x, t.btn.y, pev->origin.z);
-						MoveTowardsPosition(&step);
+						// (from its front: the side its thin face looks to, where a player stands - not beside it)
+						Vector size = hi - lo;
+						Vector front = t.btn;
+						if (size.x < size.y)
+							front.x += (o.x >= t.btn.x ? 1.0f : -1.0f) * (0.5f * size.x + 20.0f);
+						else
+							front.y += (o.y >= t.btn.y ? 1.0f : -1.0f) * (0.5f * size.y + 20.0f);
+						TraceResult ft;
+						Vector fz(front.x, front.y, pev->origin.z);
+						UTIL_TraceHull(fz, fz, ignore_monsters, human_hull, ENT(pev), &ft);
+						if (ft.fStartSolid)
+						{
+							// (the other face, then)
+							if (size.x < size.y)
+								front.x = t.btn.x - (front.x - t.btn.x);
+							else
+								front.y = t.btn.y - (front.y - t.btn.y);
+						}
+						Vector step(front.x, front.y, pev->origin.z);
+						if ((step - pev->origin).Make2D().IsLengthGreaterThan(8.0f))
+							MoveTowardsPosition(&step);
 					}
 					if (gap.Length() > 52.0f && !closer)
 					{
@@ -1645,7 +1664,7 @@ bool CCSBot::LsDrTick()
 							UseEnvironment();
 						LsWhy("deathrun: opens the door");
 					}
-					if (!(closer && gap.Length() > 14.0f))
+					if (!(closer && gap.Length() > 14.0f && gap.Length() <= 120.0f))
 						ClearMovement();
 					return true;
 				}
