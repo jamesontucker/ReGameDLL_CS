@@ -1801,7 +1801,7 @@ void CCSBot::LsModeTick()
 	const LsModeGoal &gb = m_lsModeGoal[best];
 	CBaseEntity *pBestThing = gb.ent > 0 ? (CBaseEntity *)gb.thing : nullptr;
 	bool reviveBest = (gb.kind == LS_GOAL_USE || gb.kind == LS_GOAL_HOLD) && pBestThing && pBestThing->IsPlayer();
-	bool reviveClose = reviveBest && LsModeDist2D(gb.at, pev->origin) < 160.0f;
+	bool reviveClose = reviveBest && (pBestThing->pev->origin - pev->origin).IsLengthLessThan(300.0f);
 	// (on its way to a squad mate bleeding out, for the vision: enemies a way off who aren't after it are
 	// left be a moment - it keeps going; anyone close or shooting at it is a fight as usual)
 	m_lsModeRevivingUntil = reviveBest ? gpGlobals->time + 1.0f : 0.0f;
@@ -1819,7 +1819,8 @@ void CCSBot::LsModeTick()
 		StopAttacking();
 		LsWhy("mode revive: breaking off a fight for them");
 	}
-	if (!LsFree() || (m_isEnemyVisible && !reviveClose && !farFight) || IsOnLadder())
+	// (right by them, a fight on doesn't stop it either: whether it goes in now is the revive's weighing)
+	if ((!LsFree() && !(reviveClose && IsAttacking())) || (m_isEnemyVisible && !reviveClose && !farFight) || IsOnLadder())
 		return;
 	if (LsModePushTick(m_lsModeGoal[best]))
 		return;
@@ -1870,14 +1871,17 @@ bool CCSBot::LsModeHealTick()
 bool CCSBot::LsModeSquadTick(bool overGoal, bool loose)
 {
 	float now = gpGlobals->time;
-	if (!g_lsModeTies || now < m_lsModeSquadAt || now < m_lsModePushUntil || IsOnLadder() || !m_repathTimer.IsElapsed())
-		return false;
-	m_lsModeSquadAt = now + RANDOM_FLOAT(3.0f, 5.0f);
 	// (over a goal: only a light one - a crate, a camping spot; a revive or anything that matters goes on)
 	if (overGoal)
 		for (int i = 0; i < LS_MODE_GOALS; i++)
 			if (m_lsModeGoal[i].kind != LS_GOAL_NONE && m_lsModeGoal[i].care && m_lsModeGoal[i].prio >= 60)
+			{
+				m_lsModeSquadUntil = 0.0f;	// (and a walk back to the squad already on gives way)
 				return false;
+			}
+	if (!g_lsModeTies || now < m_lsModeSquadAt || now < m_lsModePushUntil || IsOnLadder() || !m_repathTimer.IsElapsed())
+		return false;
+	m_lsModeSquadAt = now + RANDOM_FLOAT(3.0f, 5.0f);
 	CBasePlayer *pMate = nullptr;
 	float mateDist = 4000.0f;
 	LsForTeammates(this, [&](CBasePlayer *pPlayer) {
