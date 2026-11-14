@@ -1357,6 +1357,18 @@ void CCSBot::LsPuppetCommand(const char *what, float now)
 		bool chat = CMD_ARGC() > 8 && FStrEq(CMD_ARGV(8), "bc");
 		if (!chat && ordered)
 			return;
+		// (goto ... [bc] [influence 0-100], the influence 9th: above 50 a loner, or a careful one
+		// sent where it's known to be dangerous, may turn it down)
+		if (CMD_ARGC() > 9 && CMD_ARGV(9)[0])
+		{
+			float sway = 2.0f * Q_min(1.0f, Q_max(0.0f, float(Q_atof(CMD_ARGV(9))) / 100.0f));
+			Vector dest(LsArg(3), LsArg(4), LsArg(5));
+			CNavArea *pDest = TheNavAreaGrid.GetNearestNavArea(&dest);
+			float risk = pDest ? Q_min(1.0f, LsGetDanger(pDest)) : 0.0f;
+			float no = 0.4f * (1.0f - LsTeamwork()) + 0.5f * risk * (1.0f - LsAggro());
+			if (RANDOM_FLOAT(0.0f, 1.0f) < Q_max(0.0f, sway - 1.0f) * no)
+				return;
+		}
 		Vector to(LsArg(3), LsArg(4), LsArg(5));
 		// (a spot on floor the nav doesn't cover: the nearest that it does)
 		if (!TheNavAreaGrid.GetNavArea(&to))
@@ -1510,6 +1522,14 @@ void CCSBot::LsPuppetCommand(const char *what, float now)
 		CBasePlayer *pLeader = (index >= 1 && index <= gpGlobals->maxClients) ? UTIL_PlayerByIndex(index) : nullptr;
 		if (!pLeader || !pLeader->IsAlive() || pLeader == this || BotRelationship(pLeader) != BOT_TEAMMATE)
 			return;
+		// (follow <index> [secs] [influence 0-100]: above 50 its own personality may turn it down -
+		// a loner more likely; not given or up to 50, taken as today)
+		if (CMD_ARGC() > 5 && CMD_ARGV(5)[0])
+		{
+			float sway = 2.0f * Q_min(1.0f, Q_max(0.0f, float(Q_atof(CMD_ARGV(5))) / 100.0f));
+			if (RANDOM_FLOAT(0.0f, 1.0f) < Q_max(0.0f, sway - 1.0f) * 0.7f * (1.0f - LsTeamwork()))
+				return;
+		}
 		p.holdUntil = p.crouchUntil = p.lookUntil = 0.0f;
 		p.holdTag[0] = '\0';
 		Follow(pLeader);
@@ -2679,6 +2699,20 @@ void CCSBot::LsTraceNote(const char *note)
 	if (!f)
 		return;
 	fprintf(f, "#why,%.2f,%d,%d,%.0f,%.0f,%.0f,%s\n", gpGlobals->time, entindex(), m_iTeam, pev->origin.x, pev->origin.y, pev->origin.z, note);
+	fflush(f);
+}
+
+// Who it is, for comparing personas in a recording: a #persona line (name, aggression, teamwork,
+// skill, style, loot greed)
+void CCSBot::LsTracePersona(float greed)
+{
+	if (cv_bot_ls_trace.value <= 0.0f)
+		return;
+	FILE *f = LsTraceFile();
+	if (!f)
+		return;
+	fprintf(f, "#persona,%.2f,%d,%d,%s,%.2f,%.2f,%.2f,%d,%.2f\n", gpGlobals->time, entindex(), m_iTeam, STRING(pev->netname),
+		LsAggro(), LsTeamwork(), LsSkill(), LsStyle(), greed);
 	fflush(f);
 }
 

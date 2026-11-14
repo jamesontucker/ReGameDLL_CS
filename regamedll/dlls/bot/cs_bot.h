@@ -1346,6 +1346,7 @@ public:
 	void LsCheckBeforeDefuse();						// a look round the site before defusing
 	bool LsObjectiveThreat(bool defusing);			// planting/defusing: a threat around it (true: stop for now)
 	void LsWhy(const char *why);			// a decision's label (bot_ls_trace: written as it happens)
+	void LsTracePersona(float greed);		// its persona as a #persona line (bot_ls_trace)
 	void LsTrace();										// bot_ls_trace: what it's doing, to lstrace.csv
 	bool LsShirksObjective();						// a rogue who leaves the objective to others
 	CNavArea *LsPickHuntArea();					// every bot for itself: where to hunt
@@ -1713,9 +1714,11 @@ public:
 		float phaseUntil = 0.0f;					// ...that lasts till then
 		float nextTry = 0.0f;						// the next MoveTo, if it's been sent off its way
 		int tries = 0;								// times sent back on its way without getting there
+		float infl = -1.0f;							// personality influence 0-1 (-1 not given: the usual mix)
+		float startAt = 0.0f;						// not on its way before then (slower to react: lower skill)
 	};
 	enum { LS_MODE_GOALS = 4 };
-	void LsModeSetGoal(int kind, const Vector &at, float radius, int ent, int prio, float secs);
+	void LsModeSetGoal(int kind, const Vector &at, float radius, int ent, int prio, float secs, float infl = -1.0f);
 	void LsModeClearGoals(int kind, int ent);		// kind 0 and ent 0: all of them
 	bool LsModeHasGoal() const;
 	void LsModeTick();								// each think after a person's order (cs_bot_update.cpp)
@@ -1724,6 +1727,21 @@ public:
 	bool LsModePeace();								// a mode's peace (a loot-up), or the moment after it: no player enemies
 	bool LsModeGearing();							// just after the peace: gearing up before hunting
 	bool LsModeKitted();							// armor, a pistol and a spare magazine beside a main gun
+	bool LsModeDowned() const;						// knocked down by the mode (no-target, lying)
+	void LsModeDownTick();							// down: crawl to a teammate or cover, still for a revive
+	float m_lsModeDownAt = 0.0f;
+	int m_lsModeOfferKind = 0;						// the offer it's on its way to use (LS_OFFER_*)
+	float m_lsModeOfferInfl = -1.0f;				// ...and that offer's personality influence
+	int m_lsModeOfferCost = 0;						// ...its price
+	int m_lsModeOfferMoney = -1;					// ...the money it had as it began to use it (-1 not yet)
+	bool LsModeHealTick();							// a healing item used at a moment of its own choosing (BR)
+	float m_lsModeHealAt = 0.0f;					// next heal decision
+	float m_lsModeHealUntil = 0.0f;					// healing (standing still) till then
+	bool LsModeSquadTick();							// back toward its squad when it's strayed too far (BR)
+	float m_lsModeSquadAt = 0.0f;
+	bool LsModeThirdTick();							// a fight between others near by: in on it, or away from it
+	float m_lsModeThirdAt = 0.0f;
+	float m_lsModePersonaFor = -1.0f;				// its persona written to the trace for this map (its start time)
 	bool LsModeOfferTick();							// a perk, the bench, the box, the trap, a turret: when to take one
 	float m_lsModeOfferAt = 0.0f;
 	float m_lsModeReviveBackUntil = 0.0f;			// backed off a revive under fire till then
@@ -1788,7 +1806,7 @@ private:
 	float m_lsModePushAt = 0.0f;					// next push roll
 	bool LsModeShootTick();							// a mode enemy (a creature) in sight: shoot it (true: it is)
 	float LsModeGreed();							// 0-1: how much loot and pickups pull it
-	bool LsModeCares(int kind, int prio);			// a goal's taken up or not (once, by its persona)
+	bool LsModeCares(int kind, int prio, const Vector &at, float infl);	// a goal's taken up or not (once, by its persona)
 
 public:
 	// Loner-Strike deathrun (cs_bot_ls_deathrun.cpp, bot_ls_deathrun): runners run the course, the

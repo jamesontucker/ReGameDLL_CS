@@ -33,7 +33,7 @@
 
 #include "precompiled.h"
 
-cvar_t cv_ls_mode_ver = { "ls_mode_ver", "1", 0, 1.0f, nullptr };	// the plugins look for this before sending ls_mode
+cvar_t cv_ls_mode_ver = { "ls_mode_ver", "2", 0, 2.0f, nullptr };	// the plugins look for this before sending ls_mode
 
 bool g_lsModeTies = false;	// any friend / foe set (BotRelationship checks it, bot.h)
 
@@ -88,6 +88,26 @@ static LsModeZone s_lsAttract[LS_MODE_ATTRACTS];
 static LsModeRing s_lsRing;
 static char s_lsRole[MAX_CLIENTS + 1][16];
 static int s_lsLayer[MAX_CLIENTS + 1];
+static float s_lsLayerInfl[MAX_CLIENTS + 1];	// ...its personality influence, plus 1 (0: not given)
+static float s_lsPhaseInfl = 0.0f;				// the phase's personality influence, plus 1 (0: not given)
+static int s_lsHeals[MAX_CLIENTS + 1];			// healing items each player carries (ls_mode heals), -1 unknown
+
+// How far a bot's own personality and skill count against what the mode asked (an order's
+// "influence", 0-100 as 0-1): 0 the order exactly as given, 1 the usual mix - an order sent
+// without one - and 2 its personality and skill fully (each decision's personal part doubled)
+static float LsModeSway(float infl)
+{
+	return infl < 0.0f ? 1.0f : 2.0f * Q_min(1.0f, infl);
+}
+
+// An influence argument (0-100) as 0-1, -1 when it isn't there
+static float LsModeInflArg(int i)
+{
+	if (CMD_ARGC() <= i || !CMD_ARGV(i)[0])
+		return -1.0f;
+	float v = Q_atof(CMD_ARGV(i));
+	return v < 0.0f ? -1.0f : Q_min(1.0f, v / 100.0f);
+}
 // what a mode offers each player to use (ls_mode offer): perk machines, the upgrade bench, the mystery
 // box, a trap switch, a turret to place; the bot decides when to take one
 enum { LS_OFFER_NONE, LS_OFFER_PERK, LS_OFFER_BENCH, LS_OFFER_BOX, LS_OFFER_TRAP, LS_OFFER_TURRET };
@@ -99,6 +119,7 @@ struct LsModeOffer
 	int cost = 0;
 	int order = 0;						// perks: the order to buy them in (lowest first)
 	float nextTry = 0.0f;				// not before then (taken lately, or a box roll lost)
+	float infl = -1.0f;					// personality influence 0-1 (-1 not given)
 };
 const int LS_MODE_OFFERS = 8;
 static LsModeOffer s_lsOffer[MAX_CLIENTS + 1][LS_MODE_OFFERS];			// the mode's layer for each player (ls_mode layer): 0 surface, 1 below, 2 high, -1 none
@@ -282,6 +303,7 @@ static void LsModeReset(bool all, bool bots = true)
 	s_lsRing = LsModeRing();
 	s_lsPeace = false;
 	s_lsPeaceEndAt = -100.0f;
+	s_lsPhaseInfl = 0.0f;
 	s_lsNoBuy = false;
 	if (bots)
 		LsModeClearBotGoals(0, 0);
@@ -292,6 +314,8 @@ static void LsModeReset(bool all, bool bots = true)
 		for (int i = 0; i <= MAX_CLIENTS; i++)
 		{
 			s_lsLayer[i] = -1;
+			s_lsLayerInfl[i] = 0.0f;
+			s_lsHeals[i] = -1;
 			for (int k = 0; k < LS_MODE_OFFERS; k++)
 				s_lsOffer[i][k] = LsModeOffer();
 		}
@@ -331,9 +355,10 @@ bool CCSBot::LsModePeace()
 	if (s_lsPeaceEndAt < 0.0f)
 		return false;
 	float since = gpGlobals->time - s_lsPeaceEndAt;
-	if (since < 0.0f || since > 2.0f)
+	if (since < 0.0f || since > 3.0f)
 		return false;
-	return since < 0.4f + 0.6f * LsTrait(205) + 0.4f * (1.0f - LsSkill());
+	// (each its own moment: the slower, the later - none at all with an influence of 0)
+	return since < LsModeSway(s_lsPhaseInfl - 1.0f) * (0.4f + 0.6f * LsTrait(205) + 0.4f * (1.0f - LsSkill()));
 }
 
 // Kitted out enough to go hunting: some armor, a pistol beside the main gun, and a spare
@@ -370,7 +395,9 @@ bool CCSBot::LsModeGearing()
 	// back to looting: a knife let loose on whoever's nearest set off the chains of knife kills)
 	// (kitted out is a reason to go hunting only after the first 45 s: everyone landed armed on
 	// some maps, and the whole lobby went hunting at once)
-	if (since < 0.0f || since > (armed ? 90.0f : 60.0f + 40.0f * LsTrait(206)) || (armed && since > 45.0f && LsModeKitted())
+	// (unarmed: each its own while - the bold give up on a gun sooner, the careful look longer)
+	float unarmed = 80.0f + LsModeSway(s_lsPhaseInfl - 1.0f) * (40.0f * LsTrait(206) - 30.0f * (LsAggro() - 0.5f) - 20.0f);
+	if (since < 0.0f || since > (armed ? 90.0f : unarmed) || (armed && since > 45.0f && LsModeKitted())
 		|| (armed && GetTimeSinceAttacked() < 2.0f))
 	{
 		m_lsModeGearDone = true;
@@ -453,6 +480,9 @@ void CCSBot::LsModeRoomTick(float reach)
 		CBasePlayer *pPlayer = UTIL_PlayerByIndex(i);
 		if (!UTIL_IsValidPlayer(pPlayer) || pPlayer == this || !pPlayer->IsAlive())
 			continue;
+		// (a squad loots together: a team player keeps by its squad mates, a loner gives them room too)
+		if (g_lsModeTies && LsTeamwork() >= 0.5f && BotRelationship(pPlayer) == BOT_TEAMMATE)
+			continue;
 		float d = (pPlayer->pev->origin - pev->origin).Length();
 		if (d < nearest)
 		{
@@ -491,6 +521,8 @@ void LsModePlayerGone(int index)
 		return;
 	s_lsRole[index][0] = '\0';
 	s_lsLayer[index] = -1;
+	s_lsLayerInfl[index] = 0.0f;
+	s_lsHeals[index] = -1;
 	for (int k = 0; k < LS_MODE_OFFERS; k++)
 		s_lsOffer[index][k] = LsModeOffer();
 	s_lsFriend[index] = s_lsFoe[index] = 0;
@@ -772,13 +804,15 @@ bool CCSBot::LsModeShootTick()
 	// (close: whether it can get at the bot at all - behind a gate it's no threat up close, and
 	// no knife reaches it)
 	bool reachable = gap < 250.0f && LsModeReachable(this, pTarget);
-	if (LsHealth() < 35.0f && gap > 350.0f && gap < 900.0f && now >= m_lsModeCoverAt)
+	// (hurt: the careful go for cover sooner, the bold fight on lower)
+	if (LsHealth() < 25.0f + 25.0f * (1.0f - LsAggro()) && gap > 350.0f && gap < 900.0f && now >= m_lsModeCoverAt)
 	{
 		m_lsModeCoverAt = now + 4.0f;
 		if (LsTakeCoverFrom(pTarget->pev->origin, 300.0f, true))
 			LsWhy("mode enemy: hurt, to cover");
 	}
-	else if (!IsUsingKnife() && gap < 220.0f && reachable && LsAggro() < 0.75f)
+	// (the better ones keep their distance sooner: kiting, not trading hits)
+	else if (!IsUsingKnife() && gap < 140.0f + 140.0f * LsSkill() && reachable && LsAggro() < 0.75f)
 	{
 		m_lsModeBackFrom = pTarget->pev->origin;
 		m_lsModeBackUntil = now + 0.35f;
@@ -893,15 +927,16 @@ float CCSBot::LsModeGreed()
 
 // A goal's advisory: whether this bot takes it up is up to who it is (rolled once, as it's
 // given). Team jobs go by its teamwork, loot by its greed, running away by its caution
-bool CCSBot::LsModeCares(int kind, int prio)
+bool CCSBot::LsModeCares(int kind, int prio, const Vector &at, float infl)
 {
-	if (prio >= 80)
-		return true;
+	// (the influence: 0 every bot takes it up; 1 the usual; 2 its personality fully - the careful
+	// may turn down a risky one, even one the mode says matters)
+	float sway = LsModeSway(infl);
+	if (kind == LS_GOAL_OFFER || sway <= 0.0f)
+		return true;	// (an offer: its own pick)
 	float lean;
 	switch (kind)
 	{
-	case LS_GOAL_OFFER:
-		return true;	// (its own pick)
 	case LS_GOAL_LOOT:
 	case LS_GOAL_USE:
 	case LS_GOAL_INVESTIGATE:
@@ -915,6 +950,29 @@ bool CCSBot::LsModeCares(int kind, int prio)
 		break;
 	}
 	float chance = prio >= 30 ? 0.55f + 0.45f * lean : 0.1f + 0.5f * lean;
+	// (how risky it is there: creatures, enemy players about - the careful less keen; for a
+	// run-away, the keener)
+	float risk = 0.0f;
+	for (int k = 0; k < s_lsTargetCount; k++)
+		if (LsModeTargetOk(s_lsTarget[k]) && (s_lsTarget[k]->pev->origin - at).IsLengthLessThan(600.0f))
+			risk += 0.25f;
+	for (int i = 1; i <= gpGlobals->maxClients; i++)
+	{
+		CBasePlayer *pPlayer = UTIL_PlayerByIndex(i);
+		if (UTIL_IsValidPlayer(pPlayer) && pPlayer->IsAlive() && !(pPlayer->pev->flags & FL_NOTARGET)
+			&& BotRelationship(pPlayer) == BOT_ENEMY && (pPlayer->pev->origin - at).IsLengthLessThan(800.0f))
+			risk += 0.35f;
+	}
+	risk = Q_min(1.0f, risk);
+	if (kind == LS_GOAL_FLEE)
+		chance = Q_min(1.0f, chance + 0.3f * risk);
+	else
+		chance *= 1.0f - 0.5f * risk * (1.0f - LsAggro());
+	// (one that matters - prio 80 up - is always taken up unless its personality has the full say)
+	if (prio >= 80)
+		chance = 1.0f - Q_max(0.0f, sway - 1.0f) * (1.0f - chance);
+	else
+		chance = 1.0f - sway * (1.0f - chance);
 	return RANDOM_FLOAT(0.0f, 1.0f) < chance;
 }
 
@@ -922,7 +980,7 @@ bool CCSBot::LsModeCares(int kind, int prio)
 // least important goes if the new one matters more
 static Vector LsModeOnMesh(const Vector &pos);
 
-void CCSBot::LsModeSetGoal(int kind, const Vector &at, float radius, int ent, int prio, float secs)
+void CCSBot::LsModeSetGoal(int kind, const Vector &at, float radius, int ent, int prio, float secs, float infl)
 {
 	// (an entity named has to be there now; it's kept by handle, so a new one in its slot later
 	// isn't mistaken for it)
@@ -950,6 +1008,9 @@ void CCSBot::LsModeSetGoal(int kind, const Vector &at, float radius, int ent, in
 			return;
 	}
 	LsModeGoal &g = m_lsModeGoal[slot];
+	// (the same one again - a mode re-sends its goals - keeps its start)
+	bool again = g.kind == kind && (g.at - at).IsLengthLessThan(64.0f);
+	float startAt = g.startAt;
 	g = LsModeGoal();
 	g.kind = kind;
 	g.at = at;
@@ -959,7 +1020,11 @@ void CCSBot::LsModeSetGoal(int kind, const Vector &at, float radius, int ent, in
 	g.onMesh = LsModeOnMesh(at);
 	g.prio = prio;
 	g.until = LsModeUntil(secs);
-	g.care = LsModeCares(kind, prio);
+	g.infl = infl;
+	g.care = LsModeCares(kind, prio, at, infl);
+	// (on its way after a moment - the less skilled, the longer; a must-do one at once)
+	g.startAt = again ? startAt
+		: (prio >= 90 ? 0.0f : gpGlobals->time + LsModeSway(infl) * (1.0f - LsSkill()) * RANDOM_FLOAT(0.4f, 1.2f));
 	if (m_lsModeGoalOn == slot)
 		m_lsModeGoalOn = -1;
 }
@@ -1114,8 +1179,10 @@ int CCSBot::LsModeLayerWant()
 {
 	LS_PROF("LsModeLayerWant");
 	// (the mode's say first: Battle Royale spreads its players over the layers)
-	int told = entindex() >= 1 && entindex() <= MAX_CLIENTS ? s_lsLayer[entindex()] : -1;
-	if (told >= 0)
+	int me = entindex();
+	int told = me >= 1 && me <= MAX_CLIENTS ? s_lsLayer[me] : -1;
+	// (with its personality given more say than usual, some go by their own taste after all)
+	if (told >= 0 && LsTrait(214) >= 0.6f * Q_max(0.0f, LsModeSway(s_lsLayerInfl[me] - 1.0f) - 1.0f))
 		return told;
 	if (LsModeKitted())
 		return 2;
@@ -1163,6 +1230,10 @@ bool CCSBot::LsModeOfferTick()
 	for (int k = 0; k < LS_MODE_OFFERS; k++)
 		if (s_lsOffer[me][k].kind == LS_OFFER_PERK && (!perkCost || s_lsOffer[me][k].cost < perkCost))
 			perkCost = s_lsOffer[me][k].cost;
+	// (who it is: a gun player - bold, skilled - upgrades the gun before a turret; a careful team
+	// player puts the turret down first and keeps more money by; a loner pulls the trap later)
+	float aggro = LsAggro(), team = LsTeamwork();
+	float tilt = 0.5f * (1.0f - aggro) + 0.5f * team - 0.5f * aggro - 0.5f * LsSkill();
 	LsModeOffer *pBest = nullptr;
 	int bestRank = 1000;
 	for (int k = 0; k < LS_MODE_OFFERS; k++)
@@ -1170,9 +1241,11 @@ bool CCSBot::LsModeOfferTick()
 		LsModeOffer &o = s_lsOffer[me][k];
 		if (o.kind == LS_OFFER_NONE || now < o.nextTry)
 			continue;
+		float sway = LsModeSway(o.infl);
+		int spare = int(200.0f + sway * (250.0f * (1.0f - aggro) - 100.0f));
 		// (a turret is defense, bought when it can be: W1's at $2500 never came with a perk's price kept
 		// on top as well)
-		if ((o.kind == LS_OFFER_BOX || o.kind == LS_OFFER_BENCH) && m_iAccount < o.cost + perkCost + 200)
+		if ((o.kind == LS_OFFER_BOX || o.kind == LS_OFFER_BENCH) && m_iAccount < o.cost + perkCost + spare)
 			continue;
 		int rank = 1000;
 		if (o.kind == LS_OFFER_TRAP)
@@ -1181,21 +1254,24 @@ bool CCSBot::LsModeOfferTick()
 			for (int t = 0; t < s_lsTargetCount; t++)
 				if (LsModeTargetOk(s_lsTarget[t]) && (s_lsTarget[t]->pev->origin - o.at).IsLengthLessThan(500.0f))
 					pressure++;
-			if (pressure >= 5 && m_iAccount >= o.cost)
+			float most = 5.0f + sway * (2.0f * aggro + 2.0f * (1.0f - team) - 2.0f);
+			if (pressure >= Q_max(2, int(most + 0.5f)) && m_iAccount >= o.cost)
 				rank = 0;	// (urgent: even mid-fight)
 		}
-		else if (calm && m_iAccount >= o.cost + 200)
+		else if (calm && m_iAccount >= o.cost + spare)
 		{
 			if (o.kind == LS_OFFER_PERK)
 				rank = 10 + o.order;
-			else if (o.kind == LS_OFFER_TURRET)
-				rank = 40;
+			// (the gun before a turret: the mode offers the bench once the perks are in, and a $2500
+			// turret taken first left no money for it - bots never upgraded at a bench)
 			else if (o.kind == LS_OFFER_BENCH)
-				rank = 50;
+				rank = int(30.0f + sway * 15.0f * tilt);
+			else if (o.kind == LS_OFFER_TURRET)
+				rank = int(40.0f - sway * 15.0f * tilt);
 			else if (o.kind == LS_OFFER_BOX)
 			{
 				// (now and then: a roll a minute or so, the greedier the likelier)
-				if (RANDOM_FLOAT(0.0f, 1.0f) < 0.15f + 0.35f * LsModeGreed())
+				if (RANDOM_FLOAT(0.0f, 1.0f) < 0.325f + sway * 0.35f * (LsModeGreed() - 0.5f))
 					rank = 60;
 				else
 					o.nextTry = now + RANDOM_FLOAT(40.0f, 80.0f);
@@ -1210,6 +1286,10 @@ bool CCSBot::LsModeOfferTick()
 	if (!pBest)
 		return false;
 	pBest->nextTry = now + 20.0f;
+	m_lsModeOfferKind = pBest->kind;
+	m_lsModeOfferInfl = pBest->infl;
+	m_lsModeOfferCost = pBest->cost;
+	m_lsModeOfferMoney = -1;
 	Vector at = pBest->at;
 	if (pBest->kind == LS_OFFER_TURRET)
 	{
@@ -1217,14 +1297,80 @@ bool CCSBot::LsModeOfferTick()
 		Vector spot;
 		if (LsModePickSpot(pBest->at, 400.0f, &spot))
 			at = spot;
-		LsModeSetGoal(LS_GOAL_OFFER, at, 64.0f, 0, 72, 20.0f);
+		LsModeSetGoal(LS_GOAL_OFFER, at, 64.0f, 0, 72, 20.0f, pBest->infl);
 	}
 	else
-		LsModeSetGoal(LS_GOAL_OFFER, at, 64.0f, pBest->ent, pBest->kind == LS_OFFER_TRAP ? 90 : 72, 20.0f);
+		LsModeSetGoal(LS_GOAL_OFFER, at, 64.0f, pBest->ent, pBest->kind == LS_OFFER_TRAP ? 90 : 72, 20.0f, pBest->infl);
 	LsWhy(pBest->kind == LS_OFFER_PERK ? "mode offer: a perk" : pBest->kind == LS_OFFER_BENCH ? "mode offer: the bench"
 		: pBest->kind == LS_OFFER_BOX ? "mode offer: the box" : pBest->kind == LS_OFFER_TRAP ? "mode offer: the trap, gate under pressure"
 		: "mode offer: placing a turret");
 	return true;
+}
+
+// Knocked down (Last Stand, Battle Royale): the mode lays the player down - no-target, the view a
+// hand above the floor - with only a pistol, at a crawl
+bool CCSBot::LsModeDowned() const
+{
+	return (pev->flags & FL_NOTARGET) && pev->view_ofs.z < 20.0f;
+}
+
+// A spot that's no place to crawl to: outside the safe zone, or with a creature close by
+static bool LsModeBadCrawl(const Vector &spot)
+{
+	if (s_lsRing.on && LsModeDist2D(spot, s_lsRing.at) > s_lsRing.r - 100.0f)
+		return true;
+	for (int k = 0; k < s_lsTargetCount; k++)
+		if (LsModeTargetOk(s_lsTarget[k]) && (s_lsTarget[k]->pev->origin - spot).IsLengthLessThan(300.0f))
+			return true;
+	return false;
+}
+
+// Down as a person is down: a teammate right by it (reviving) - still, not a crawl that breaks it;
+// else, now and then, a crawl toward the nearest teammate who's up, or to cover close by - not into
+// the open, the zone or creatures, and nothing if there's nowhere better. The pistol fights as usual
+void CCSBot::LsModeDownTick()
+{
+	float now = gpGlobals->time;
+	CBasePlayer *pMate = nullptr;
+	float mateDist = 1500.0f;
+	LsForTeammates(this, [&](CBasePlayer *pPlayer) {
+		// (a teammate who's down too is no help)
+		if ((pPlayer->pev->flags & FL_NOTARGET) && pPlayer->pev->view_ofs.z < 20.0f)
+			return;
+		float d = (pPlayer->pev->origin - pev->origin).Length();
+		if (d < mateDist)
+		{
+			mateDist = d;
+			pMate = pPlayer;
+		}
+	});
+	if (pMate && mateDist < 90.0f)
+	{
+		m_lsModeStillUntil = now + 0.5f;
+		if (m_lsWhy == nullptr || Q_strcmp(m_lsWhy, "mode down: still for the revive"))
+			LsWhy("mode down: still for the revive");
+		return;
+	}
+	if (IsAttacking() || now < m_lsModeDownAt || IsOnLadder() || !m_repathTimer.IsElapsed())
+		return;
+	m_lsModeDownAt = now + RANDOM_FLOAT(2.5f, 4.0f);
+	Vector to;
+	bool go = false;
+	if (pMate && mateDist > 150.0f)
+	{
+		// (a stretch toward them: they'll come the rest of the way)
+		to = LsModeOnMesh(pev->origin + LsModeDir2D(pev->origin, pMate->pev->origin) * Q_min(300.0f, mateDist - 100.0f));
+		go = !LsModeBadCrawl(to);
+	}
+	if (!go && LsModePickSpot(pev->origin, 300.0f, &to))
+		go = !LsModeBadCrawl(to);
+	if (!go)
+	{
+		m_lsModeStillUntil = now + 1.0f;
+		return;
+	}
+	LsModeMove(to, false);
+	LsWhy(pMate ? "mode down: crawling toward a teammate" : "mode down: crawling to cover");
 }
 
 // A spot on high ground to hold: a hiding spot (one with a view - a sniper spot - likelier) or the
@@ -1362,10 +1508,11 @@ bool CCSBot::LsModeAttractTick(bool gearing)
 			// hardly: a bot meant for below goes straight down from the trench mouth)
 			int me = entindex();
 			bool told = me >= 1 && me <= MAX_CLIENTS && s_lsLayer[me] >= 0;
+			float sway = told ? LsModeSway(s_lsLayerInfl[me] - 1.0f) : 1.0f;
 			if (want >= 0 && z.layer == want)
-				score *= told ? 3.0f : 2.0f;
+				score *= told ? 6.0f / (1.0f + sway) : 2.0f;
 			else if (told)
-				score *= 0.4f;
+				score *= 0.1f + 0.3f * sway;
 			// (the bold ones go where it's richest; everyone else steers clear of the crowd)
 			if (want >= 0)
 			{
@@ -1404,6 +1551,12 @@ void CCSBot::LsModeTick()
 		StopAttacking();
 	if (!s_lsModeOn || !IsAlive() || IsBuying() || (CSGameRules() && CSGameRules()->IsFreezePeriod()))
 		return;
+	// (testing: who it is, once a map, in the trace)
+	if (m_lsModePersonaFor < 0.0f || m_lsModePersonaFor > gpGlobals->time)
+	{
+		m_lsModePersonaFor = gpGlobals->time;
+		LsTracePersona(LsModeGreed());
+	}
 
 	// (a peace phase: no fights, room between players; then the goals - crates - as usual)
 	if (s_lsPeace)
@@ -1417,6 +1570,14 @@ void CCSBot::LsModeTick()
 	if (gearing || (!s_lsPeace && s_lsPeaceEndAt >= 0.0f && gpGlobals->time - s_lsPeaceEndAt < 60.0f && !IsAttacking()))
 		LsModeRoomTick(300.0f);
 
+	// (knocked down: crawling, shooting back, or lying still for a revive - nothing else)
+	if (LsModeDowned())
+	{
+		LsModeShootTick();
+		LsModeDownTick();
+		return;
+	}
+
 	bool shooting = LsModeShootTick();
 
 	if (LsModeEscape())
@@ -1427,6 +1588,9 @@ void CCSBot::LsModeTick()
 		return;
 	// (mid-fight with a creature: no new spot, no errand; it shoots)
 	if (shooting)
+		return;
+	// (a healing item, at a moment of its own choosing - and still while it works)
+	if (LsModeHealTick())
 		return;
 
 	// the goal to act on: the most important it cares about (the nearer of two alike); spent
@@ -1460,6 +1624,10 @@ void CCSBot::LsModeTick()
 		// (gearing up: off to loot rather than hunting)
 		if ((gearing || s_lsPeace) && !shooting && LsModeAttractTick(true))
 			return;
+		// (Battle Royale after the gearing up: a fight between others near by - in on it or away
+		// from it - and back toward its squad when it's strayed)
+		if (!gearing && !s_lsPeace && s_lsRing.on && (LsModeThirdTick() || LsModeSquadTick()))
+			return;
 		// (geared up and a high-ground player: a sightline held a while, then the next along)
 		if (!gearing && !s_lsPeace && s_lsPeaceEndAt >= 0.0f && !shooting && LsModeLayerWant() == 2 && LsModePerchTick())
 			return;
@@ -1474,6 +1642,132 @@ void CCSBot::LsModeTick()
 	if (LsModePushTick(m_lsModeGoal[best]))
 		return;
 	LsModeGoalTick(m_lsModeGoal[best]);
+}
+
+// Healing (Battle Royale's items: the mode says what each carries, ls_mode heals): when is its own
+// call - the careful patch up early and soon after a fight, the bold fight on and heal only well
+// hurt and once it's been quiet a while; not with an enemy in sight. It asks the mode to start
+// one (ls_comp_heal) and stands still while it works (the mode says so: ls_mode heal)
+bool CCSBot::LsModeHealTick()
+{
+	float now = gpGlobals->time;
+	int me = entindex();
+	if (now < m_lsModeHealUntil)
+	{
+		if (GetTimeSinceAttacked() < 0.5f)
+		{
+			m_lsModeHealUntil = 0.0f;	// (shot: the mode stops it, and it fights)
+			return false;
+		}
+		m_lsModeStillUntil = now + 0.3f;
+		return true;
+	}
+	if (me < 1 || me > MAX_CLIENTS || s_lsHeals[me] <= 0 || now < m_lsModeHealAt || IsAttacking() || m_isEnemyVisible
+		|| IsOnLadder() || LsModeDowned())
+		return false;
+	m_lsModeHealAt = now + RANDOM_FLOAT(1.5f, 2.5f);
+	float aggro = LsAggro();
+	if (LsHealth() >= 50.0f + 40.0f * (1.0f - aggro) || GetTimeSinceAttacked() < 1.5f + 5.0f * aggro)
+		return false;
+	SERVER_COMMAND(UTIL_VarArgs("ls_comp_heal %d\n", me));
+	m_lsModeHealAt = now + 4.0f;
+	LsWhy("mode heal: patching up");
+	return false;
+}
+
+// Battle Royale, a squad: back toward the nearest squad mate who's up when it's strayed - a team
+// player keeps close, a loner wanders far (true: on its way)
+bool CCSBot::LsModeSquadTick()
+{
+	float now = gpGlobals->time;
+	if (!g_lsModeTies || now < m_lsModeSquadAt || now < m_lsModePushUntil || IsOnLadder() || !m_repathTimer.IsElapsed())
+		return false;
+	m_lsModeSquadAt = now + RANDOM_FLOAT(3.0f, 5.0f);
+	CBasePlayer *pMate = nullptr;
+	float mateDist = 4000.0f;
+	LsForTeammates(this, [&](CBasePlayer *pPlayer) {
+		if ((pPlayer->pev->flags & FL_NOTARGET) && pPlayer->pev->view_ofs.z < 20.0f)
+			return;
+		float d = (pPlayer->pev->origin - pev->origin).Length();
+		if (d < mateDist)
+		{
+			mateDist = d;
+			pMate = pPlayer;
+		}
+	});
+	float leash = 350.0f + 1500.0f * (1.0f - LsTeamwork());
+	if (!pMate || mateDist < leash)
+		return false;
+	Vector spot;
+	if (!LsModePickSpot(pMate->pev->origin, 250.0f, &spot))
+		spot = LsModeOnMesh(pMate->pev->origin);
+	if (s_lsRing.on && LsModeDist2D(spot, s_lsRing.at) > s_lsRing.r - 100.0f)
+		return false;
+	LsModeMove(spot, mateDist > 1500.0f);
+	m_lsModePushUntil = now + 6.0f;
+	LsWhy("mode squad: back to the squad");
+	return true;
+}
+
+// Battle Royale: two others fighting near by (bots shooting at each other, both its enemies). The
+// bold and the skilled go in on it - to cover on the near side, for the one left standing - the
+// careful keep out of it, moving off if it's close; hurt, less keen (true: on its way)
+bool CCSBot::LsModeThirdTick()
+{
+	float now = gpGlobals->time;
+	if (now < m_lsModeThirdAt || now < m_lsModePushUntil || IsOnLadder() || !m_repathTimer.IsElapsed())
+		return false;
+	m_lsModeThirdAt = now + RANDOM_FLOAT(4.0f, 7.0f);
+	Vector fight;
+	float fightDist = 2000.0f;
+	bool found = false;
+	for (int i = 1; i <= gpGlobals->maxClients; i++)
+	{
+		CBasePlayer *pPlayer = UTIL_PlayerByIndex(i);
+		if (!UTIL_IsValidPlayer(pPlayer) || pPlayer == this || !pPlayer->IsAlive() || !pPlayer->IsBot()
+			|| BotRelationship(pPlayer) != BOT_ENEMY)
+			continue;
+		CCSBot *pA = static_cast<CCSBot *>(pPlayer);
+		CBasePlayer *pB = pA->GetEnemy();
+		if (!pA->IsAttacking() || !pB || pB == this || !pB->IsAlive() || BotRelationship(pB) != BOT_ENEMY)
+			continue;
+		Vector mid = (pA->pev->origin + pB->pev->origin) * 0.5f;
+		float d = (mid - pev->origin).Length();
+		if (d > 500.0f && d < fightDist)
+		{
+			fightDist = d;
+			fight = mid;
+			found = true;
+		}
+	}
+	if (!found)
+		return false;
+	float aggro = LsAggro();
+	float keen = 0.15f + 0.5f * aggro + 0.25f * LsSkill() - (LsHealth() < 75.0f ? 0.25f : 0.0f);
+	if (RANDOM_FLOAT(0.0f, 1.0f) < keen)
+	{
+		Vector closeBy = fight + LsModeDir2D(fight, pev->origin) * 350.0f;
+		Vector spot;
+		if (!LsModePickSpot(closeBy, 300.0f, &spot))
+			spot = LsModeOnMesh(closeBy);
+		if (s_lsRing.on && LsModeDist2D(spot, s_lsRing.at) > s_lsRing.r - 100.0f)
+			return false;
+		LsModeMove(spot, aggro > 0.6f);
+		m_lsModePushUntil = now + 10.0f;
+		LsWhy("mode third party: in on a fight");
+		return true;
+	}
+	if (fightDist < 1000.0f && aggro < 0.45f)
+	{
+		Vector away = LsModeOnMesh(pev->origin + LsModeDir2D(fight, pev->origin) * 500.0f);
+		if (s_lsRing.on && LsModeDist2D(away, s_lsRing.at) > s_lsRing.r - 100.0f)
+			return false;
+		LsModeMove(away, false);
+		m_lsModePushUntil = now + 6.0f;
+		LsWhy("mode third party: keeping out of it");
+		return true;
+	}
+	return false;
 }
 
 // Where its side is based: the middle of the spots its teammates hold for the mode, or else of
@@ -1630,7 +1924,7 @@ bool CCSBot::LsModePushTick(const LsModeGoal &g)
 		|| m_lsModeTarget.IsValid() || now - m_lsModeSawAt < 4.0f || LsHealth() < 70.0f || IsFollowing())
 		return false;
 	m_lsModePushAt = now + RANDOM_FLOAT(5.0f, 9.0f);
-	if (RANDOM_FLOAT(0.0f, 1.0f) >= 0.1f + 0.35f * LsAggro())
+	if (RANDOM_FLOAT(0.0f, 1.0f) >= LsModeSway(g.infl) * (0.1f + 0.35f * LsAggro()))
 		return false;
 	float leash = 2.0f * g.radius + 1200.0f;
 	CBaseEntity *pNearest = nullptr;
@@ -1665,6 +1959,9 @@ void CCSBot::LsModeGoalTick(LsModeGoal &g)
 	float dist = to.Make2D().Length();
 	bool there = dist < Q_max(g.radius * 0.8f, 48.0f) && Q_fabs(to.z) < 100.0f;
 	bool hurry = g.prio >= 80 || g.kind == LS_GOAL_EXTRACT || g.kind == LS_GOAL_FLEE;
+	// (a moment before it gets going: the less skilled react later)
+	if (now < g.startAt)
+		return;
 
 	// running from it: far enough is done
 	if (g.kind == LS_GOAL_FLEE)
@@ -1763,10 +2060,12 @@ void CCSBot::LsModeGoalTick(LsModeGoal &g)
 		if (now - m_lsModeSmokeAt < 12.0f && (m_lsModeSmokeOn - mate).IsLengthLessThan(200.0f))
 			reviveThreat = 0;
 	}
-	if (revive && g.prio < 90)
+	float sway = LsModeSway(g.infl);
+	if (revive && g.prio < 90 && sway > 0.0f)
 	{
-		// (one enemy a way off is a risk most take; the bold take one close by, or two further off)
-		int tolerance = LsAggro() > 0.65f ? 2 : 1;
+		// (one enemy a way off is a risk most take; the bold take one close by, or two further off;
+		// with its personality fully in charge, the careful take none and the boldest three)
+		int tolerance = sway >= 1.5f ? int(0.5f + 2.5f * LsAggro()) : (LsAggro() > 0.65f ? 2 : 1);
 		float away = (pGoalThing->pev->origin - pev->origin).Length();
 		if (g.phase == 1 && GetTimeSinceAttacked() < 1.0f && (LsHealth() < 50.0f || reviveThreat >= 2))
 		{
@@ -1832,6 +2131,22 @@ void CCSBot::LsModeGoalTick(LsModeGoal &g)
 			else
 				m_lsModeStillUntil = now + 0.3f;
 			SetLookAt("Loner-Strike: using", &at, PRIORITY_HIGH, 0.5f);
+			// (bought: done - holding USE on at the box bought it again a second later)
+			if (g.kind == LS_GOAL_OFFER)
+			{
+				if (m_lsModeOfferMoney < 0)
+					m_lsModeOfferMoney = m_iAccount;
+				else if (m_iAccount <= m_lsModeOfferMoney - Q_max(1, m_lsModeOfferCost / 2))
+				{
+					LsModeClearGoals(g.kind, 0);
+					LsWhy("mode offer: bought");
+					return;
+				}
+			}
+			// (the bench upgrades the gun in hand: the main gun out first)
+			if (g.kind == LS_GOAL_OFFER && m_lsModeOfferKind == LS_OFFER_BENCH && m_rgpPlayerItems[PRIMARY_WEAPON_SLOT]
+				&& !(m_pActiveItem && m_pActiveItem == m_rgpPlayerItems[PRIMARY_WEAPON_SLOT]))
+				EquipBestWeapon(true);
 			UseEnvironment();
 			m_lsModePressed |= 2;
 			return;
@@ -1912,6 +2227,7 @@ bool CCSBot::LsModePickSpot(const Vector &center, float radius, Vector *out)
 	});
 
 	float bestScore = -1.0f;
+	float skill = LsSkill();
 	auto consider = [&](const Vector &pos, bool cover) {
 		if (LsModeDist2D(pos, center) > radius || Q_fabs(pos.z - center.z) > 250.0f)
 			return;
@@ -1920,7 +2236,9 @@ bool CCSBot::LsModePickSpot(const Vector &center, float radius, Vector *out)
 		float apart = 500.0f;
 		for (int i = 0; i < nTaken; i++)
 			apart = Q_min(apart, LsModeDist2D(pos, taken[i]));
-		float score = apart / 500.0f + (cover ? 0.35f : 0.0f) + RANDOM_FLOAT(0.0f, 0.5f) - LsModeDist2D(pos, pev->origin) / 3000.0f;
+		// (the skilled pick the covered spots, the rest more by chance)
+		float score = apart / 500.0f + (cover ? 0.15f + 0.4f * skill : 0.0f) + RANDOM_FLOAT(0.0f, 0.25f + 0.5f * (1.0f - skill))
+			- LsModeDist2D(pos, pev->origin) / 3000.0f;
 		if (score > bestScore)
 		{
 			bestScore = score;
@@ -1974,13 +2292,13 @@ void CCSBot::LsModeStationTick(LsModeGoal &g, float dist)
 	if (!m_repathTimer.IsElapsed())
 		return;
 
-	float aggro = LsAggro();
-	float hold = quiet ? RANDOM_FLOAT(5.0f, 9.0f) : RANDOM_FLOAT(5.0f, 9.0f) * (0.7f + 0.6f * (1.0f - aggro));
+	float aggro = LsAggro(), sway = LsModeSway(g.infl);
+	float hold = quiet ? RANDOM_FLOAT(5.0f, 9.0f) : RANDOM_FLOAT(5.0f, 9.0f) * (1.0f + sway * (0.6f * (1.0f - aggro) - 0.3f));
 	if (LsStyle() == LS_STYLE_CAMPER && !quiet)
-		hold *= 1.5f;
+		hold *= 1.0f + 0.5f * sway;
 
 	// between waves, now and then: off with a person on its side for a bit
-	if (quiet && !tight && dist < leash && RANDOM_FLOAT(0.0f, 1.0f) < 0.25f * LsTeamwork())
+	if (quiet && !tight && dist < leash && RANDOM_FLOAT(0.0f, 1.0f) < 0.25f * sway * LsTeamwork())
 	{
 		CBasePlayer *pHuman = nullptr;
 		LsForTeammates(this, [&](CBasePlayer *pPlayer) {
@@ -2112,8 +2430,9 @@ static void LsModeStatus()
 		{
 			const CCSBot::LsModeGoal &goal = pBot->LsModeGoalAt(g);
 			if (goal.kind != LS_GOAL_NONE)
-				CONSOLE_ECHO("  %d %s: %s at %.0f %.0f %.0f r %.0f prio %d%s%s\n", i, STRING(pPlayer->pev->netname), s_lsGoalNames[goal.kind],
-					goal.at.x, goal.at.y, goal.at.z, goal.radius, goal.prio, goal.care ? "" : " (not taken up)", goal.phase ? " (there)" : "");
+				CONSOLE_ECHO("  %d %s: %s at %.0f %.0f %.0f r %.0f prio %d influence %d%s%s\n", i, STRING(pPlayer->pev->netname), s_lsGoalNames[goal.kind],
+					goal.at.x, goal.at.y, goal.at.z, goal.radius, goal.prio, goal.infl < 0.0f ? -1 : int(goal.infl * 100.0f + 0.5f),
+					goal.care ? "" : " (not taken up)", goal.phase ? " (there)" : "");
 		}
 	}
 }
@@ -2154,6 +2473,9 @@ void Bot_LsModeCommand()
 	{
 		const char *phase = CMD_ARGV(2);
 		bool peace = FStrEq(what, "noenemies") ? Q_atoi(phase) != 0 : (FStrEq(phase, "loot") || FStrEq(phase, "peace"));
+		// (phase <phase> [influence]: how much each bot's own pace counts - when it notices the
+		// fight is on, how long it gears up)
+		s_lsPhaseInfl = LsModeInflArg(3) + 1.0f;
 		if (s_lsPeace && !peace)
 			s_lsPeaceEndAt = gpGlobals->time;
 		s_lsPeace = peace;
@@ -2162,25 +2484,46 @@ void Bot_LsModeCommand()
 		return;
 	}
 
-	// goal <who> <kind> <x> <y> <z> [ent] [prio] [until] [radius]
+	// heals <who> <bandages> <medkits> <drinks>: the healing items a player carries (Battle Royale)
+	if (FStrEq(what, "heals"))
+	{
+		int n = LsModeWho(CMD_ARGV(2), who, false);
+		int total = Q_atoi(CMD_ARGV(3)) + Q_atoi(CMD_ARGV(4)) + Q_atoi(CMD_ARGV(5));
+		for (int i = 0; i < n; i++)
+			s_lsHeals[who[i]] = total;
+		return;
+	}
+	// heal <who> <kind | -> [secs]: a heal started (it stands still that long) or stopped
+	if (FStrEq(what, "heal"))
+	{
+		bool stop = FStrEq(CMD_ARGV(3), "-") || !CMD_ARGV(3)[0];
+		float secs = Q_atof(CMD_ARGV(4));
+		int n = LsModeWho(CMD_ARGV(2), who, true);
+		for (int i = 0; i < n; i++)
+			static_cast<CCSBot *>(UTIL_PlayerByIndex(who[i]))->m_lsModeHealUntil = stop ? 0.0f : gpGlobals->time + Q_min(Q_max(secs, 1.0f), 15.0f);
+		return;
+	}
+
+	// goal <who> <kind> <x> <y> <z> [ent] [prio] [until] [radius] [influence]
 	if (FStrEq(what, "goal"))
 	{
 		int kind = LsModeGoalKind(CMD_ARGV(3));
 		if (kind == LS_GOAL_NONE || CMD_ARGC() < 7)
 		{
-			CONSOLE_ECHO("ls_mode goal <who> <kind> <x> <y> <z> [ent] [prio] [until] [radius]\n"
+			CONSOLE_ECHO("ls_mode goal <who> <kind> <x> <y> <z> [ent] [prio] [until] [radius] [influence 0-100]\n"
 				"  kinds: go_hold defend capture extract loot use ride investigate flee meeting\n");
 			return;
 		}
 		Vector at(LsModeArg(4), LsModeArg(5), LsModeArg(6));
 		int ent = int(LsModeArg(7)), prio = int(LsModeArg(8, 50.0f));
 		float secs = LsModeArg(9), radius = LsModeArg(10);
+		float infl = LsModeInflArg(11);
 		if (LsModeBadArgs())
 			return;
 		radius = radius > 0.0f ? LsModeRadius(radius, 16.0f) : 0.0f;
 		int n = LsModeWho(CMD_ARGV(2), who, true);
 		for (int i = 0; i < n; i++)
-			static_cast<CCSBot *>(UTIL_PlayerByIndex(who[i]))->LsModeSetGoal(kind, at, radius, ent, prio, secs);
+			static_cast<CCSBot *>(UTIL_PlayerByIndex(who[i]))->LsModeSetGoal(kind, at, radius, ent, prio, secs, infl);
 		if (n > 0)
 			s_lsModeOn = true;
 		return;
@@ -2207,9 +2550,10 @@ void Bot_LsModeCommand()
 		}
 		Vector at(LsModeArg(4), LsModeArg(5), LsModeArg(6));
 		int ent = int(LsModeArg(7)), cost = int(LsModeArg(8)), order = int(LsModeArg(9));
+		float infl = LsModeInflArg(10);
 		if (!kind || CMD_ARGC() < 9 || LsModeBadArgs())
 		{
-			CONSOLE_ECHO("ls_mode offer <who> <perk|bench|box|trap|turret> <x> <y> <z> <ent> <cost> [order]\n");
+			CONSOLE_ECHO("ls_mode offer <who> <perk|bench|box|trap|turret> <x> <y> <z> <ent> <cost> [order] [influence 0-100]\n");
 			return;
 		}
 		for (int i = 0; i < n; i++)
@@ -2234,6 +2578,7 @@ void Bot_LsModeCommand()
 			pSlot->cost = cost;
 			pSlot->order = order;
 			pSlot->nextTry = nextTry;
+			pSlot->infl = infl;
 		}
 		if (n > 0)
 			s_lsModeOn = true;
@@ -2348,9 +2693,13 @@ void Bot_LsModeCommand()
 	{
 		const char *name = CMD_ARGV(3);
 		int layer = FStrEq(name, "below") ? 1 : FStrEq(name, "high") ? 2 : FStrEq(name, "surface") ? 0 : -1;
+		float infl = LsModeInflArg(4);
 		int n = LsModeWho(CMD_ARGV(2), who, false);
 		for (int i = 0; i < n; i++)
+		{
 			s_lsLayer[who[i]] = layer;
+			s_lsLayerInfl[who[i]] = infl + 1.0f;
+		}
 		return;
 	}
 	// role <who> <role | ->
@@ -2428,5 +2777,5 @@ void Bot_LsModeCommand()
 		return;
 	}
 
-	CONSOLE_ECHO("ls_mode: reset set status goal goal_clear avoid attract forget block zone zone_clear role friend foe enemyclass enemyclass_clear\n");
+	CONSOLE_ECHO("ls_mode: reset set status phase nobuy goal goal_clear offer offer_clear avoid attract forget block zone zone_clear layer role friend foe enemyclass enemyclass_clear heals heal\n");
 }
