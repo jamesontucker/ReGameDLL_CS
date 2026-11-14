@@ -32,6 +32,11 @@
 #include "precompiled.h"
 #ifndef _WIN32
 #include <sys/time.h>
+#include <signal.h>
+#include <execinfo.h>
+#include <dlfcn.h>
+#include <fcntl.h>
+#include <sys/ucontext.h>
 #endif
 #include <climits>
 
@@ -446,12 +451,95 @@ static LONG WINAPI LsUnhandled(EXCEPTION_POINTERS *ep)
 }
 #endif
 
+#ifndef _WIN32
+// A crash on Linux: the signal, the address, where (module and function: the Linux cs.so keeps
+// its symbols) and the call stack, with the watchdog's marks, to ls_crash.log; then the signal
+// goes on to whoever handled it before (the engine's own handler, or the default: a core).
+static struct sigaction s_crashOld[32];
+
+static void LsCrashWrite(int fd, const char *text, int len)
+{
+	ssize_t r = write(fd, text, len);
+	(void)r;
+}
+
+static void LsCrashSignal(int sig, siginfo_t *info, void *ctx)
+{
+	static volatile int s_written = 0;
+	if (++s_written <= 3 && s_watchPath[0])
+	{
+		char path[260];
+		Q_strlcpy(path, s_watchPath);
+		char *slash = Q_strrchr(path, '/');
+		Q_strlcpy(slash ? slash + 1 : path, "ls_crash.log", sizeof(path) - (slash ? (slash + 1 - path) : 0));
+		int fd = open(path, O_WRONLY | O_CREAT | O_APPEND, 0644);
+		if (fd >= 0)
+		{
+			char line[512];
+			void *eip = nullptr;
+#if defined(REG_EIP)
+			eip = (void *)((ucontext_t *)ctx)->uc_mcontext.gregs[REG_EIP];
+#endif
+			time_t now = time(nullptr);
+			int n = Q_snprintf(line, sizeof(line), "%ssignal %d at %p (address %p)\n", ctime(&now), sig, eip, info ? info->si_addr : nullptr);
+			LsCrashWrite(fd, line, n);
+			Dl_info di;
+			if (eip && dladdr(eip, &di))
+			{
+				n = Q_snprintf(line, sizeof(line), "where: %s (%s+0x%lx), module base %p\n", di.dli_fname ? di.dli_fname : "?", di.dli_sname ? di.dli_sname : "?",
+					(unsigned long)((char *)eip - (char *)(di.dli_saddr ? di.dli_saddr : di.dli_fbase)), di.dli_fbase);
+				LsCrashWrite(fd, line, n);
+			}
+			void *frames[48];
+			int count = backtrace(frames, 48);
+			LsCrashWrite(fd, "stack (newest first):\n", 22);
+			backtrace_symbols_fd(frames, count, fd);
+			LsCrashWrite(fd, "last marks:\n", 12);
+			unsigned next = s_watchNext;
+			unsigned marks = (next < LS_WATCH_MARKS) ? next : LS_WATCH_MARKS;
+			for (unsigned k = next - marks; k != next; k++)
+			{
+				const LsWatchMark &m = s_watchMarks[k % LS_WATCH_MARKS];
+				n = Q_snprintf(line, sizeof(line), "  %10.2f  %-28s %d\n", m.time, m.where ? m.where : "?", m.ent);
+				LsCrashWrite(fd, line, n);
+			}
+			n = Q_snprintf(line, sizeof(line), "  (last text: %s)\n\n", s_watchText);
+			LsCrashWrite(fd, line, n);
+			close(fd);
+		}
+	}
+	// on to the handler before ours (or the default), as if we weren't here
+	sigaction(sig, &s_crashOld[sig], nullptr);
+	raise(sig);
+}
+
+static void LsCrashSignalsInstall()
+{
+	struct sigaction sa;
+	Q_memset(&sa, 0, sizeof(sa));
+	sa.sa_sigaction = LsCrashSignal;
+	sa.sa_flags = SA_SIGINFO | SA_RESETHAND;
+	sigemptyset(&sa.sa_mask);
+	const int sigs[] = { SIGSEGV, SIGBUS, SIGFPE, SIGILL, SIGABRT };
+	for (int sig : sigs)
+	{
+		struct sigaction old;
+		if (sigaction(sig, nullptr, &old) == 0 && old.sa_sigaction == LsCrashSignal)
+			continue;
+		if (sigaction(sig, &sa, &old) == 0)
+			s_crashOld[sig] = old;
+	}
+}
+#endif
+
 // (each map: the engine and Steam's crash handler may have set their own filter since)
 void LsCrashQuietInstall()
 {
 #ifdef _WIN32
 	if (IS_DEDICATED_SERVER() && ls_crash_quiet.value > 0.0f)
 		SetUnhandledExceptionFilter(LsUnhandled);
+#else
+	LsCrashSignalsInstall();
 #endif
 }
 
