@@ -134,6 +134,7 @@ struct LsCreatureType
 	float spread;			// ranged: degrees
 
 	float fleeHealth;		// flee below this part of its health (0 = never)
+	bool fleeHome;			// a flee heads back toward its home (where it spawned), not just away
 	int behaviour;			// LsCreatureBehaviour at home
 	float guardRadius;		// guard/wander/patrol: how far from home it goes
 	int targeting;			// LsCreatureTargeting
@@ -455,6 +456,7 @@ public:
 	int m_tier;					// 1..3 (key "tier"; 0 = 1)
 	int m_keyFriendly;			// key "friendly": 0 the type's, 1 no, 2 yes
 	int m_ownerIndex;			// key "owner": the player who placed it (its kills are theirs)
+	float m_keyFleeHp;			// key "flee_hp" + 1 (0 = the type's; flee_hp=0 = never flees, not even a passive one)
 
 	CCreatureImprov *m_improv;
 
