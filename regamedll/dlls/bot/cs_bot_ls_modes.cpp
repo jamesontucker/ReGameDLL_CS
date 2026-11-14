@@ -2399,14 +2399,23 @@ void CCSBot::LsModeGoalTick(LsModeGoal &g)
 		Vector toThing = at - pev->origin;
 		float gap = toThing.Make2D().Length();
 		bool handy = gap < 120.0f && Q_fabs(toThing.z) < 100.0f;
+		// (a revive needs it right by them - within 80 u, origin to origin, for 4 s: close in, stay)
+		if (revive)
+			handy = (pGoalThing->pev->origin - pev->origin).Length() < 70.0f;
 		if (g.phase == 1)
 		{
+			if (revive && !handy && now < g.phaseUntil && (pGoalThing->pev->origin - pev->origin).IsLengthLessThan(200.0f))
+			{
+				m_lsModeStepTo = pGoalThing->pev->origin;
+				m_lsModeStepUntil = now + 0.3f;
+				return;
+			}
 			if (now >= g.phaseUntil || !handy)
 			{
 				LsModeClearGoals(g.kind, 0);
 				return;
 			}
-			if (gap > 48.0f)
+			if (gap > (revive ? 30.0f : 48.0f))
 			{
 				m_lsModeStepTo = at;
 				m_lsModeStepUntil = now + 0.3f;
@@ -2459,6 +2468,15 @@ void CCSBot::LsModeGoalTick(LsModeGoal &g)
 				g.phaseUntil = Q_min(g.phaseUntil, g.until);
 			g.tries = 0;
 			LsWhy("mode use");
+			return;
+		}
+		// (close: straight up to where they lie now - they may have crawled from where they fell)
+		if (revive && (pGoalThing->pev->origin - pev->origin).IsLengthLessThan(300.0f) && Q_fabs(toThing.z) < 60.0f)
+		{
+			if (IsAttacking())
+				StopAttacking();
+			m_lsModeStepTo = pGoalThing->pev->origin;
+			m_lsModeStepUntil = now + 0.3f;
 			return;
 		}
 		// (far: on its way, below)
