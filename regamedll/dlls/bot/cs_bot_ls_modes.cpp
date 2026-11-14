@@ -2275,6 +2275,13 @@ void CCSBot::LsModeGoalTick(LsModeGoal &g)
 	// the goal once it's open, or they're up)
 	CBaseEntity *pGoalThing = g.ent > 0 ? (CBaseEntity *)g.thing : nullptr;
 	bool revive = (g.kind == LS_GOAL_HOLD || g.kind == LS_GOAL_USE) && pGoalThing && pGoalThing->IsPlayer();
+	// (a downed one crawls: the way there follows where they lie now)
+	if (revive && (pGoalThing->pev->origin - g.onMesh).IsLengthGreaterThan(100.0f) && LsModeIsDown(pGoalThing))
+	{
+		g.at = pGoalThing->pev->origin;
+		g.onMesh = LsModeOnMesh(g.at);
+		g.nextTry = 0.0f;
+	}
 	// (up again, or gone: nothing to revive)
 	if (revive && g.kind == LS_GOAL_USE && (!pGoalThing->IsAlive() || !LsModeIsDown(pGoalThing)))
 	{
