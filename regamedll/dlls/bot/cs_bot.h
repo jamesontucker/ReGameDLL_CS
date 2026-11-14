@@ -1765,7 +1765,7 @@ public:
 	float m_lsModeSmokeAt = -100.0f;				// its smoke for a revive, thrown then...
 	Vector m_lsModeSmokeOn;							// ...on them there
 	bool LsModePickHigh(Vector *out);				// a sightline spot on high ground
-	bool LsModePerchTick();							// high ground held a while, then the next along
+	bool LsModePerchTick(bool anyState = false);							// high ground held a while, then the next along
 	float m_lsModePerchUntil = 0.0f;				// holding its high spot till then
 	float m_lsModePerchAt = 0.0f;					// next perch decision
 	int LsModeLayerWant();							// the layer it would rather loot on (-1 anywhere: a hot dropper)
