@@ -213,6 +213,7 @@ static void LsPerfReport(double now, double span)
 static struct { double secondStart; int frames, low, good; float cap; } s_adapt;
 
 static int LsAliveCount(bool friendly = false);
+static void LsUpdateAliveCount();
 
 float LsCreatureCapNow()
 {
@@ -2004,6 +2005,10 @@ void LsCreatureUnregister(CBaseEntity *pEntity)
 
 	while (s_listCount > 0 && !s_list[s_listCount - 1])
 		s_listCount--;
+
+	// (ls_creature_alive at once: a remove sends no game event, so nothing else would bring it
+	// up to date)
+	LsUpdateAliveCount();
 }
 
 int LsCreatureCount()
@@ -2734,7 +2739,9 @@ int LsCreatureShouldCollide(edict_t *pentTouched, edict_t *pentOther)
 	if (!(pentTouched->v.flags & FL_MONSTER) || !(pentOther->v.flags & FL_MONSTER))
 		return 1;
 
-	if (FClassnameIs(pentTouched, "ls_creature") && FClassnameIs(pentOther, "ls_creature"))
+	// (only creatures on the same side: a friendly one - a bought turret, pev->team 1 - and the
+	// others block and hit each other, or a turret's shots went through every creature)
+	if (FClassnameIs(pentTouched, "ls_creature") && FClassnameIs(pentOther, "ls_creature") && pentTouched->v.team == pentOther->v.team)
 		return 0;
 
 	return 1;
