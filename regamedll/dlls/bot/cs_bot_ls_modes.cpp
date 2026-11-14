@@ -1771,7 +1771,8 @@ void CCSBot::LsModeTick()
 	if (best < 0)
 	{
 		// (gearing up, armed and a high-ground player: up to a sightline rather than more loot)
-		if (gearing && !s_lsPeace && !shooting && m_rgpPlayerItems[PRIMARY_WEAPON_SLOT] && LsModeLayerWant() == 2 && LsModePerchTick())
+		// (in the loot-up too: one who found a gun takes a high spot before the fight starts)
+		if ((gearing || s_lsPeace) && !shooting && m_rgpPlayerItems[PRIMARY_WEAPON_SLOT] && LsModeLayerWant() == 2 && LsModePerchTick())
 			return;
 		// (gearing up: off to loot rather than hunting)
 		if ((gearing || s_lsPeace) && !shooting && LsModeAttractTick(true))
