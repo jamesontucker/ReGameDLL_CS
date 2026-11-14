@@ -167,7 +167,7 @@ static int LsPerfViewCount(edict_t *host)
 	return n;
 }
 
-static const int LS_PROF_SLOTS = 64;
+static const int LS_PROF_SLOTS = 160;
 static struct { const char *name; double sum, max, frameSum; int calls; } s_prof[LS_PROF_SLOTS];
 static int s_profCount = 0;
 
