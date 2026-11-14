@@ -33,7 +33,7 @@
 
 #include "precompiled.h"
 
-cvar_t cv_ls_mode_ver = { "ls_mode_ver", "2", 0, 2.0f, nullptr };	// the plugins look for this before sending ls_mode
+cvar_t cv_ls_mode_ver = { "ls_mode_ver", "3", 0, 3.0f, nullptr };	// the plugins look for this before sending ls_mode
 
 bool g_lsModeTies = false;	// any friend / foe set (BotRelationship checks it, bot.h)
 
@@ -2571,19 +2571,20 @@ void CCSBot::LsModeGoalTick(LsModeGoal &g)
 					return;
 				}
 			}
-			// (an interactable: one press - the mode acts on the press, not on USE held - then it's done,
-			// not tried again for a while)
+			// (an interactable: USE pressed - the mode acts on a press, not on USE held - and again a moment
+			// later if nothing came of it; once the mode takes the offer back (used: cooling down, used up)
+			// the goal goes; after 2 s it's done anyway, not tried again for a while)
 			if (useOffer)
 			{
 				float since = now - m_lsModeUseStart;
-				if (since > 0.8f)
+				if (since > 2.0f)
 				{
 					LsModeOfferGiveUp(g.ent, RANDOM_FLOAT(40.0f, 70.0f));
 					LsModeClearGoals(g.kind, 0);
 					LsWhy("mode offer: used it");
 					return;
 				}
-				if (since > 0.15f && since < 0.45f)
+				if ((since > 0.15f && since < 0.45f) || (since > 1.1f && since < 1.4f))
 				{
 					UseEnvironment();
 					m_lsModePressed |= 2;
