@@ -510,6 +510,10 @@ struct Trap
 
 struct Tele { int from, to; Vector at; };
 
+// A door between two learned floors (nav generation doesn't connect through a closed door): linked,
+// and the button that opens it (a trap whose wiring moves it), if a runner can get to that button
+struct DoorLink { int from, to; EntityHandle<CBaseEntity> door; Vector at; int trap = -1; };
+
 struct Death { Vector at; int count; bool trap; float when; };
 
 static char s_map[64] = "";
@@ -529,6 +533,7 @@ static std::vector<char> s_deadly;
 static std::vector<Box> s_hurts;
 static std::vector<Trap> s_traps;
 static std::vector<Tele> s_teles;
+static std::vector<DoorLink> s_doorLinks;
 static std::vector<Death> s_deaths;
 static int s_endIdx = -1, s_startIdx = -1, s_tStartIdx = -1;
 static Vector s_end;
@@ -682,6 +687,7 @@ static void Build()
 	s_out.clear();
 	s_traps.clear();
 	s_teles.clear();
+	s_doorLinks.clear();
 	s_endIdx = s_startIdx = s_tStartIdx = -1;
 	s_course = 0.0f;
 
@@ -789,6 +795,52 @@ static void Build()
 	}
 
 	DeadlyHurts(s_hurts);
+
+	// doors in the way: a wall-type func_door / func_door_rotating (taller than a step, thin one way)
+	// with learned floor on both sides. Linked both ways; a runner opens it with its button, or waits
+	{
+		const char *doorClasses[] = { "func_door", "func_door_rotating" };
+		for (const char *cls : doorClasses)
+		{
+			CBaseEntity *pDoor = nullptr;
+			while ((pDoor = UTIL_FindEntityByClassname(pDoor, cls)) != nullptr)
+			{
+				Vector lo = pDoor->pev->absmin, hi = pDoor->pev->absmax, size = hi - lo;
+				if (size.z < 48.0f)
+					continue;	// (a floor or a step)
+				bool thinX = size.x <= 64.0f && size.x < size.y, thinY = size.y <= 64.0f && size.y < size.x;
+				if (!thinX && !thinY)
+					continue;
+				Vector mid = (lo + hi) * 0.5f;
+				float half = (thinX ? size.x : size.y) * 0.5f + 24.0f, w = thinX ? size.y : size.x;
+				for (float along = 0.0f; along <= 0.61f; along += 0.3f)
+				{
+					float off = (along == 0.0f ? 0.0f : (along < 0.4f ? -0.3f : 0.3f)) * w;
+					Vector a = mid, b = mid;
+					if (thinX) { a.x -= half; b.x += half; a.y += off; b.y += off; }
+					else { a.y -= half; b.y += half; a.x += off; b.x += off; }
+					a.z = b.z = lo.z + 24.0f;
+					CNavArea *A = TheNavAreaGrid.GetNavArea(&a), *B = TheNavAreaGrid.GetNavArea(&b);
+					if (!A || !B || A == B || Q_fabs(A->GetZ(&a) - B->GetZ(&b)) > 24.0f)
+						continue;
+					int ia = Index(A), ib = Index(B);
+					if (ia < 0 || ib < 0)
+						continue;
+					NavDirType ab = thinX ? EAST : SOUTH, ba = thinX ? WEST : NORTH;
+					if (!A->IsConnected(B, NUM_DIRECTIONS)) { A->ConnectTo(B, ab); s_out[ia].push_back(ib); }
+					if (!B->IsConnected(A, NUM_DIRECTIONS)) { B->ConnectTo(A, ba); s_out[ib].push_back(ia); }
+					DoorLink dl;
+					dl.door = pDoor;
+					dl.at = Vector(mid.x, mid.y, lo.z);
+					dl.from = ia; dl.to = ib; s_doorLinks.push_back(dl);
+					dl.from = ib; dl.to = ia; s_doorLinks.push_back(dl);
+					break;
+				}
+			}
+		}
+		if (!s_doorLinks.empty())
+			CONSOLE_ECHO("Loner-Strike deathrun: %d doors linked across\n", int(s_doorLinks.size() / 2));
+	}
 
 	// gaps a running jump clears, linked on this nav too (a nav learned without course learning -
 	// or by hand - has none): from every edge of every area, every step along it, the jump check
@@ -921,6 +973,28 @@ static void Build()
 			s_traps.push_back(t);
 		}
 	}
+	// each door's opener: a button whose wiring moves it, that runners can get to
+	for (DoorLink &dl : s_doorLinks)
+	{
+		CBaseEntity *pDoor = dl.door;
+		if (!pDoor)
+			continue;
+		Vector dm = (pDoor->pev->absmin + pDoor->pev->absmax) * 0.5f;
+		float bestD = 1e9f;
+		for (size_t ti = 0; ti < s_traps.size(); ti++)
+		{
+			const Trap &t = s_traps[ti];
+			if (t.spotIdx < 0 || s_prog[t.spotIdx] < 0.0f || !InTrap(t, dm, 4.0f))
+				continue;
+			float d = (t.btn - dl.at).Length();
+			if (d < bestD)
+			{
+				bestD = d;
+				dl.trap = int(ti);
+			}
+		}
+	}
+
 	s_ready = true;
 	int reach = 0;
 	for (const Trap &t : s_traps)
@@ -982,6 +1056,7 @@ struct Runner
 	int passedTrap = -1;
 	float floorWaitSince = 0.0f;	// waiting for a floor that isn't there
 	float teleWaitSince = 0.0f;		// standing in a teleport that doesn't send it anywhere
+	int openDoor = -1;				// a shut door on its way (s_doorLinks): its button, or a wait
 	int gaveUpArea = -1;			// the floor it last gave up on (another way) and when: back at it soon
 	float gaveUpAt = -99.0f;		// after means there is no other way
 	Vector gaveUpPos;
@@ -1357,6 +1432,64 @@ bool CCSBot::LsDrTick()
 		else
 			return true;
 	}
+	// a shut door on the way: the button that opens it (one runner at a time: the nearest), else a wait
+	if (r.openDoor >= int(s_doorLinks.size()))
+		r.openDoor = -1;
+	if (r.openDoor >= 0)
+	{
+		const DoorLink &dl = s_doorLinks[r.openDoor];
+		if (!DoorShut(dl))
+		{
+			r.openDoor = -1;
+			r.holdUntil = 0.0f;
+			r.moveState = -1.0f;	// (back on the course)
+			LsWhy("deathrun: door open");
+		}
+		else
+		{
+			bool presser = false;
+			if (dl.trap >= 0 && ButtonReady(s_traps[dl.trap]))
+			{
+				const Trap &t = s_traps[dl.trap];
+				float mine = (pev->origin - t.spot).Length();
+				presser = true;
+				for (int c = 1; c <= gpGlobals->maxClients && presser; c++)
+				{
+					CBasePlayer *p = UTIL_PlayerByIndex(c);
+					if (p && p != this && p->IsAlive() && p->m_iTeam == CT && (p->pev->origin - t.spot).Length() < mine - 1.0f)
+						presser = false;
+				}
+				if (presser)
+				{
+					CBaseEntity *pBtn = t.button;
+					Vector o = pev->origin, lo = pBtn->pev->absmin, hi = pBtn->pev->absmax;
+					Vector gap(Q_max(Q_max(lo.x - o.x, 0.0f), o.x - hi.x), Q_max(Q_max(lo.y - o.y, 0.0f), o.y - hi.y), Q_max(Q_max(lo.z - o.z, 0.0f), o.z - hi.z));
+					if (gap.Length() > 52.0f)
+					{
+						if (r.moveState != m_stateTimestamp || !HasPath())
+						{
+							MoveTo(&t.spot, FASTEST_ROUTE);
+							r.moveState = m_stateTimestamp;
+						}
+						LsWhy("deathrun: to the door's button");
+						return false;
+					}
+					SetLookAt("Loner-Strike: door button", &t.btn, PRIORITY_HIGH, 0.5f, false, 3.0f);
+					UTIL_MakeVectors(pev->v_angle);
+					Vector to = (t.btn - (pev->origin + pev->view_ofs)).Normalize();
+					if (DotProduct(to, gpGlobals->v_forward) > 0.9f)
+						UseEnvironment();
+					ClearMovement();
+					LsWhy("deathrun: opens the door");
+					return true;
+				}
+			}
+			r.holdUntil = Q_max(r.holdUntil, now + 0.3f);
+			r.holdLook = dl.at;
+			LsWhy("deathrun: waits for the door");
+		}
+	}
+
 	if (now < r.holdUntil)
 		return true;
 
@@ -1697,6 +1830,19 @@ void CCSBot::LsDrPostUpdate()
 	}
 }
 
+// Is the door of this link in the way right now (a hull between the two floors hits it)
+static bool DoorShut(const DoorLink &dl)
+{
+	CBaseEntity *pDoor = dl.door;
+	if (!pDoor || dl.from < 0 || dl.to < 0 || size_t(dl.from) >= s_areas.size() || size_t(dl.to) >= s_areas.size())
+		return false;
+	Vector a = *s_areas[dl.from]->GetCenter() + Vector(0, 0, HalfHumanHeight + 4.0f);
+	Vector b = *s_areas[dl.to]->GetCenter() + Vector(0, 0, HalfHumanHeight + 4.0f);
+	TraceResult tr;
+	UTIL_TraceHull(a, b, ignore_monsters, human_hull, nullptr, &tr);
+	return tr.flFraction < 1.0f && tr.pHit == pDoor->edict();
+}
+
 // In path movement: the next stretch crosses a gap (a jump, armed for LsDrDrive), goes through a
 // teleport (walk into it), or onto a floor that isn't there now (wait at the edge)
 static bool LsDrSeparated(const CNavArea *a, const CNavArea *b)
@@ -1925,6 +2071,22 @@ void CCSBot::LsDrPathTick()
 			}
 		if (r.tele)
 			return;
+		// a door between the two: open, walk through; shut, its button or a wait (LsDrTick)
+		{
+			bool door = false;
+			for (size_t k = 0; k < s_doorLinks.size(); k++)
+			{
+				const DoorLink &dl = s_doorLinks[k];
+				if (dl.from != ia || dl.to != ib)
+					continue;
+				door = true;
+				if (DoorShut(dl) && (pev->origin - dl.at).Make2D().IsLengthLessThan(400.0f))
+					r.openDoor = int(k);
+				break;
+			}
+			if (door)
+				return;
+		}
 		// a gap: run at the edge, jump, land a little way in
 		Vector2D d;
 		DirectionToVector2D((NavDirType)to.how, &d);
