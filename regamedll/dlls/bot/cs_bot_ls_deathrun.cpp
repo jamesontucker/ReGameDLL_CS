@@ -2138,6 +2138,26 @@ void CCSBot::LsDrPathTick()
 			continue;
 		if (m_lastKnownArea == B)
 			break;
+		// a door between the two (a linked door, whichever pair of areas the path crosses it by): shut, its
+		// button or a wait (LsDrTick)
+		if (!s_doorLinks.empty() && (pev->origin - *B->GetCenter()).Make2D().IsLengthLessThan(400.0f))
+		{
+			Vector a = *A->GetCenter() + Vector(0, 0, HalfHumanHeight + 4.0f), b = *B->GetCenter() + Vector(0, 0, HalfHumanHeight + 4.0f);
+			TraceResult tr;
+			UTIL_TraceHull(a, b, ignore_monsters, human_hull, nullptr, &tr);
+			if (tr.flFraction < 1.0f && tr.pHit)
+			{
+				for (size_t k = 0; k < s_doorLinks.size(); k++)
+				{
+					CBaseEntity *pDoor = s_doorLinks[k].door;
+					if (pDoor && pDoor->edict() == tr.pHit)
+					{
+						r.openDoor = int(k);
+						return;
+					}
+				}
+			}
+		}
 		// (a ledge a jump climbs: touching, but higher than a step - jumped like a gap, tucked)
 		bool climb = false;
 		if (!LsDrSeparated(A, B))
@@ -2220,26 +2240,6 @@ void CCSBot::LsDrPathTick()
 			}
 		if (r.tele)
 			return;
-		// a door between the two (a linked door, whichever pair of areas the path crosses it by): shut, its
-		// button or a wait (LsDrTick)
-		if (!s_doorLinks.empty() && (pev->origin - *B->GetCenter()).Make2D().IsLengthLessThan(400.0f))
-		{
-			Vector a = *A->GetCenter() + Vector(0, 0, HalfHumanHeight + 4.0f), b = *B->GetCenter() + Vector(0, 0, HalfHumanHeight + 4.0f);
-			TraceResult tr;
-			UTIL_TraceHull(a, b, ignore_monsters, human_hull, nullptr, &tr);
-			if (tr.flFraction < 1.0f && tr.pHit)
-			{
-				for (size_t k = 0; k < s_doorLinks.size(); k++)
-				{
-					CBaseEntity *pDoor = s_doorLinks[k].door;
-					if (pDoor && pDoor->edict() == tr.pHit)
-					{
-						r.openDoor = int(k);
-						return;
-					}
-				}
-			}
-		}
 		// a gap: run at the edge, jump, land a little way in
 		Vector2D d;
 		DirectionToVector2D((NavDirType)to.how, &d);
