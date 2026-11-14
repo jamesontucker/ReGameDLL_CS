@@ -513,6 +513,7 @@ struct Tele { int from, to; Vector at; };
 // A door between two learned floors (nav generation doesn't connect through a closed door): linked,
 // and the button that opens it (a trap whose wiring moves it), if a runner can get to that button
 struct DoorLink { int from, to; EntityHandle<CBaseEntity> door; Vector at; int trap = -1; };
+static bool DoorShut(const DoorLink &dl);
 
 struct Death { Vector at; int count; bool trap; float when; };
 
