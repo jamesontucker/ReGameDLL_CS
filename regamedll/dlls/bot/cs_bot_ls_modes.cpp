@@ -1941,6 +1941,10 @@ void CCSBot::LsModeStationTick(LsModeGoal &g, float dist)
 		m_lsModeHideState = m_stateTimestamp;
 		g.phaseUntil = now + hold + dist / 180.0f;
 		g.tries = 0;
+		// (a hide that ends at once - its path failed on the way, the bot dropped to idle - isn't
+		// tried again for a moment: a crowd at the gates otherwise had every bot pathing twice a
+		// second, the most costly thing the bots did in Last Stand)
+		g.nextTry = now + 1.5f;
 		LsWhy("mode station");
 		return;
 	}
