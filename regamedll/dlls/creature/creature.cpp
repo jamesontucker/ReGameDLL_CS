@@ -80,6 +80,7 @@ static volatile unsigned s_watchNext = 0;
 static volatile unsigned s_watchFrames = 0;
 static char s_watchPath[260] = "";
 static char s_watchText[64] = "";		// the newest LsMarkText
+static char s_crashMap[64] = "";		// the map, for a crash's entry in ls_crash.log
 
 void LsMarkText(const char *text)
 {
@@ -387,6 +388,14 @@ static LONG WINAPI LsCrashHandler(EXCEPTION_POINTERS *ep)
 		&& code != EXCEPTION_INT_DIVIDE_BY_ZERO && code != EXCEPTION_PRIV_INSTRUCTION)
 		return EXCEPTION_CONTINUE_SEARCH;
 
+	// the same fault again (the unhandled-exception filter after this vectored handler): written once
+	static DWORD s_lastEip = 0, s_lastEsp = 0, s_lastCode = 0;
+	if (ep->ContextRecord->Eip == s_lastEip && ep->ContextRecord->Esp == s_lastEsp && code == s_lastCode)
+		return EXCEPTION_CONTINUE_SEARCH;
+	s_lastEip = ep->ContextRecord->Eip;
+	s_lastEsp = ep->ContextRecord->Esp;
+	s_lastCode = code;
+
 	if (InterlockedIncrement(&s_written) > 3 || !s_watchPath[0])
 		return EXCEPTION_CONTINUE_SEARCH;
 
@@ -404,6 +413,8 @@ static LONG WINAPI LsCrashHandler(EXCEPTION_POINTERS *ep)
 	fprintf(f, "%sexception 0x%08lx at 0x%08lx (first-chance; the game may still handle it)\n", ctime(&now), (unsigned long)code, (unsigned long)eip);
 	if (code == EXCEPTION_ACCESS_VIOLATION && ep->ExceptionRecord->NumberParameters >= 2)
 		fprintf(f, "  %s 0x%08lx\n", ep->ExceptionRecord->ExceptionInformation[0] ? "writing" : "reading", (unsigned long)ep->ExceptionRecord->ExceptionInformation[1]);
+	// for the app's crash list (one entry per crash, in UTC, with the map)
+	fprintf(f, "unix time: %lld\nmap: %s\n", (long long)now, s_crashMap[0] ? s_crashMap : "?");
 
 	fprintf(f, "where:\n");
 	LsCrashModule(f, eip);
@@ -484,6 +495,9 @@ static void LsCrashSignal(int sig, siginfo_t *info, void *ctx)
 #endif
 			time_t now = time(nullptr);
 			int n = Q_snprintf(line, sizeof(line), "%ssignal %d at %p (address %p)\n", ctime(&now), sig, eip, info ? info->si_addr : nullptr);
+			LsCrashWrite(fd, line, n);
+			// for the app's crash list (one entry per crash, in UTC, with the map)
+			n = Q_snprintf(line, sizeof(line), "unix time: %lld\nmap: %s\n", (long long)now, s_crashMap[0] ? s_crashMap : "?");
 			LsCrashWrite(fd, line, n);
 			Dl_info di;
 			if (eip && dladdr(eip, &di))
@@ -1960,6 +1974,7 @@ void LsCreaturesServerActivate()
 	LsPrecacheLate();
 	s_mapRunning = true;
 	Q_memset(&s_adapt, 0, sizeof(s_adapt));
+	Q_strlcpy(s_crashMap, STRING(gpGlobals->mapname));
 	LsCrashQuietInstall();
 }
 
