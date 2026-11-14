@@ -1734,7 +1734,8 @@ void CCSBot::LsModeGoalTick(LsModeGoal &g)
 	}
 	if (revive && g.prio < 90)
 	{
-		int tolerance = LsAggro() > 0.65f ? 1 : 0;
+		// (one enemy a way off is a risk most take; the bold take one close by, or two further off)
+		int tolerance = LsAggro() > 0.65f ? 2 : 1;
 		float away = (pGoalThing->pev->origin - pev->origin).Length();
 		if (g.phase == 1 && GetTimeSinceAttacked() < 1.0f && (LsHealth() < 50.0f || reviveThreat >= 2))
 		{
