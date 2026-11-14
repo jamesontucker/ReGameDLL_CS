@@ -1165,10 +1165,12 @@ bool CCSBot::LsModeOfferTick()
 		{
 			if (o.kind == LS_OFFER_PERK)
 				rank = 10 + o.order;
+			// (the gun before a turret: the mode offers the bench once the perks are in, and a $2500
+			// turret taken first left no money for it - bots never upgraded at a bench)
+			else if (o.kind == LS_OFFER_BENCH)
+				rank = 30;
 			else if (o.kind == LS_OFFER_TURRET)
 				rank = 40;
-			else if (o.kind == LS_OFFER_BENCH)
-				rank = 50;
 			else if (o.kind == LS_OFFER_BOX)
 			{
 				// (now and then: a roll a minute or so, the greedier the likelier)
@@ -1187,6 +1189,7 @@ bool CCSBot::LsModeOfferTick()
 	if (!pBest)
 		return false;
 	pBest->nextTry = now + 20.0f;
+	m_lsModeOfferKind = pBest->kind;
 	Vector at = pBest->at;
 	if (pBest->kind == LS_OFFER_TURRET)
 	{
@@ -1875,6 +1878,10 @@ void CCSBot::LsModeGoalTick(LsModeGoal &g)
 			else
 				m_lsModeStillUntil = now + 0.3f;
 			SetLookAt("Loner-Strike: using", &at, PRIORITY_HIGH, 0.5f);
+			// (the bench upgrades the gun in hand: the main gun out first)
+			if (g.kind == LS_GOAL_OFFER && m_lsModeOfferKind == LS_OFFER_BENCH && m_rgpPlayerItems[PRIMARY_WEAPON_SLOT]
+				&& !(m_pActiveItem && m_pActiveItem == m_rgpPlayerItems[PRIMARY_WEAPON_SLOT]))
+				EquipBestWeapon(true);
 			UseEnvironment();
 			m_lsModePressed |= 2;
 			return;

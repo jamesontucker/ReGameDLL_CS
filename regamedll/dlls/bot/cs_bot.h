@@ -1727,6 +1727,7 @@ public:
 	bool LsModeDowned() const;						// knocked down by the mode (no-target, lying)
 	void LsModeDownTick();							// down: crawl to a teammate or cover, still for a revive
 	float m_lsModeDownAt = 0.0f;
+	int m_lsModeOfferKind = 0;						// the offer it's on its way to use (LS_OFFER_*)
 	bool LsModeOfferTick();							// a perk, the bench, the box, the trap, a turret: when to take one
 	float m_lsModeOfferAt = 0.0f;
 	float m_lsModeReviveBackUntil = 0.0f;			// backed off a revive under fire till then
