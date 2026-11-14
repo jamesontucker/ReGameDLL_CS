@@ -3031,7 +3031,17 @@ void Bot_LsModeCommand()
 				{
 					LsModeOffer &o = s_lsOffer[who[i]][k];
 					if (o.kind != LS_OFFER_NONE && (!CMD_ARGV(3)[0] || (kind && o.kind == kind) || (ent && o.ent == ent)))
+					{
+						// (an interactable taken back - someone used it, it's cooling down - and a bot on its way
+						// to it turns back)
+						if (o.kind == LS_OFFER_USE && o.ent > 0)
+						{
+							CCSBot *pBot = static_cast<CCSBot *>(UTIL_PlayerByIndex(who[i]));
+							if (pBot)
+								pBot->LsModeClearGoals(LS_GOAL_OFFER, o.ent);
+						}
 						o = LsModeOffer();
+					}
 				}
 			return;
 		}
