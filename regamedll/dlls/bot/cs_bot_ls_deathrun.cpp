@@ -1184,6 +1184,7 @@ struct Runner
 	float floorWaitSince = 0.0f;	// waiting for a floor that isn't there
 	float teleWaitSince = 0.0f;		// standing in a teleport that doesn't send it anywhere
 	int openDoor = -1;				// a shut door on its way (s_doorLinks): its button, or a wait
+	float pressSince = 0.0f;		// at that door's button since
 	int gaveUpArea = -1;			// the floor it last gave up on (another way) and when: back at it soon
 	float gaveUpAt = -99.0f;		// after means there is no other way
 	Vector gaveUpPos;
@@ -1569,6 +1570,7 @@ bool CCSBot::LsDrTick()
 		if (!DoorShut(dl))
 		{
 			r.openDoor = -1;
+			r.pressSince = 0.0f;
 			r.holdUntil = 0.0f;
 			r.moveState = -1.0f;	// (back on the course)
 			LsWhy("deathrun: door open");
@@ -1605,10 +1607,26 @@ bool CCSBot::LsDrTick()
 					SetLookAt("Loner-Strike: door button", &t.btn, PRIORITY_HIGH, 0.5f, false, 3.0f);
 					UTIL_MakeVectors(pev->v_angle);
 					Vector to = (t.btn - (pev->origin + pev->view_ofs)).Normalize();
-					if (DotProduct(to, gpGlobals->v_forward) > 0.9f)
-						UseEnvironment();
+					bool aimed = DotProduct(to, gpGlobals->v_forward) > 0.97f;
+					if (r.pressSince <= 0.0f)
+						r.pressSince = now;
+					// (use it; a button that takes damage and hasn't gone after a second of that - shot to
+					// press, or something in front of it in the way of use - gets shot)
+					if (pBtn->pev->takedamage != DAMAGE_NO && now - r.pressSince > 1.0f)
+					{
+						if (IsUsingKnife())
+							EquipPistol();
+						if (aimed)
+							PrimaryAttack();
+						LsWhy("deathrun: shoots the door's button");
+					}
+					else
+					{
+						if (aimed || DotProduct(to, gpGlobals->v_forward) > 0.9f)
+							UseEnvironment();
+						LsWhy("deathrun: opens the door");
+					}
 					ClearMovement();
-					LsWhy("deathrun: opens the door");
 					return true;
 				}
 			}
