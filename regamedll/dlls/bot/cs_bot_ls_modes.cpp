@@ -2259,7 +2259,7 @@ void CCSBot::LsModeGoalTick(LsModeGoal &g)
 		// with its personality fully in charge, the careful take none and the boldest three)
 		// (bravery: the bold and the team players go in under more; a careful loner waits)
 		float brave = 0.5f * LsAggro() + 0.5f * LsTeamwork();
-		int tolerance = sway >= 1.5f ? int(0.5f + 2.5f * brave) : int(0.3f + 2.4f * brave);
+		int tolerance = sway >= 1.5f ? int(0.5f + 2.5f * brave) : int(0.6f + 2.4f * brave);
 		float away = (pGoalThing->pev->origin - pev->origin).Length();
 		// (waited long with them bleeding out: one watching from a way off is a risk the braver take
 		// now - from cover by them, never into more than that)
@@ -2269,7 +2269,7 @@ void CCSBot::LsModeGoalTick(LsModeGoal &g)
 			m_lsModeReviveWaitFrom = now;
 		}
 		if (reviveThreat > tolerance && reviveThreat <= tolerance + 1 && reviveThreat <= 2 && away < 450.0f
-			&& now - m_lsModeReviveWaitFrom > 25.0f - 15.0f * brave && LsHealth() >= 50.0f)
+			&& now - m_lsModeReviveWaitFrom > 16.0f - 10.0f * brave && LsHealth() >= 50.0f)
 			tolerance = reviveThreat;
 		if (g.phase == 1 && GetTimeSinceAttacked() < 1.0f && (LsHealth() < 50.0f || reviveThreat >= 2))
 		{
@@ -2306,8 +2306,12 @@ void CCSBot::LsModeGoalTick(LsModeGoal &g)
 					return;
 				}
 			}
-			if (m_lsWhy == nullptr || Q_strcmp(m_lsWhy, "mode revive: waiting for it to clear"))
-				LsWhy("mode revive: waiting for it to clear");
+			// (the label says how much is about: 1 one enemy watching from a way off, 2 one close or two)
+			static const char *const s_wait[] = { "mode revive: waiting for it to clear (1)", "mode revive: waiting for it to clear (2)",
+				"mode revive: waiting for it to clear (3+)" };
+			const char *why = s_wait[Q_min(2, Q_max(1, reviveThreat) - 1)];
+			if (m_lsWhy != why)
+				LsWhy(why);
 			return;
 		}
 	}
