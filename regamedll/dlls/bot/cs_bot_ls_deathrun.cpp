@@ -583,12 +583,10 @@ static bool SeamWalk(CNavArea *A, CNavArea *B)
 {
 	const Extent *ea = A->GetExtent(), *eb = B->GetExtent();
 	float dx = Q_max(eb->lo.x - ea->hi.x, ea->lo.x - eb->hi.x), dy = Q_max(eb->lo.y - ea->hi.y, ea->lo.y - eb->hi.y);
-	if (dx > 2.0f || dy > 2.0f || (dx > 0.5f && dy > 0.5f) || A->IsConnected(B, NUM_DIRECTIONS))
+	if (dx > 2.0f || dy > 2.0f || A->IsConnected(B, NUM_DIRECTIONS))
 		return false;
-	// (they must share a stretch of edge at least a player wide)
-	float ox = Q_min(ea->hi.x, eb->hi.x) - Q_max(ea->lo.x, eb->lo.x), oy = Q_min(ea->hi.y, eb->hi.y) - Q_max(ea->lo.y, eb->lo.y);
-	if (Q_max(ox, oy) < 24.0f)
-		return false;
+	// (a shared stretch of edge, or only a corner - a hole in the nav beside them leaves the way on
+	// diagonal: the hull trace below decides whether a player gets across)
 	Vector cb = *B->GetCenter(), pa, pb;
 	A->GetClosestPointOnArea(&cb, &pa);
 	B->GetClosestPointOnArea(&pa, &pb);
@@ -944,8 +942,8 @@ static void Build()
 				CNavArea *B = s_areas[j];
 				const Extent *eb = B->GetExtent();
 				float dx = Q_max(eb->lo.x - ea->hi.x, ea->lo.x - eb->hi.x), dy = Q_max(eb->lo.y - ea->hi.y, ea->lo.y - eb->hi.y);
-				if (dx > 4.0f || dy > 4.0f || (dx > 0.5f && dy > 0.5f))
-					continue;	// (only side by side, not corner to corner)
+				if (dx > 4.0f || dy > 4.0f)
+					continue;	// (touching: side by side, or corner to corner for a seam)
 				Vector dir2;
 				if (LedgeClimb(A, B, &dir2, nullptr) != 0)
 				{
