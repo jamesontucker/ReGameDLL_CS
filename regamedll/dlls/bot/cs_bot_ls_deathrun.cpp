@@ -535,6 +535,77 @@ static std::vector<Trap> s_traps;
 static std::vector<Tele> s_teles;
 static std::vector<DoorLink> s_doorLinks;
 
+// A ledge a jump climbs from A onto B (touching areas): 0 if it does, else which check fails
+// (1 not side by side, 2 not 20-56 up, 3 already linked, 4 deadly on top, 5 no room on top, 6 the way up blocked);
+// dir: the way across. Used at map start and by "ls_dr ledge".
+static int LedgeClimb(CNavArea *A, CNavArea *B, Vector *dirOut, Vector *landOut)
+{
+	const Extent *ea = A->GetExtent(), *eb = B->GetExtent();
+	float dx = Q_max(eb->lo.x - ea->hi.x, ea->lo.x - eb->hi.x), dy = Q_max(eb->lo.y - ea->hi.y, ea->lo.y - eb->hi.y);
+	if (dx > 4.0f || dy > 4.0f || (dx > 0.5f && dy > 0.5f))
+		return 1;
+	Vector ca = *A->GetCenter(), cb = *B->GetCenter();
+	Vector pa, pb;
+	A->GetClosestPointOnArea(&cb, &pa);
+	B->GetClosestPointOnArea(&pa, &pb);
+	float rise = pb.z - pa.z;
+	if (rise < 20.0f || rise > 56.0f)
+		return 2;
+	if (A->IsConnected(B, NUM_DIRECTIONS))
+		return 3;
+	if (DeadlyAt(s_hurts, cb))
+		return 4;
+	Vector dir2 = (pb - pa).Make2D().IsLengthLessThan(1.0f) ? (cb - ca) : (pb - pa);
+	dir2.z = 0.0f;
+	dir2 = dir2.Normalize();
+	Vector land = pb + dir2 * 24.0f;
+	land.z = B->GetZ(&land);
+	// (a duck-jump goes up tucked: the crouched hull, so a low corridor over the ledge is fine)
+	TraceResult tr;
+	Vector up(pa.x, pa.y, pb.z + HalfHumanHeight * 0.5f + 2.0f), top(land.x, land.y, land.z + HalfHumanHeight * 0.5f + 2.0f);
+	UTIL_TraceHull(top, top, ignore_monsters, head_hull, nullptr, &tr);
+	if (tr.fStartSolid || tr.fAllSolid)
+		return 5;
+	UTIL_TraceHull(up, top, ignore_monsters, head_hull, nullptr, &tr);
+	if (tr.fStartSolid || tr.flFraction < 1.0f)
+		return 6;
+	if (dirOut)
+		*dirOut = dir2;
+	if (landOut)
+		*landOut = land;
+	return 0;
+}
+
+// A walkable seam A -> B the nav left unlinked: side by side, level within a step where they meet,
+// and a standing player gets across (no wall between) - starwars' start corridor, ramps whose
+// centres are 48 apart but meet level
+static bool SeamWalk(CNavArea *A, CNavArea *B)
+{
+	const Extent *ea = A->GetExtent(), *eb = B->GetExtent();
+	float dx = Q_max(eb->lo.x - ea->hi.x, ea->lo.x - eb->hi.x), dy = Q_max(eb->lo.y - ea->hi.y, ea->lo.y - eb->hi.y);
+	if (dx > 2.0f || dy > 2.0f || A->IsConnected(B, NUM_DIRECTIONS))
+		return false;
+	// (a shared stretch of edge, or only a corner - a hole in the nav beside them leaves the way on
+	// diagonal: the hull trace below decides whether a player gets across)
+	Vector cb = *B->GetCenter(), pa, pb;
+	A->GetClosestPointOnArea(&cb, &pa);
+	B->GetClosestPointOnArea(&pa, &pb);
+	if (Q_fabs(pb.z - pa.z) > StepHeight || DeadlyAt(s_hurts, cb))
+		return false;
+	Vector d = (cb - *A->GetCenter());
+	d.z = 0.0f;
+	d = d.Normalize();
+	// (just above the floor - a low corridor has little room over a standing player - and the step's
+	// height higher at the low end)
+	Vector from = pa - d * 16.0f, to = pb + d * 16.0f;
+	float za = A->GetZ(&from), zb = B->GetZ(&to), top = Q_max(za, zb);
+	from.z = top + HalfHumanHeight + 2.0f;
+	to.z = top + HalfHumanHeight + 2.0f;
+	TraceResult tr;
+	UTIL_TraceHull(from, to, ignore_monsters, human_hull, nullptr, &tr);
+	return !tr.fStartSolid && tr.flFraction >= 1.0f;
+}
+
 // Is the door of this link in the way right now (a hull between the two floors hits it)
 static bool DoorShut(const DoorLink &dl)
 {
@@ -856,6 +927,48 @@ static void Build()
 			CONSOLE_ECHO("Loner-Strike deathrun: %d doors linked across\n", int(s_doorLinks.size() / 2));
 	}
 
+	// ledges a jump climbs: touching areas the next one 20-56 units up (over a step, within a duck-jump),
+	// the arc's hull clear - nav generation leaves them unlinked and the course stopped below them
+	// (starwars' start corridor: a channel, then a 36-48 unit ledge)
+	{
+		int made = 0, seams = 0;
+		for (size_t i = 0; i < n; i++)
+		{
+			CNavArea *A = s_areas[i];
+			const Extent *ea = A->GetExtent();
+			if (DeadlyAt(s_hurts, *A->GetCenter()))
+				continue;
+			for (size_t j = 0; j < n; j++)
+			{
+				if (i == j)
+					continue;
+				CNavArea *B = s_areas[j];
+				const Extent *eb = B->GetExtent();
+				float dx = Q_max(eb->lo.x - ea->hi.x, ea->lo.x - eb->hi.x), dy = Q_max(eb->lo.y - ea->hi.y, ea->lo.y - eb->hi.y);
+				if (dx > 4.0f || dy > 4.0f)
+					continue;	// (touching: side by side, or corner to corner for a seam)
+				Vector dir2;
+				if (LedgeClimb(A, B, &dir2, nullptr) != 0)
+				{
+					if (SeamWalk(A, B))
+					{
+						Vector d = *B->GetCenter() - *A->GetCenter();
+						A->ConnectTo(B, Q_fabs(d.x) > Q_fabs(d.y) ? (d.x > 0 ? EAST : WEST) : (d.y > 0 ? SOUTH : NORTH));
+						s_out[i].push_back(int(j));
+						seams++;
+					}
+					continue;
+				}
+				NavDirType dir = Q_fabs(dir2.x) > Q_fabs(dir2.y) ? (dir2.x > 0 ? EAST : WEST) : (dir2.y > 0 ? SOUTH : NORTH);
+				A->ConnectTo(B, dir);
+				s_out[i].push_back(int(j));
+				made++;
+			}
+		}
+		if (made || seams)
+			CONSOLE_ECHO("Loner-Strike deathrun: %d ledges a jump climbs and %d walkable seams linked\n", made, seams);
+	}
+
 	// gaps a running jump clears, linked on this nav too (a nav learned without course learning -
 	// or by hand - has none): from every edge of every area, every step along it, the jump check
 	// the learner uses; a landing on another area not linked yet gets a one-way link
@@ -1071,6 +1184,7 @@ struct Runner
 	float floorWaitSince = 0.0f;	// waiting for a floor that isn't there
 	float teleWaitSince = 0.0f;		// standing in a teleport that doesn't send it anywhere
 	int openDoor = -1;				// a shut door on its way (s_doorLinks): its button, or a wait
+	float pressSince = 0.0f;		// at that door's button since
 	int gaveUpArea = -1;			// the floor it last gave up on (another way) and when: back at it soon
 	float gaveUpAt = -99.0f;		// after means there is no other way
 	Vector gaveUpPos;
@@ -1088,6 +1202,7 @@ struct Runner
 	float backUntil = 0.0f;			// backing up for a run-up
 	bool tele = false;				// walking into a teleport rather than jumping
 	float hopSpeed = 0.0f;			// a hop at this pace (small blocks), 0: a full running jump
+	bool climb = false;				// a jump up onto a ledge: from right at its foot
 	Vector paceFor;					// the learned gap whose pace was worked out, and that pace
 	float paceCached = 0.0f;
 	Vector lastGround;
@@ -1348,6 +1463,17 @@ float LsDrAreaCost(const CNavArea *area)
 
 using namespace LsDr;
 
+// The deathrun brain has a jump armed for the gap ahead (timed at its edge by LsDrDrive): the stock
+// path-following's early gap jumps stand back for it
+bool CCSBot::LsDrJumpArmed() const
+{
+	int idx = const_cast<CCSBot *>(this)->entindex();
+	if (idx < 1 || idx > MAX_CLIENTS)
+		return false;
+	const Runner &r = s_run[idx];
+	return r.gapArmed && !r.tele && gpGlobals->time - r.armedAt < 0.4f;
+}
+
 bool CCSBot::LsDrRunner() const
 {
 	return LsDrOn() && s_ready && m_iTeam == CT;
@@ -1457,6 +1583,7 @@ bool CCSBot::LsDrTick()
 		if (!DoorShut(dl))
 		{
 			r.openDoor = -1;
+			r.pressSince = 0.0f;
 			r.holdUntil = 0.0f;
 			r.moveState = -1.0f;	// (back on the course)
 			LsWhy("deathrun: door open");
@@ -1480,7 +1607,15 @@ bool CCSBot::LsDrTick()
 					CBaseEntity *pBtn = t.button;
 					Vector o = pev->origin, lo = pBtn->pev->absmin, hi = pBtn->pev->absmax;
 					Vector gap(Q_max(Q_max(lo.x - o.x, 0.0f), o.x - hi.x), Q_max(Q_max(lo.y - o.y, 0.0f), o.y - hi.y), Q_max(Q_max(lo.z - o.z, 0.0f), o.z - hi.z));
-					if (gap.Length() > 52.0f)
+					// (within use reach first; still not gone after a second: right up to it - a trigger in front of
+					// a button can be what clears the way to it, as a person walking up would touch it)
+					bool closer = r.pressSince > 0.0f && now - r.pressSince > 1.0f;
+					if (closer && gap.Length() > 14.0f && gap.Length() <= 80.0f)
+					{
+						Vector step(t.btn.x, t.btn.y, pev->origin.z);
+						MoveTowardsPosition(&step);
+					}
+					if (gap.Length() > 52.0f && !closer)
 					{
 						if (r.moveState != m_stateTimestamp || !HasPath())
 						{
@@ -1493,12 +1628,52 @@ bool CCSBot::LsDrTick()
 					SetLookAt("Loner-Strike: door button", &t.btn, PRIORITY_HIGH, 0.5f, false, 3.0f);
 					UTIL_MakeVectors(pev->v_angle);
 					Vector to = (t.btn - (pev->origin + pev->view_ofs)).Normalize();
-					if (DotProduct(to, gpGlobals->v_forward) > 0.9f)
-						UseEnvironment();
-					ClearMovement();
-					LsWhy("deathrun: opens the door");
+					bool aimed = DotProduct(to, gpGlobals->v_forward) > 0.97f;
+					if (r.pressSince <= 0.0f)
+						r.pressSince = now;
+					// (use it; a button that takes damage and hasn't gone after a second of that - shot to
+					// press, or something in front of it in the way of use - gets shot)
+					if (pBtn->pev->takedamage != DAMAGE_NO && now - r.pressSince > 1.0f)
+					{
+						if (IsUsingKnife())
+							EquipPistol();
+						if (aimed)
+							PrimaryAttack();
+						LsWhy("deathrun: shoots the door's button");
+					}
+					else
+					{
+						if (aimed || DotProduct(to, gpGlobals->v_forward) > 0.9f)
+							UseEnvironment();
+						LsWhy("deathrun: opens the door");
+					}
+					if (!(closer && gap.Length() > 14.0f))
+						ClearMovement();
 					return true;
 				}
+			}
+			// (a door you open with use, no button: walk up to it and use it)
+			CBaseEntity *pDoor = dl.door;
+			if (!presser && pDoor && (pDoor->pev->spawnflags & SF_DOOR_USE_ONLY) && FStringNull(pDoor->pev->targetname))
+			{
+				Vector dm = (pDoor->pev->absmin + pDoor->pev->absmax) * 0.5f;
+				Vector o = pev->origin, lo = pDoor->pev->absmin, hi = pDoor->pev->absmax;
+				Vector gap(Q_max(Q_max(lo.x - o.x, 0.0f), o.x - hi.x), Q_max(Q_max(lo.y - o.y, 0.0f), o.y - hi.y), Q_max(Q_max(lo.z - o.z, 0.0f), o.z - hi.z));
+				SetLookAt("Loner-Strike: door", &dm, PRIORITY_HIGH, 0.5f, false, 3.0f);
+				if (gap.Length() > 40.0f)
+				{
+					Vector step(dm.x, dm.y, pev->origin.z);
+					MoveTowardsPosition(&step);
+				}
+				else
+				{
+					UTIL_MakeVectors(pev->v_angle);
+					Vector to = (dm - (pev->origin + pev->view_ofs)).Normalize();
+					if (DotProduct(to, gpGlobals->v_forward) > 0.8f)
+						UseEnvironment();
+				}
+				LsWhy("deathrun: opens the door (use)");
+				return true;
 			}
 			r.holdUntil = Q_max(r.holdUntil, now + 0.3f);
 			r.holdLook = dl.at;
@@ -2003,8 +2178,38 @@ void CCSBot::LsDrPathTick()
 			continue;
 		if (m_lastKnownArea == B)
 			break;
+		// a door between the two (a linked door, whichever pair of areas the path crosses it by): shut, its
+		// button or a wait (LsDrTick)
+		if (!s_doorLinks.empty() && (pev->origin - *B->GetCenter()).Make2D().IsLengthLessThan(400.0f))
+		{
+			Vector a = *A->GetCenter() + Vector(0, 0, HalfHumanHeight + 4.0f), b = *B->GetCenter() + Vector(0, 0, HalfHumanHeight + 4.0f);
+			TraceResult tr;
+			UTIL_TraceHull(a, b, ignore_monsters, human_hull, nullptr, &tr);
+			if (tr.flFraction < 1.0f && tr.pHit)
+			{
+				for (size_t k = 0; k < s_doorLinks.size(); k++)
+				{
+					CBaseEntity *pDoor = s_doorLinks[k].door;
+					if (pDoor && pDoor->edict() == tr.pHit)
+					{
+						r.openDoor = int(k);
+						return;
+					}
+				}
+			}
+		}
+		// (a ledge a jump climbs: touching, but higher than a step - jumped like a gap, tucked)
+		bool climb = false;
 		if (!LsDrSeparated(A, B))
-			continue;
+		{
+			Vector pa, pb;
+			const Vector *cb = B->GetCenter();
+			A->GetClosestPointOnArea(cb, &pa);
+			B->GetClosestPointOnArea(&pa, &pb);
+			climb = pb.z - pa.z > 20.0f && pb.z - pa.z <= 56.0f;
+			if (!climb)
+				continue;
+		}
 		// a teleport link: walk into the trigger
 		int ia = Index(A), ib = Index(B);
 		for (const Tele &tl : s_teles)
@@ -2051,6 +2256,7 @@ void CCSBot::LsDrPathTick()
 				{
 					r.gapArmed = true;
 					r.hopSpeed = 0.0f;
+					r.climb = false;
 					r.armedAt = now;
 					r.landing = tl.at;
 					r.jumpedAt = -9.0f;
@@ -2074,22 +2280,6 @@ void CCSBot::LsDrPathTick()
 			}
 		if (r.tele)
 			return;
-		// a door between the two: open, walk through; shut, its button or a wait (LsDrTick)
-		{
-			bool door = false;
-			for (size_t k = 0; k < s_doorLinks.size(); k++)
-			{
-				const DoorLink &dl = s_doorLinks[k];
-				if (dl.from != ia || dl.to != ib)
-					continue;
-				door = true;
-				if (DoorShut(dl) && (pev->origin - dl.at).Make2D().IsLengthLessThan(400.0f))
-					r.openDoor = int(k);
-				break;
-			}
-			if (door)
-				return;
-		}
 		// a gap: run at the edge, jump, land a little way in
 		Vector2D d;
 		DirectionToVector2D((NavDirType)to.how, &d);
@@ -2159,7 +2349,8 @@ void CCSBot::LsDrPathTick()
 			}
 		}
 		r.gapArmed = true;
-		r.hopSpeed = r.paceCached;
+		r.hopSpeed = climb ? 150.0f : r.paceCached;
+		r.climb = climb;
 		r.armedAt = now;
 		r.takeoff = takeoff;
 		r.landing = land;
@@ -2270,6 +2461,7 @@ bool CCSBot::LsDrJumpGap(int i)
 		if (hop < 0.0f)
 			continue;
 		r.hopSpeed = hop;
+		r.climb = false;
 		r.gapArmed = true;
 		r.tele = false;
 		r.armedAt = now;
@@ -2396,6 +2588,8 @@ void LsDrDrive(CBasePlayer *bot, float *forward, float *strafe, unsigned short *
 			float need = DotProduct(r.landing.Make2D(), r.gapDir) - r.edge;
 			float slack = 0.66f * pace - need;
 			float early = Q_min(14.0f + 0.06f * Q_max(0.0f, speed), Q_max(3.0f, 0.5f * slack));
+			if (r.climb)
+				early = 6.0f;	// (up onto a ledge: from its foot, or the jump meets the wall on the way up)
 			if (toEdge < early && toEdge > -20.0f && now - r.jumpedAt > 0.8f)
 			{
 				// (a full jump wants a run at it; a hop its own pace, give or take)
@@ -2455,6 +2649,40 @@ void LsDrCommand()
 		DeadlyHurts(s_learnHurts);
 		CONSOLE_ECHO("ls_dr gap from %.0f %.0f %.0f dir %d:\n", p.x, p.y, p.z, Q_atoi(CMD_ARGV(5)));
 		GapJumpAt(p, Q_atoi(CMD_ARGV(5)) & 3, true, &land, &n, true);
+		return;
+	}
+	// ls_dr ledge <x> <y> <z>: every touching area 20-56 units above the area at a spot, and whether a
+	// jump climbs onto it (which check fails); ledges are linked at map start when it does
+	if (CMD_ARGC() >= 5 && FStrEq(CMD_ARGV(1), "ledge"))
+	{
+		Vector p(Q_atof(CMD_ARGV(2)), Q_atof(CMD_ARGV(3)), Q_atof(CMD_ARGV(4)));
+		CNavArea *A = TheNavAreaGrid.GetNavArea(&p);
+		if (!A)
+			A = TheNavAreaGrid.GetNearestNavArea(&p);
+		if (!A)
+		{
+			CONSOLE_ECHO("ls_dr ledge: no area at %.0f %.0f %.0f\n", p.x, p.y, p.z);
+			return;
+		}
+		static const char *why[] = { "climbs", "not side by side", "not 20-56 up", "already linked", "deadly on top", "no room on top (crouched)", "the way up is blocked (crouched)" };
+		const Extent *ea = A->GetExtent();
+		CONSOLE_ECHO("ls_dr ledge from area #%d (%.0f %.0f - %.0f %.0f, z %.0f):\n", A->GetID(), ea->lo.x, ea->lo.y, ea->hi.x, ea->hi.y, A->GetCenter()->z);
+		int shown = 0;
+		for (CNavArea *B : TheNavAreaList)
+		{
+			if (B == A)
+				continue;
+			const Extent *eb = B->GetExtent();
+			float dx = Q_max(eb->lo.x - ea->hi.x, ea->lo.x - eb->hi.x), dy = Q_max(eb->lo.y - ea->hi.y, ea->lo.y - eb->hi.y);
+			if (dx > 4.0f || dy > 4.0f || Q_fabs(B->GetCenter()->z - A->GetCenter()->z) > 80.0f)
+				continue;
+			int r = LedgeClimb(A, B, nullptr, nullptr);
+			bool seam = r != 0 && SeamWalk(A, B);
+			CONSOLE_ECHO("  -> #%d (%.0f %.0f - %.0f %.0f, z %.0f): %s%s%s\n", B->GetID(), eb->lo.x, eb->lo.y, eb->hi.x, eb->hi.y, B->GetCenter()->z, why[r],
+				seam ? "; a walkable seam (linked)" : "", A->IsConnected(B, NUM_DIRECTIONS) ? "; linked" : "");
+			if (++shown >= 16)
+				break;
+		}
 		return;
 	}
 	// ls_dr ents <x> <y> <z> <r>: entities round a spot, their solid type and box (a trigger's state)
