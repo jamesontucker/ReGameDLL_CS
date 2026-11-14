@@ -1157,12 +1157,20 @@ bool CCSBot::LsModeOfferTick()
 	for (int k = 0; calm && k < s_lsTargetCount; k++)
 		if (LsModeTargetOk(s_lsTarget[k]) && (s_lsTarget[k]->pev->origin - pev->origin).IsLengthLessThan(600.0f))
 			calm = false;
+	// (money kept for the next perk: the box or the bench only with that still left after - the box
+	// at $950 in the first waves kept every bot short of a perk)
+	int perkCost = 0;
+	for (int k = 0; k < LS_MODE_OFFERS; k++)
+		if (s_lsOffer[me][k].kind == LS_OFFER_PERK && (!perkCost || s_lsOffer[me][k].cost < perkCost))
+			perkCost = s_lsOffer[me][k].cost;
 	LsModeOffer *pBest = nullptr;
 	int bestRank = 1000;
 	for (int k = 0; k < LS_MODE_OFFERS; k++)
 	{
 		LsModeOffer &o = s_lsOffer[me][k];
 		if (o.kind == LS_OFFER_NONE || now < o.nextTry)
+			continue;
+		if (o.kind != LS_OFFER_PERK && o.kind != LS_OFFER_TRAP && m_iAccount < o.cost + perkCost + 200)
 			continue;
 		int rank = 1000;
 		if (o.kind == LS_OFFER_TRAP)
