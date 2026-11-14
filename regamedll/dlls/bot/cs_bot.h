@@ -1755,6 +1755,8 @@ public:
 	bool LsModeOfferTick();							// a perk, the bench, the box, the trap, a turret: when to take one
 	float m_lsModeOfferAt = 0.0f;
 	float m_lsModeReviveBackUntil = 0.0f;			// backed off a revive under fire till then
+	float m_lsModeReviveHeldAt = 0.0f;				// (testing) next "revive held" note
+	float m_lsModeReviveNoteAt = 0.0f;				// (testing) next revive note in the trace
 	int m_lsModeReviveFor = 0;						// the downed one its revive is for...
 	float m_lsModeReviveWaitFrom = 0.0f;			// ...and since when
 	float m_lsModeSmokeAt = -100.0f;				// its smoke for a revive, thrown then...

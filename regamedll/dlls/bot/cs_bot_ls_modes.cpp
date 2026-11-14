@@ -1745,6 +1745,21 @@ void CCSBot::LsModeTick()
 		return;
 	}
 	// (a fight, a person's order, a plugin's habit, the bomb: the goal waits)
+	// (testing: a revive it holds and whether it's on it now, every 2 s)
+	if (cv_bot_ls_trace.value > 0.0f && gpGlobals->time >= m_lsModeReviveHeldAt)
+		for (int i = 0; i < LS_MODE_GOALS; i++)
+		{
+			const LsModeGoal &rg = m_lsModeGoal[i];
+			CBaseEntity *pR = rg.ent > 0 ? (CBaseEntity *)rg.thing : nullptr;
+			if (rg.kind != LS_GOAL_USE || !pR || !pR->IsPlayer())
+				continue;
+			m_lsModeReviveHeldAt = gpGlobals->time + 2.0f;
+			static char note[160];
+			Q_snprintf(note, sizeof(note), "revive-held d=%d care=%d chosen=%d free=%d enemyvis=%d atk=%d dist=%.0f state=%s", rg.ent, rg.care ? 1 : 0,
+				best == i ? 1 : 0, LsFree() ? 1 : 0, m_isEnemyVisible ? 1 : 0, IsAttacking() ? 1 : 0, (pR->pev->origin - pev->origin).Length(),
+				m_state ? m_state->GetName() : "-");
+			LsTraceNote(note);
+		}
 	// (a revive right by the downed one goes on with an enemy in sight - whether that's a risk it
 	// takes is the revive's own weighing, by who it is)
 	const LsModeGoal &gb = m_lsModeGoal[best];
@@ -2277,6 +2292,16 @@ void CCSBot::LsModeGoalTick(LsModeGoal &g)
 			reviveThreat = 0;
 	}
 	float sway = LsModeSway(g.infl);
+	// (testing: how a revive goes, every 2 s)
+	if (revive && now >= m_lsModeReviveNoteAt)
+	{
+		m_lsModeReviveNoteAt = now + 2.0f;
+		static char note[160];
+		Q_snprintf(note, sizeof(note), "revive-state d=%d dist=%.0f threat=%d phase=%d atk=%d vis=%d hp=%.0f brave=%.2f", pGoalThing->entindex(),
+			(pGoalThing->pev->origin - pev->origin).Length(), reviveThreat, g.phase, IsAttacking() ? 1 : 0, m_isEnemyVisible ? 1 : 0,
+			LsHealth(), 0.5f * LsAggro() + 0.5f * LsTeamwork());
+		LsTraceNote(note);
+	}
 	if (revive && g.prio < 90 && sway > 0.0f)
 	{
 		// (one enemy a way off is a risk most take; the bold take one close by, or two further off;
