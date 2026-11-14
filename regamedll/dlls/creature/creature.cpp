@@ -31,7 +31,7 @@
 
 #include "precompiled.h"
 #ifndef _WIN32
-#include <time.h>
+#include <sys/time.h>
 #endif
 #include <climits>
 
@@ -108,9 +108,10 @@ static double LsPerfNow()
 	QueryPerformanceCounter(&now);
 	return double(now.QuadPart) / double(freq.QuadPart);
 #else
-	struct timespec ts;
-	clock_gettime(CLOCK_MONOTONIC, &ts);
-	return ts.tv_sec + ts.tv_nsec * 1e-9;
+	// (gettimeofday: clock_gettime needs a newer glibc than the build allows)
+	struct timeval tv;
+	gettimeofday(&tv, nullptr);
+	return tv.tv_sec + tv.tv_usec * 1e-6;
 #endif
 }
 
