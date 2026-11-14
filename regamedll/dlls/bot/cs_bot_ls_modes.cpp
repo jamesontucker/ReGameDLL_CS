@@ -1000,7 +1000,8 @@ bool CCSBot::LsModeEscape()
 		float caution = 1.0f - LsAggro();
 		Vector ringAt = s_lsRing.at;
 		float ringR = s_lsRing.r;
-		if (s_lsRing.next && s_lsRing.shrinkAt > 0.0f && s_lsRing.shrinkAt - now < 15.0f + 25.0f * caution)
+		// (and each its own timing: some rotate early, some cut it fine, as people do)
+		if (s_lsRing.next && s_lsRing.shrinkAt > 0.0f && s_lsRing.shrinkAt - now < 10.0f + 25.0f * caution + 20.0f * LsTrait(212))
 		{
 			ringAt = s_lsRing.nextAt;
 			ringR = s_lsRing.nextR;
@@ -1081,6 +1082,82 @@ int CCSBot::LsModeLayerWant()
 	return taste < 0.33f ? 2 : (taste < 0.66f ? 1 : 0);
 }
 
+// A spot on high ground to hold: a hiding spot (one with a view - a sniper spot - likelier) or the
+// middle of an open area, on the high layer, inside the zone, not where others are; near (the
+// next along the route) when it's already up high
+bool CCSBot::LsModePickHigh(Vector *out)
+{
+	bool onHigh = LsModeLayer(pev->origin) == 2;
+	float reach = onHigh ? 1200.0f : 2500.0f;
+	float bestScore = -1.0f;
+	auto consider = [&](const Vector &pos, float bonus) {
+		float d = (pos - pev->origin).Length();
+		if (d > reach || (onHigh && d < 200.0f) || LsModeLayer(pos) != 2)
+			return;
+		if (s_lsRing.on && LsModeDist2D(pos, s_lsRing.at) > s_lsRing.r - 200.0f)
+			return;
+		int crowd = 0;
+		for (int i = 1; i <= gpGlobals->maxClients; i++)
+		{
+			CBasePlayer *pPlayer = UTIL_PlayerByIndex(i);
+			if (UTIL_IsValidPlayer(pPlayer) && pPlayer != this && pPlayer->IsAlive() && (pPlayer->pev->origin - pos).IsLengthLessThan(600.0f))
+				crowd++;
+		}
+		float score = (bonus + RANDOM_FLOAT(0.0f, 0.6f)) / (1.0f + crowd) - d / 6000.0f;
+		if (score > bestScore)
+		{
+			bestScore = score;
+			*out = pos;
+		}
+	};
+	for (auto area : TheNavAreaList)
+	{
+		const Vector *c = area->GetCenter();
+		if ((*c - pev->origin).IsLengthGreaterThan(reach + 200.0f) || c->z < s_lsNavMidZ + 200.0f)
+			continue;
+		for (auto spot : *area->GetHidingSpotList())
+			consider(*spot->GetPosition(), spot->IsGoodSniperSpot() ? 1.0f : (spot->HasGoodCover() ? 0.6f : 0.4f));
+		if (area->GetSizeX() > 64.0f && area->GetSizeY() > 64.0f)
+			consider(*c, 0.3f);
+	}
+	return bestScore >= 0.0f;
+}
+
+// High ground held like a person holds it: a sightline for a while (its patience: 20-60 s), watching
+// and taking the shots there are, then the next spot along the high route - or off hunting, now
+// and then. The zone, an empty gun and a fight take it off (true: holding or on its way)
+bool CCSBot::LsModePerchTick()
+{
+	float now = gpGlobals->time;
+	if (LsModeOursHiding() && now < m_lsModePerchUntil)
+		return true;
+	if (now < m_lsModePerchAt || LsOutOfAmmo() || !(IsHunting() || m_state == &m_idleState || LsModeOursHiding()))
+		return false;
+	m_lsModePerchAt = now + RANDOM_FLOAT(1.0f, 3.0f);
+	if (!m_repathTimer.IsElapsed())
+		return false;
+	// (now and then a restless one goes looking for a fight instead)
+	if (m_lsModePerchUntil > 0.0f && RANDOM_FLOAT(0.0f, 1.0f) < 0.15f + 0.3f * LsAggro())
+	{
+		m_lsModePerchUntil = 0.0f;
+		m_lsModePerchAt = now + RANDOM_FLOAT(20.0f, 40.0f);
+		return false;
+	}
+	Vector spot;
+	if (!LsModePickHigh(&spot))
+		return false;
+	float patience = 0.5f * (1.0f - LsAggro()) + 0.5f * LsTrait(213);
+	float hold = 20.0f + 40.0f * patience;
+	float travel = (spot - pev->origin).Length() / 200.0f;
+	Hide(&spot, hold + travel, false);
+	if (!IsHiding())
+		return false;
+	m_lsModeHideState = m_stateTimestamp;
+	m_lsModePerchUntil = now + hold + travel;
+	LsWhy("mode high: holding a sightline");
+	return true;
+}
+
 // Off to somewhere a mode says is worth it (a weapon spawner, a crate, a supply drop). Hunting
 // with nothing better to do, now and then (the greedier, the likelier); gearing up or in a loot-up,
 // every time. Spread out as people do: its own layer counts double, a place with others at it or
@@ -1133,8 +1210,14 @@ bool CCSBot::LsModeAttractTick(bool gearing)
 		{
 			if (z.layer < 0)
 				z.layer = LsModeLayer(z.at);
+			// (its own layer counts double; one the mode told it, three times - and the others
+			// hardly: a bot meant for below goes straight down from the trench mouth)
+			int me = entindex();
+			bool told = me >= 1 && me <= MAX_CLIENTS && s_lsLayer[me] >= 0;
 			if (want >= 0 && z.layer == want)
-				score *= 2.0f;
+				score *= told ? 3.0f : 2.0f;
+			else if (told)
+				score *= 0.4f;
 			// (the bold ones go where it's richest; everyone else steers clear of the crowd)
 			if (want >= 0)
 			{
@@ -1178,12 +1261,12 @@ void CCSBot::LsModeTick()
 		LsModePeaceTick();
 	// (gearing up after it: far noises aren't chased, the loot is)
 	bool gearing = LsModeGearing();
-	if (gearing)
-	{
-		if (IsNoiseHeard() && (m_noisePosition - pev->origin).IsLengthGreaterThan(600.0f))
-			ForgetNoise();
-		LsModeRoomTick(250.0f);
-	}
+	if (gearing && IsNoiseHeard() && (m_noisePosition - pev->origin).IsLengthGreaterThan(600.0f))
+		ForgetNoise();
+	// (the first minute of fighting - geared up or not - room from anyone who isn't its fight yet:
+	// people spread out early)
+	if (gearing || (!s_lsPeace && s_lsPeaceEndAt >= 0.0f && gpGlobals->time - s_lsPeaceEndAt < 60.0f && !IsAttacking()))
+		LsModeRoomTick(300.0f);
 
 	bool shooting = LsModeShootTick();
 
@@ -1223,6 +1306,9 @@ void CCSBot::LsModeTick()
 	{
 		// (gearing up: off to loot rather than hunting)
 		if ((gearing || s_lsPeace) && !shooting && LsModeAttractTick(true))
+			return;
+		// (geared up and a high-ground player: a sightline held a while, then the next along)
+		if (!gearing && !s_lsPeace && s_lsPeaceEndAt >= 0.0f && !shooting && LsModeLayerWant() == 2 && LsModePerchTick())
 			return;
 		// (a creature mode's free players: roam like one)
 		if (!shooting && !(s_lsClassCount > 0 && LsFree() && !m_isEnemyVisible && !IsOnLadder() && LsModeRoamTick()))
