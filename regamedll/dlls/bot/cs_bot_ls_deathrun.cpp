@@ -1717,7 +1717,15 @@ static bool LsDrFloorThere(const CNavArea *area, const Vector &nearPos, float st
 			return true;
 		entvars_t *pv = VARS(hit);
 		if (pv->avelocity.Length() > 1.0f)
-			continue;	// (turning: not something to jump onto mid-turn)
+		{
+			// (spinning about its own upright axis - a turning pillar, a spinning disc - it's floor near the
+			// axis all the time: the circle inside it doesn't move. Tipping or swinging: not to jump onto)
+			bool yawOnly = Q_fabs(pv->avelocity.x) < 1.0f && Q_fabs(pv->avelocity.z) < 1.0f;
+			float inner = 0.35f * Q_min(pv->size.x, pv->size.y) - 4.0f;	// (size may be its turning box: up to 1.41x)
+			if (yawOnly && inner > 8.0f && (spots[k] - pv->origin).Make2D().IsLengthLessThan(inner))
+				return true;
+			continue;
+		}
 		if (pv->velocity.Length() < 1.0f)
 			return true;
 		Vector shift = pv->velocity * stay;
