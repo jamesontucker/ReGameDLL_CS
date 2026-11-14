@@ -87,7 +87,21 @@ static LsModeZone s_lsAvoid[LS_MODE_ZONES];		// avoids and blocked doors
 static LsModeZone s_lsAttract[LS_MODE_ATTRACTS];
 static LsModeRing s_lsRing;
 static char s_lsRole[MAX_CLIENTS + 1][16];
-static int s_lsLayer[MAX_CLIENTS + 1];			// the mode's layer for each player (ls_mode layer): 0 surface, 1 below, 2 high, -1 none
+static int s_lsLayer[MAX_CLIENTS + 1];
+// what a mode offers each player to use (ls_mode offer): perk machines, the upgrade bench, the mystery
+// box, a trap switch, a turret to place; the bot decides when to take one
+enum { LS_OFFER_NONE, LS_OFFER_PERK, LS_OFFER_BENCH, LS_OFFER_BOX, LS_OFFER_TRAP, LS_OFFER_TURRET };
+struct LsModeOffer
+{
+	int kind = LS_OFFER_NONE;
+	Vector at;
+	int ent = 0;
+	int cost = 0;
+	int order = 0;						// perks: the order to buy them in (lowest first)
+	float nextTry = 0.0f;				// not before then (taken lately, or a box roll lost)
+};
+const int LS_MODE_OFFERS = 8;
+static LsModeOffer s_lsOffer[MAX_CLIENTS + 1][LS_MODE_OFFERS];			// the mode's layer for each player (ls_mode layer): 0 surface, 1 below, 2 high, -1 none
 static unsigned int s_lsFriend[MAX_CLIENTS + 1];	// bit j-1 set: player i treats player j as a teammate
 static unsigned int s_lsFoe[MAX_CLIENTS + 1];		// ...as an enemy
 static LsModeClass s_lsClass[LS_MODE_CLASSES];
@@ -276,7 +290,11 @@ static void LsModeReset(bool all, bool bots = true)
 		s_lsModeId[0] = '\0';
 		Q_memset(s_lsRole, 0, sizeof(s_lsRole));
 		for (int i = 0; i <= MAX_CLIENTS; i++)
+		{
 			s_lsLayer[i] = -1;
+			for (int k = 0; k < LS_MODE_OFFERS; k++)
+				s_lsOffer[i][k] = LsModeOffer();
+		}
 		Q_memset(s_lsFriend, 0, sizeof(s_lsFriend));
 		Q_memset(s_lsFoe, 0, sizeof(s_lsFoe));
 		g_lsModeTies = false;
@@ -469,6 +487,8 @@ void LsModePlayerGone(int index)
 		return;
 	s_lsRole[index][0] = '\0';
 	s_lsLayer[index] = -1;
+	for (int k = 0; k < LS_MODE_OFFERS; k++)
+		s_lsOffer[index][k] = LsModeOffer();
 	s_lsFriend[index] = s_lsFoe[index] = 0;
 	unsigned int bit = 1u << (index - 1);
 	g_lsModeTies = false;
@@ -1082,6 +1102,88 @@ int CCSBot::LsModeLayerWant()
 	return taste < 0.33f ? 2 : (taste < 0.66f ? 1 : 0);
 }
 
+// What the mode offers (ls_mode offer), taken like a person would: only with the money for it and a
+// little to spare, and when it's calm round here (no creature near, not mid-fight); perks in their
+// order (Tough first), the bench when the money's there, the box now and then (the greedier, the
+// more), the trap switch only when a gate's under heavy pressure (five creatures near it), a turret
+// at a covered spot near where it's wanted. Taking one is walking over and using it (a use goal)
+bool CCSBot::LsModeOfferTick()
+{
+	int me = entindex();
+	if (me < 1 || me > MAX_CLIENTS)
+		return false;
+	float now = gpGlobals->time;
+	if (now < m_lsModeOfferAt)
+		return false;
+	m_lsModeOfferAt = now + RANDOM_FLOAT(1.0f, 2.5f);
+	for (int i = 0; i < LS_MODE_GOALS; i++)
+		if (m_lsModeGoal[i].kind == LS_GOAL_USE)
+			return false;	// (already on its way to one)
+	// (calm: nothing to shoot within 600 u)
+	bool calm = now - m_lsModeSawAt > 3.0f;
+	for (int k = 0; calm && k < s_lsTargetCount; k++)
+		if (LsModeTargetOk(s_lsTarget[k]) && (s_lsTarget[k]->pev->origin - pev->origin).IsLengthLessThan(600.0f))
+			calm = false;
+	LsModeOffer *pBest = nullptr;
+	int bestRank = 1000;
+	for (int k = 0; k < LS_MODE_OFFERS; k++)
+	{
+		LsModeOffer &o = s_lsOffer[me][k];
+		if (o.kind == LS_OFFER_NONE || now < o.nextTry)
+			continue;
+		int rank = 1000;
+		if (o.kind == LS_OFFER_TRAP)
+		{
+			int pressure = 0;
+			for (int t = 0; t < s_lsTargetCount; t++)
+				if (LsModeTargetOk(s_lsTarget[t]) && (s_lsTarget[t]->pev->origin - o.at).IsLengthLessThan(500.0f))
+					pressure++;
+			if (pressure >= 5 && m_iAccount >= o.cost)
+				rank = 0;	// (urgent: even mid-fight)
+		}
+		else if (calm && m_iAccount >= o.cost + 200)
+		{
+			if (o.kind == LS_OFFER_PERK)
+				rank = 10 + o.order;
+			else if (o.kind == LS_OFFER_TURRET)
+				rank = 40;
+			else if (o.kind == LS_OFFER_BENCH)
+				rank = 50;
+			else if (o.kind == LS_OFFER_BOX)
+			{
+				// (now and then: a roll a minute or so, the greedier the likelier)
+				if (RANDOM_FLOAT(0.0f, 1.0f) < 0.15f + 0.35f * LsModeGreed())
+					rank = 60;
+				else
+					o.nextTry = now + RANDOM_FLOAT(40.0f, 80.0f);
+			}
+		}
+		if (rank < bestRank)
+		{
+			bestRank = rank;
+			pBest = &o;
+		}
+	}
+	if (!pBest)
+		return false;
+	pBest->nextTry = now + 20.0f;
+	Vector at = pBest->at;
+	if (pBest->kind == LS_OFFER_TURRET)
+	{
+		// (a covered spot near where it's wanted, facing that way)
+		Vector spot;
+		if (LsModePickSpot(pBest->at, 400.0f, &spot))
+			at = spot;
+		LsModeSetGoal(LS_GOAL_USE, at, 64.0f, 0, 80, 20.0f);
+	}
+	else
+		LsModeSetGoal(LS_GOAL_USE, at, 64.0f, pBest->ent, pBest->kind == LS_OFFER_TRAP ? 90 : 80, 20.0f);
+	LsWhy(pBest->kind == LS_OFFER_PERK ? "mode offer: a perk" : pBest->kind == LS_OFFER_BENCH ? "mode offer: the bench"
+		: pBest->kind == LS_OFFER_BOX ? "mode offer: the box" : pBest->kind == LS_OFFER_TRAP ? "mode offer: the trap, gate under pressure"
+		: "mode offer: placing a turret");
+	return true;
+}
+
 // A spot on high ground to hold: a hiding spot (one with a view - a sniper spot - likelier) or the
 // middle of an open area, on the high layer, inside the zone, not where others are; near (the
 // next along the route) when it's already up high
@@ -1271,6 +1373,10 @@ void CCSBot::LsModeTick()
 	bool shooting = LsModeShootTick();
 
 	if (LsModeEscape())
+		return;
+	// (what the mode offers - a perk, the bench, the box, a turret - in a calm moment; the trap when a
+	// gate's swamped, even mid-fight)
+	if (!IsOnLadder() && (!shooting || s_lsTargetCount >= 5) && LsModeOfferTick())
 		return;
 	// (mid-fight with a creature: no new spot, no errand; it shoots)
 	if (shooting)
@@ -1569,7 +1675,28 @@ void CCSBot::LsModeGoalTick(LsModeGoal &g)
 	// it edges up to it (the path ends against it), looks at it and holds use (the mode clears
 	// the goal once it's open, or they're up)
 	CBaseEntity *pGoalThing = g.ent > 0 ? (CBaseEntity *)g.thing : nullptr;
-	bool revive = g.kind == LS_GOAL_HOLD && pGoalThing && pGoalThing->IsPlayer();
+	bool revive = (g.kind == LS_GOAL_HOLD || g.kind == LS_GOAL_USE) && pGoalThing && pGoalThing->IsPlayer();
+	// (a revive as people do it: not into a crowd - two creatures near the downed one, or one right by
+	// them, and it fights from where it is till it's clear; a must-do one goes anyway)
+	if (revive && g.prio < 90)
+	{
+		int near2 = 0, close1 = 0;
+		for (int k = 0; k < s_lsTargetCount; k++)
+		{
+			CBaseEntity *pEntity = s_lsTarget[k];
+			if (!LsModeTargetOk(pEntity))
+				continue;
+			float d = (pEntity->pev->origin - pGoalThing->pev->origin).Length();
+			near2 += d < 450.0f;
+			close1 += d < 250.0f;
+		}
+		if (near2 >= 2 || close1 >= 1)
+		{
+			if (m_lsWhy == nullptr || Q_strcmp(m_lsWhy, "mode revive: waiting for it to clear"))
+				LsWhy("mode revive: waiting for it to clear");
+			return;
+		}
+	}
 	if (g.kind == LS_GOAL_LOOT || g.kind == LS_GOAL_USE || revive)
 	{
 		Vector at = g.at;
@@ -1935,6 +2062,60 @@ void Bot_LsModeCommand()
 		int n = LsModeWho(CMD_ARGV(2), who, true);
 		for (int i = 0; i < n; i++)
 			static_cast<CCSBot *>(UTIL_PlayerByIndex(who[i]))->LsModeSetGoal(kind, at, radius, ent, prio, secs);
+		if (n > 0)
+			s_lsModeOn = true;
+		return;
+	}
+	// offer <who> <perk|bench|box|trap|turret> <x> <y> <z> <ent> <cost> [order]: something the bot may
+	// use (the same ent or kind and position again replaces it); offer_clear <who> [kind | ent]
+	if (FStrEq(what, "offer") || FStrEq(what, "offer_clear"))
+	{
+		const char *kn = CMD_ARGV(3);
+		int kind = FStrEq(kn, "perk") ? LS_OFFER_PERK : FStrEq(kn, "bench") ? LS_OFFER_BENCH : FStrEq(kn, "box") ? LS_OFFER_BOX
+			: FStrEq(kn, "trap") ? LS_OFFER_TRAP : FStrEq(kn, "turret") ? LS_OFFER_TURRET : LS_OFFER_NONE;
+		int n = LsModeWho(CMD_ARGV(2), who, true);
+		if (FStrEq(what, "offer_clear"))
+		{
+			int ent = kind ? 0 : Q_atoi(kn);
+			for (int i = 0; i < n; i++)
+				for (int k = 0; k < LS_MODE_OFFERS; k++)
+				{
+					LsModeOffer &o = s_lsOffer[who[i]][k];
+					if (o.kind != LS_OFFER_NONE && (!CMD_ARGV(3)[0] || (kind && o.kind == kind) || (ent && o.ent == ent)))
+						o = LsModeOffer();
+				}
+			return;
+		}
+		Vector at(LsModeArg(4), LsModeArg(5), LsModeArg(6));
+		int ent = int(LsModeArg(7)), cost = int(LsModeArg(8)), order = int(LsModeArg(9));
+		if (!kind || CMD_ARGC() < 9 || LsModeBadArgs())
+		{
+			CONSOLE_ECHO("ls_mode offer <who> <perk|bench|box|trap|turret> <x> <y> <z> <ent> <cost> [order]\n");
+			return;
+		}
+		for (int i = 0; i < n; i++)
+		{
+			LsModeOffer *pSlot = nullptr;
+			for (int k = 0; k < LS_MODE_OFFERS && !pSlot; k++)
+			{
+				LsModeOffer &o = s_lsOffer[who[i]][k];
+				if (o.kind == kind && (ent ? o.ent == ent : (o.at - at).IsLengthLessThan(32.0f)))
+					pSlot = &o;
+			}
+			for (int k = 0; k < LS_MODE_OFFERS && !pSlot; k++)
+				if (s_lsOffer[who[i]][k].kind == LS_OFFER_NONE)
+					pSlot = &s_lsOffer[who[i]][k];
+			if (!pSlot)
+				continue;
+			float nextTry = pSlot->kind == kind ? pSlot->nextTry : 0.0f;
+			*pSlot = LsModeOffer();
+			pSlot->kind = kind;
+			pSlot->at = at;
+			pSlot->ent = ent;
+			pSlot->cost = cost;
+			pSlot->order = order;
+			pSlot->nextTry = nextTry;
+		}
 		if (n > 0)
 			s_lsModeOn = true;
 		return;
