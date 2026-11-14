@@ -1398,7 +1398,16 @@ bool CCSBot::LsModeOfferTick()
 		LsModeSetGoal(LS_GOAL_OFFER, at, 64.0f, 0, 72, 20.0f, pBest->infl);
 	}
 	else
+	{
+		// (the trap's x y z is the gate it covers: the switch is the entity - that's where it goes)
+		if (pBest->kind == LS_OFFER_TRAP && pBest->ent > 0)
+		{
+			edict_t *pEdict = INDEXENT(pBest->ent);
+			if (pEdict && !pEdict->free && pEdict->pvPrivateData)
+				at = CBaseEntity::Instance(pEdict)->Center();
+		}
 		LsModeSetGoal(LS_GOAL_OFFER, at, 64.0f, pBest->ent, pBest->kind == LS_OFFER_TRAP ? 90 : 72, 20.0f, pBest->infl);
+	}
 	LsWhy(pBest->kind == LS_OFFER_PERK ? "mode offer: a perk" : pBest->kind == LS_OFFER_BENCH ? "mode offer: the bench"
 		: pBest->kind == LS_OFFER_BOX ? "mode offer: the box" : pBest->kind == LS_OFFER_TRAP ? "mode offer: the trap, gate under pressure"
 		: "mode offer: placing a turret");
@@ -1691,7 +1700,14 @@ void CCSBot::LsModeTick()
 	// (a player it's hunting, in sight: the fight is with them, unless someone closer is on it)
 	LsModeHuntPrefer();
 
-	bool shooting = LsModeShootTick();
+	// (on its way to pull the trap for a swamped gate: it runs for the switch rather than stand and
+	// shoot - the shooting kept it rooted, and no bot ever got there)
+	bool trapRun = false;
+	for (int i = 0; i < LS_MODE_GOALS; i++)
+		if (m_lsModeGoal[i].kind == LS_GOAL_OFFER && m_lsModeGoal[i].care && m_lsModeOfferKind == LS_OFFER_TRAP
+			&& (m_lsModeGoal[i].until <= 0.0f || gpGlobals->time < m_lsModeGoal[i].until))
+			trapRun = true;
+	bool shooting = trapRun ? false : LsModeShootTick();
 
 	if (LsModeEscape())
 		return;
