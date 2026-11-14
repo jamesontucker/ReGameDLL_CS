@@ -1724,6 +1724,10 @@ public:
 	bool LsModePeace();								// a mode's peace (a loot-up), or the moment after it: no player enemies
 	bool LsModeGearing();							// just after the peace: gearing up before hunting
 	bool LsModeKitted();							// armor, a pistol and a spare magazine beside a main gun
+	bool LsModePickHigh(Vector *out);				// a sightline spot on high ground
+	bool LsModePerchTick();							// high ground held a while, then the next along
+	float m_lsModePerchUntil = 0.0f;				// holding its high spot till then
+	float m_lsModePerchAt = 0.0f;					// next perch decision
 	int LsModeLayerWant();							// the layer it would rather loot on (-1 anywhere: a hot dropper)
 	bool LsModeLetsBe(CBasePlayer *pPlayer);		// ...someone in sight left be (not right on it, nor coming at it)
 	const Vector *LsModeSpot() const;				// the spot it holds for a station (teammates pick others)
