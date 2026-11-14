@@ -1752,6 +1752,8 @@ public:
 	bool LsModeOfferTick();							// a perk, the bench, the box, the trap, a turret: when to take one
 	float m_lsModeOfferAt = 0.0f;
 	float m_lsModeReviveBackUntil = 0.0f;			// backed off a revive under fire till then
+	int m_lsModeReviveFor = 0;						// the downed one its revive is for...
+	float m_lsModeReviveWaitFrom = 0.0f;			// ...and since when
 	float m_lsModeSmokeAt = -100.0f;				// its smoke for a revive, thrown then...
 	Vector m_lsModeSmokeOn;							// ...on them there
 	bool LsModePickHigh(Vector *out);				// a sightline spot on high ground

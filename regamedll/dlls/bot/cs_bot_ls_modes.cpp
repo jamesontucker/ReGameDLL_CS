@@ -100,7 +100,10 @@ static bool LsModeIsDown(CBaseEntity *pPlayer)
 	int i = pPlayer ? pPlayer->entindex() : 0;
 	if (i >= 1 && i <= MAX_CLIENTS && s_lsDown[i])
 		return pPlayer->IsAlive();
-	return pPlayer && (pPlayer->pev->flags & FL_NOTARGET) && pPlayer->pev->view_ofs.z < 20.0f;
+	// (no hint: no-target with the view low, or - not hidden, with ls_down_finish - the view low and
+	// held to a crawl: crouching keeps its speed)
+	return pPlayer && pPlayer->pev->view_ofs.z < 20.0f
+		&& ((pPlayer->pev->flags & FL_NOTARGET) || (pPlayer->IsAlive() && pPlayer->pev->maxspeed > 2.0f && pPlayer->pev->maxspeed <= 60.0f));
 }
 
 // How far a bot's own personality and skill count against what the mode asked (an order's
@@ -2242,8 +2245,20 @@ void CCSBot::LsModeGoalTick(LsModeGoal &g)
 	{
 		// (one enemy a way off is a risk most take; the bold take one close by, or two further off;
 		// with its personality fully in charge, the careful take none and the boldest three)
-		int tolerance = sway >= 1.5f ? int(0.5f + 2.5f * LsAggro()) : (LsAggro() > 0.65f ? 2 : 1);
+		// (bravery: the bold and the team players go in under more; a careful loner waits)
+		float brave = 0.5f * LsAggro() + 0.5f * LsTeamwork();
+		int tolerance = sway >= 1.5f ? int(0.5f + 2.5f * brave) : int(0.3f + 2.4f * brave);
 		float away = (pGoalThing->pev->origin - pev->origin).Length();
+		// (waited long with them bleeding out: one watching from a way off is a risk the braver take
+		// now - from cover by them, never into more than that)
+		if (m_lsModeReviveFor != g.ent)
+		{
+			m_lsModeReviveFor = g.ent;
+			m_lsModeReviveWaitFrom = now;
+		}
+		if (reviveThreat > tolerance && reviveThreat <= tolerance + 1 && reviveThreat <= 2 && away < 450.0f
+			&& now - m_lsModeReviveWaitFrom > 25.0f - 15.0f * brave && LsHealth() >= 50.0f)
+			tolerance = reviveThreat;
 		if (g.phase == 1 && GetTimeSinceAttacked() < 1.0f && (LsHealth() < 50.0f || reviveThreat >= 2))
 		{
 			g.phase = 0;
