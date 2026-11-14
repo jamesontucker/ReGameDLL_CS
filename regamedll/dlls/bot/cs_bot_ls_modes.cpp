@@ -1756,6 +1756,21 @@ void CCSBot::LsModeGoalTick(LsModeGoal &g)
 				LsWhy("mode revive: smoke on them first");
 				return;
 			}
+			// (not from far off; nearer, up to cover by them - where the one who downed them is in
+			// sight to deal with - then the revive once it's clear)
+			if (away > 1600.0f)
+				return;
+			if (away > 450.0f && now >= g.nextTry && m_repathTimer.IsElapsed())
+			{
+				g.nextTry = now + 4.0f;
+				Vector cover;
+				if (LsModePickSpot(pGoalThing->pev->origin, 400.0f, &cover))
+				{
+					LsModeMove(cover, false);
+					LsWhy("mode revive: up to cover by them");
+					return;
+				}
+			}
 			if (m_lsWhy == nullptr || Q_strcmp(m_lsWhy, "mode revive: waiting for it to clear"))
 				LsWhy("mode revive: waiting for it to clear");
 			return;
