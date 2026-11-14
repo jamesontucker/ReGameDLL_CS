@@ -2402,6 +2402,20 @@ void CLsCreature::Spawn()
 
 	MAKE_STRING_CLASS("ls_creature", pev);
 
+	// the live cap holds for every new one, however it's made (a plugin's create_entity +
+	// DispatchSpawn too, not only "ls_creature spawn"); placed in the map ones always come
+	if (!m_improv && !m_fromMap)
+	{
+		int alive = LsAliveCount();
+		if (alive >= int(LsCreatureCapNow()))
+		{
+			if (ls_creature_debug.value > 0.0f)
+				CONSOLE_ECHO("ls_creature: %d alive already (ls_creature_max %.0f, live cap now %.0f): not spawned\n", alive, ls_creature_max.value, LsCreatureCapNow());
+			pev->flags |= FL_KILLME;
+			return;
+		}
+	}
+
 	if (!m_improv)
 	{
 		m_improv = new CCreatureImprov(this);
