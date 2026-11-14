@@ -2317,8 +2317,11 @@ void CCSBot::LsModeGoalTick(LsModeGoal &g)
 				continue;
 			TraceResult tr;
 			UTIL_TraceLine(pPlayer->pev->origin + pPlayer->pev->view_ofs, mate + Vector(0, 0, 8), ignore_monsters, pPlayer->edict(), &tr);
+			// (one busy fighting someone else is less of a worry: close by, one; a way off, none)
+			bool busy = pPlayer->IsBot() && static_cast<CCSBot *>(pPlayer)->IsAttacking() && static_cast<CCSBot *>(pPlayer)->GetEnemy()
+				&& static_cast<CCSBot *>(pPlayer)->GetEnemy() != this && static_cast<CCSBot *>(pPlayer)->GetEnemy() != pGoalThing;
 			if (tr.flFraction == 1.0f || tr.pHit == pGoalThing->edict())
-				reviveThreat += d < 350.0f ? 2 : 1;
+				reviveThreat += busy ? (d < 350.0f ? 1 : 0) : (d < 350.0f ? 2 : 1);
 		}
 		// (its own smoke on them a moment ago: they can't see in)
 		if (now - m_lsModeSmokeAt < 12.0f && (m_lsModeSmokeOn - mate).IsLengthLessThan(200.0f))
