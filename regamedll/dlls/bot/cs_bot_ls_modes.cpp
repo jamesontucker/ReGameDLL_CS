@@ -1698,7 +1698,8 @@ void CCSBot::LsModeTick()
 		}
 	}
 	// (Battle Royale: strayed well away from its squad - back toward them, over a mode's errand)
-	if (!gearing && !s_lsPeace && s_lsRing.on && (LsModeSquadTick(true) || (gpGlobals->time < m_lsModeSquadUntil && LsModeHeadedTo(m_lsModeMoveTo))))
+	// (gearing up too, a looser leash: squads loot near each other)
+	if (!s_lsPeace && s_lsRing.on && (LsModeSquadTick(true, gearing) || (gpGlobals->time < m_lsModeSquadUntil && LsModeHeadedTo(m_lsModeMoveTo))))
 		return;
 
 	// the goal to act on: the most important it cares about (the nearer of two alike); spent
@@ -1734,7 +1735,7 @@ void CCSBot::LsModeTick()
 			return;
 		// (Battle Royale after the gearing up: a fight between others near by - in on it or away
 		// from it - and back toward its squad when it's strayed)
-		if (!gearing && !s_lsPeace && s_lsRing.on && (LsModeThirdTick() || LsModeSquadTick(false)))
+		if (!gearing && !s_lsPeace && s_lsRing.on && (LsModeThirdTick() || LsModeSquadTick(false, false)))
 			return;
 		// (geared up and a high-ground player: a sightline held a while, then the next along)
 		if (!gearing && !s_lsPeace && s_lsPeaceEndAt >= 0.0f && !shooting && LsModeLayerWant() == 2 && LsModePerchTick())
@@ -1764,8 +1765,14 @@ void CCSBot::LsModeTick()
 	// takes is the revive's own weighing, by who it is)
 	const LsModeGoal &gb = m_lsModeGoal[best];
 	CBaseEntity *pBestThing = gb.ent > 0 ? (CBaseEntity *)gb.thing : nullptr;
-	bool reviveClose = (gb.kind == LS_GOAL_USE || gb.kind == LS_GOAL_HOLD) && pBestThing && pBestThing->IsPlayer()
-		&& LsModeDist2D(gb.at, pev->origin) < 160.0f;
+	bool reviveBest = (gb.kind == LS_GOAL_USE || gb.kind == LS_GOAL_HOLD) && pBestThing && pBestThing->IsPlayer();
+	bool reviveClose = reviveBest && LsModeDist2D(gb.at, pev->origin) < 160.0f;
+	// (a fight it's lost sight of, with a squad mate bleeding out: it breaks off and goes to them)
+	if (reviveBest && IsAttacking() && !m_isEnemyVisible && GetTimeSinceAttacked() > 2.0f && GetTimeSinceLastSawEnemy() > 1.5f)
+	{
+		StopAttacking();
+		LsWhy("mode revive: breaking off a fight for them");
+	}
 	if (!LsFree() || (m_isEnemyVisible && !reviveClose) || IsOnLadder())
 		return;
 	if (LsModePushTick(m_lsModeGoal[best]))
@@ -1814,7 +1821,7 @@ bool CCSBot::LsModeHealTick()
 
 // Battle Royale, a squad: back toward the nearest squad mate who's up when it's strayed - a team
 // player keeps close, a loner wanders far (true: on its way)
-bool CCSBot::LsModeSquadTick(bool overGoal)
+bool CCSBot::LsModeSquadTick(bool overGoal, bool loose)
 {
 	float now = gpGlobals->time;
 	if (!g_lsModeTies || now < m_lsModeSquadAt || now < m_lsModePushUntil || IsOnLadder() || !m_repathTimer.IsElapsed())
@@ -1839,7 +1846,7 @@ bool CCSBot::LsModeSquadTick(bool overGoal)
 	});
 	// (a squad stays in reach of each other - a knocked one bleeds out in 45 s; over an errand of the
 	// mode's own - a crate, a camping spot - only when it's strayed well beyond that)
-	float leash = (300.0f + 900.0f * (1.0f - LsTeamwork())) * (overGoal ? 1.6f : 1.0f);
+	float leash = (300.0f + 900.0f * (1.0f - LsTeamwork())) * (overGoal ? 1.6f : 1.0f) * (loose ? 1.5f : 1.0f);
 	if (!pMate || mateDist < leash)
 		return false;
 	Vector spot;
