@@ -1743,6 +1743,9 @@ public:
 	void LsModeHuntTick(LsModeGoal &g);				// hunting a player down: toward where they are now
 	void LsModeHuntPrefer();						// the hunted one in sight: the fight is with them
 	float m_lsModeHuntAt = 0.0f;					// next check for that
+	EntityHandle<CBasePlayer> m_lsModeHunting;		// the one it's hunting now (none: not hunting)...
+	float m_lsModeHuntingUntil = 0.0f;				// ...as of a moment ago
+	float m_lsModeHuntSway = 1.0f;					// ...and that hunt's personality sway
 	float m_lsModeNatureAt = 0.0f;					// next write of its nature to vuser2/vuser3 (for plugins)
 	float m_lsModeThirdAt = 0.0f;
 	float m_lsModePersonaFor = -1.0f;				// its persona written to the trace for this map (its start time)
