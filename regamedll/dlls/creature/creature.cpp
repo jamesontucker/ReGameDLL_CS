@@ -47,7 +47,7 @@ cvar_t ls_creature_budget    = { "ls_creature_budget", "40", 0, 40.0f, nullptr }
 cvar_t ls_creature_debug     = { "ls_creature_debug", "0", 0, 0.0f, nullptr };
 cvar_t ls_creature_last      = { "ls_creature_last", "0", 0, 0.0f, nullptr };		// the last one spawned (entity index), for plugins
 cvar_t ls_creature_alive     = { "ls_creature_alive", "0", 0, 0.0f, nullptr };		// how many are alive (all providers)
-cvar_t ls_creature_ver       = { "ls_creature_ver", "1", 0, 1.0f, nullptr };
+cvar_t ls_creature_ver       = { "ls_creature_ver", "2", 0, 2.0f, nullptr };	// 2: state in iuser3, target in enemy; behave default, speed, tier
 cvar_t ls_creature_reserve   = { "ls_creature_reserve", "40 60", 0, 0.0f, nullptr };	// model and sound slots creatures always leave free
 cvar_t ls_creature_sounds    = { "ls_creature_sounds", "2", 0, 2.0f, nullptr };		// sounds of each kind a type keeps (idle, alert, ...)
 cvar_t ls_creature_skipped   = { "ls_creature_skipped", "", 0, 0.0f, nullptr };		// types left out this map for want of precache room
@@ -2458,19 +2458,7 @@ void CLsCreature::KeyValue(KeyValueData *pkvd)
 	else if (FStrEq(key, "owner"))
 		m_ownerIndex = Q_atoi(value);
 	else if (FStrEq(key, "tier"))
-	{
-		// (0 or 1 = normal; also takes effect on one already spawned: a plugin's DispatchKeyValue after the spawn)
-		int before = Tier();
-		m_tier = clamp(Q_atoi(value), 1, 3);
-		if (m_improv && IsAlive() && Tier() != before)
-		{
-			const LsCreatureType *t = GetType();
-			float ratio = (before >= 2 ? 1.0f / t->tierHealth[before - 2] : 1.0f) * (Tier() >= 2 ? t->tierHealth[Tier() - 2] : 1.0f);
-			pev->max_health *= ratio;
-			pev->health *= ratio;
-			ApplyLook();
-		}
-	}
+		SetTier(Q_atoi(value));		// (also on one already spawned: a plugin's DispatchKeyValue after the spawn)
 	else
 	{
 		CBaseMonster::KeyValue(pkvd);
@@ -2596,6 +2584,7 @@ void CLsCreature::Setup()
 	ApplyLook();
 
 	m_bloodColor = t->bloodColor;
+	m_speedScale = 1.0f;
 	m_runSpeed = (m_keySpeed > 0.0f) ? m_keySpeed : t->speed;
 	m_walkSpeed = Q_min(t->walkSpeed, m_runSpeed);
 	if (m_walkSpeed <= 0.0f)
@@ -3197,6 +3186,66 @@ void CLsCreature::SetBehaviour(int behaviour, const Vector *spot)
 	m_patrolCorner = nullptr;
 	if (m_mode == MODE_HOME || m_mode == MODE_SEARCH)
 		GoHome();
+}
+
+// 0 or 1 = normal, 2, 3 (see ApplyLook); on a live one the health keeps its share
+void CLsCreature::SetTier(int tier)
+{
+	int before = Tier();
+	m_tier = clamp(tier, 1, 3);
+	if (m_improv && IsAlive() && Tier() != before)
+	{
+		const LsCreatureType *t = GetType();
+		float ratio = (before >= 2 ? 1.0f / t->tierHealth[before - 2] : 1.0f) * (Tier() >= 2 ? t->tierHealth[Tier() - 2] : 1.0f);
+		pev->max_health *= ratio;
+		pev->health *= ratio;
+		ApplyLook();
+	}
+}
+
+void CLsCreature::SetSpeedScale(float scale)
+{
+	scale = clamp(scale, 0.2f, 3.0f);
+	float ratio = scale / Q_max(m_speedScale, 0.01f);
+	m_runSpeed *= ratio;
+	m_walkSpeed *= ratio;
+	m_speedScale = scale;
+}
+
+// Back to what it does on its own: its spawn behaviour (the key's, a patrol, or the type's), its
+// spawn spot as home, no target it was told to attack. (A hunter picks its next target itself.)
+void CLsCreature::Resume()
+{
+	const LsCreatureType *t = GetType();
+	if (!t || !IsAlive())
+		return;
+	m_forcedTarget = nullptr;
+	m_target = nullptr;
+	m_hEnemy = nullptr;
+	m_home = m_spawnOrigin;
+	m_behaviour = (m_homeBehaviour > 0) ? m_homeBehaviour - 1 : m_patrolStart ? LSB_PATROL : t->behaviour;
+	if (!t->moves)
+		m_behaviour = LSB_GUARD;
+	m_patrolCorner = nullptr;
+	if (m_mode != MODE_DEAD)
+		GoHome();
+}
+
+void CLsCreature::PublishState()
+{
+	int state = LSST_NONE;
+	switch (m_mode)
+	{
+	case MODE_HOME: state = LSST_IDLE + clamp(m_behaviour, 0, int(LSB_FLEE)); break;
+	case MODE_CHASE: state = LSST_CHASE; break;
+	case MODE_ATTACK: state = LSST_ATTACK; break;
+	case MODE_SEARCH: state = LSST_SEARCH; break;
+	case MODE_FLEE: state = LSST_FLEE; break;
+	case MODE_DEAD: state = LSST_DEAD; break;
+	}
+	pev->iuser3 = state;
+	CBaseEntity *pTarget = m_target;
+	pev->enemy = (pTarget && m_mode != MODE_DEAD) ? pTarget->edict() : nullptr;
 }
 
 void CLsCreature::KillQuietly()
@@ -4373,6 +4422,7 @@ void CLsCreature::CreatureThink()
 	LsMark("creature think", entindex());
 	double t0 = LsPerfClock();
 	CreatureThinkBody();
+	PublishState();
 	if (t0 > 0.0)
 		LsPerfAddCreature(LsPerfClock() - t0);
 	LsMark("creature think end", entindex());
@@ -4858,9 +4908,40 @@ void LsCreature_f()
 		return;
 	}
 
+	if (!Q_stricmp(cmd, "speed") || !Q_stricmp(cmd, "tier"))
+	{
+		// speed <ent|all|type> <0.2..3>: times its normal walk and run until it dies;
+		// tier <ent|all|type> <0..3>
+		if (CMD_ARGC() < 4)
+		{
+			CONSOLE_ECHO("usage: ls_creature %s <entity|all|type> <%s>\n", cmd, !Q_stricmp(cmd, "speed") ? "0.2..3" : "0..3");
+			return;
+		}
+		bool speed = !Q_stricmp(cmd, "speed");
+		float value = Q_atof(CMD_ARGV(3));
+		LsForEachMatching(CMD_ARGV(2), [&](ILsCreature *c) {
+			if (Q_strcmp(c->Provider(), "ls") || !c->Entity())
+				return;
+			CLsCreature *pCreature = static_cast<CLsCreature *>(c->Entity());
+			if (speed)
+				pCreature->SetSpeedScale(value);
+			else
+				pCreature->SetTier(int(value));
+		});
+		return;
+	}
+
 	if (!Q_stricmp(cmd, "behave") || !Q_stricmp(cmd, "behaviour") || !Q_stricmp(cmd, "behavior"))
 	{
-		// behave <ent|all|type> <idle|wander|patrol|guard|chase|flee> [x y z]
+		// behave <ent|all|type> <idle|wander|patrol|guard|chase|flee|default> [x y z]
+		if (!Q_stricmp(CMD_ARGV(3), "default"))
+		{
+			LsForEachMatching(CMD_ARGV(2), [&](ILsCreature *c) {
+				if (!Q_strcmp(c->Provider(), "ls") && c->Entity())
+					static_cast<CLsCreature *>(c->Entity())->Resume();
+			});
+			return;
+		}
 		int behaviour = LsNameIndex(CMD_ARGV(3), s_behaviourNames, LSB_COUNT, -1);
 		if (behaviour < 0)
 		{
