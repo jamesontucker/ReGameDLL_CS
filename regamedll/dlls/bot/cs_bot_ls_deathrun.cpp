@@ -1939,6 +1939,13 @@ void CCSBot::LsDrPathTick()
 				}
 				r.holdUntil = Q_max(r.holdUntil, now + 0.3f);
 				r.holdLook = land;
+				if (r.floorWaitSince == now && cv_bot_ls_trace.value > 0.0f)
+				{
+					// (what it's waiting for: the gap's far area and the point looked at)
+					char note[160];
+					Q_snprintf(note, sizeof(note), "deathrun: floor gap wait: area %d -> %d, land %.0f %.0f %.0f", A->GetID(), B->GetID(), land.x, land.y, land.z);
+					LsTraceNote(note);
+				}
 				LsWhy("deathrun: waits for the floor");
 			}
 			return;
@@ -1980,6 +1987,12 @@ void CCSBot::LsDrPathTick()
 				return;
 			r.holdUntil = Q_max(r.holdUntil, now + 0.3f);
 			r.holdLook = m_path[i].pos;
+			if (r.floorWaitSince == now && cv_bot_ls_trace.value > 0.0f)
+			{
+				char note[160];
+				Q_snprintf(note, sizeof(note), "deathrun: floor stretch wait: area %d, at %.0f %.0f %.0f", B->GetID(), m_path[i].pos.x, m_path[i].pos.y, m_path[i].pos.z);
+				LsTraceNote(note);
+			}
 			LsWhy("deathrun: waits for the floor");
 			return;
 		}
