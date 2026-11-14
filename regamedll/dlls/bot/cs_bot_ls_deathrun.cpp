@@ -513,7 +513,6 @@ struct Tele { int from, to; Vector at; };
 // A door between two learned floors (nav generation doesn't connect through a closed door): linked,
 // and the button that opens it (a trap whose wiring moves it), if a runner can get to that button
 struct DoorLink { int from, to; EntityHandle<CBaseEntity> door; Vector at; int trap = -1; };
-static bool DoorShut(const DoorLink &dl);
 
 struct Death { Vector at; int count; bool trap; float when; };
 
@@ -535,6 +534,20 @@ static std::vector<Box> s_hurts;
 static std::vector<Trap> s_traps;
 static std::vector<Tele> s_teles;
 static std::vector<DoorLink> s_doorLinks;
+
+// Is the door of this link in the way right now (a hull between the two floors hits it)
+static bool DoorShut(const DoorLink &dl)
+{
+	CBaseEntity *pDoor = dl.door;
+	if (!pDoor || dl.from < 0 || dl.to < 0 || size_t(dl.from) >= s_areas.size() || size_t(dl.to) >= s_areas.size())
+		return false;
+	Vector a = *s_areas[dl.from]->GetCenter() + Vector(0, 0, HalfHumanHeight + 4.0f);
+	Vector b = *s_areas[dl.to]->GetCenter() + Vector(0, 0, HalfHumanHeight + 4.0f);
+	TraceResult tr;
+	UTIL_TraceHull(a, b, ignore_monsters, human_hull, nullptr, &tr);
+	return tr.flFraction < 1.0f && tr.pHit == pDoor->edict();
+}
+
 static std::vector<Death> s_deaths;
 static int s_endIdx = -1, s_startIdx = -1, s_tStartIdx = -1;
 static Vector s_end;
@@ -1829,19 +1842,6 @@ void CCSBot::LsDrPostUpdate()
 		if (DotProduct(to, gpGlobals->v_forward) > 0.9f && gap.Length() <= 60.0f)
 			UseEnvironment();
 	}
-}
-
-// Is the door of this link in the way right now (a hull between the two floors hits it)
-static bool DoorShut(const DoorLink &dl)
-{
-	CBaseEntity *pDoor = dl.door;
-	if (!pDoor || dl.from < 0 || dl.to < 0 || size_t(dl.from) >= s_areas.size() || size_t(dl.to) >= s_areas.size())
-		return false;
-	Vector a = *s_areas[dl.from]->GetCenter() + Vector(0, 0, HalfHumanHeight + 4.0f);
-	Vector b = *s_areas[dl.to]->GetCenter() + Vector(0, 0, HalfHumanHeight + 4.0f);
-	TraceResult tr;
-	UTIL_TraceHull(a, b, ignore_monsters, human_hull, nullptr, &tr);
-	return tr.flFraction < 1.0f && tr.pHit == pDoor->edict();
 }
 
 // In path movement: the next stretch crosses a gap (a jump, armed for LsDrDrive), goes through a
