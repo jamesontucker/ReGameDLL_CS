@@ -51,8 +51,8 @@ cvar_t ls_creature_frags     = { "ls_creature_frags", "0", 0, 0.0f, nullptr };		
 
 cvar_t ls_watchdog           = { "ls_watchdog", "10", 0, 10.0f, nullptr };
 cvar_t ls_creature_adaptive  = { "ls_creature_adaptive", "1", 0, 1.0f, nullptr };	// lower the live cap while the server's fps is low (players never see it)
-cvar_t ls_creature_fps_floor = { "ls_creature_fps_floor", "90", 0, 90.0f, nullptr };	// server fps under this for 2 s: lower the cap
-cvar_t ls_creature_fps_ok    = { "ls_creature_fps_ok", "110", 0, 110.0f, nullptr };	// at or above this for 10 s: raise it again
+cvar_t ls_creature_fps_floor = { "ls_creature_fps_floor", "85", 0, 85.0f, nullptr };	// server fps under this for 2 s: lower the cap
+cvar_t ls_creature_fps_ok    = { "ls_creature_fps_ok", "105", 0, 105.0f, nullptr };	// at or above this for 10 s: raise it again
 cvar_t ls_creature_cap_now   = { "ls_creature_cap_now", "0", 0, 0.0f, nullptr };		// the live cap now (read-only: ls_creature_max, lowered while fps is low)
 cvar_t ls_creature_friendly_max = { "ls_creature_friendly_max", "8", 0, 8.0f, nullptr };	// friendly creatures (bought turrets) alive at once, apart from ls_creature_max
 cvar_t ls_perf               = { "ls_perf", "0", 0, 0.0f, nullptr };		// seconds between performance lines in the log (0 = off)
