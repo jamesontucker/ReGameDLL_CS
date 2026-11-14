@@ -328,7 +328,18 @@ static bool GapJump(const CNavNode *node, int dir, Vector *land, Vector *landNor
 	// (a run-up: two steps behind it, straight)
 	const CNavNode *back = node->GetConnectedNode(OppositeDirection((NavDirType)dir));
 	bool runup = back && back->GetConnectedNode(OppositeDirection((NavDirType)dir)) != nullptr;
-	return GapJumpAt(*node->GetPosition(), dir, runup, land, landNormal, false);
+	// (a full running jump, or a hop at walking pace where a full one carries past the landing - a
+	// ledge or a lip just across, lava beyond: the runner hops it the same way)
+	static const float paces[] = { 0.0f, 150.0f, 130.0f, 110.0f };
+	for (float pace : paces)
+	{
+		s_jumpSpeed = pace;
+		bool ok = GapJumpAt(*node->GetPosition(), dir, runup, land, landNormal, false);
+		s_jumpSpeed = 0.0f;
+		if (ok)
+			return true;
+	}
+	return false;
 }
 
 } // namespace LsDr
@@ -988,6 +999,8 @@ struct Runner
 	float backUntil = 0.0f;			// backing up for a run-up
 	bool tele = false;				// walking into a teleport rather than jumping
 	float hopSpeed = 0.0f;			// a hop at this pace (small blocks), 0: a full running jump
+	Vector paceFor;					// the learned gap whose pace was worked out, and that pace
+	float paceCached = 0.0f;
 	Vector lastGround;
 	bool lastGroundSet = false;
 	bool alive = false;
@@ -1959,8 +1972,29 @@ void CCSBot::LsDrPathTick()
 			return;
 		}
 		r.floorWaitSince = 0.0f;
+		// (the pace the learned jump needs: full, or a hop where a full run carries past the landing;
+		// worked out once per gap)
+		if ((land - r.paceFor).IsLengthGreaterThan(1.0f))
+		{
+			r.paceFor = land;
+			r.paceCached = 0.0f;
+			static const float paces[] = { 0.0f, 150.0f, 130.0f, 110.0f };
+			Vector l2, n2;
+			s_learnHurts = s_hurts;
+			for (float sp : paces)
+			{
+				s_jumpSpeed = sp;
+				bool ok = GapJumpVec(Vector(takeoff.x - d.x * 12.0f, takeoff.y - d.y * 12.0f, A->GetZ(&takeoff)), d, true, &l2, &n2, false);
+				s_jumpSpeed = 0.0f;
+				if (ok)
+				{
+					r.paceCached = sp;
+					break;
+				}
+			}
+		}
 		r.gapArmed = true;
-		r.hopSpeed = 0.0f;
+		r.hopSpeed = r.paceCached;
 		r.armedAt = now;
 		r.takeoff = takeoff;
 		r.landing = land;
