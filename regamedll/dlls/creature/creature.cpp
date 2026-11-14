@@ -60,6 +60,7 @@ cvar_t ls_creature_fps_floor = { "ls_creature_fps_floor", "85", 0, 85.0f, nullpt
 cvar_t ls_creature_fps_ok    = { "ls_creature_fps_ok", "105", 0, 105.0f, nullptr };	// at or above this for 10 s: raise it again
 cvar_t ls_creature_cap_now   = { "ls_creature_cap_now", "0", 0, 0.0f, nullptr };		// the live cap now (read-only: ls_creature_max, lowered while fps is low)
 cvar_t ls_creature_friendly_max = { "ls_creature_friendly_max", "8", 0, 8.0f, nullptr };	// friendly creatures (bought turrets) alive at once, apart from ls_creature_max
+cvar_t ls_creature_flee_last = { "ls_creature_flee_last", "0", 0, 0.0f, nullptr };	// with this many hostile creatures alive or fewer, none flees (0 = off)
 cvar_t ls_perf               = { "ls_perf", "0", 0, 0.0f, nullptr };		// seconds between performance lines in the log (0 = off)
 cvar_t ls_crash_quiet        = { "ls_crash_quiet", "1", 0, 1.0f, nullptr };		// a dedicated server's crash: log and end, no dialog (Windows/Wine)		// seconds without a frame before the marks are written (0 = off)
 
@@ -624,6 +625,7 @@ void LsCreatures_RegisterCVars()
 	CVAR_REGISTER(&ls_perf);
 	CVAR_REGISTER(&ls_creature_adaptive);
 	CVAR_REGISTER(&ls_creature_friendly_max);
+	CVAR_REGISTER(&ls_creature_flee_last);
 	CVAR_REGISTER(&ls_creature_fps_floor);
 	CVAR_REGISTER(&ls_creature_fps_ok);
 	CVAR_REGISTER(&ls_creature_cap_now);
@@ -829,6 +831,7 @@ static void LsTypeDefaults(LsCreatureType *t, const char *name)
 	Q_strlcpy(t->sound[LSS_PAIN], "zombie/zo_pain1.wav zombie/zo_pain2.wav | player/pl_pain2.wav player/pl_pain4.wav");
 	Q_strlcpy(t->sound[LSS_DIE], "zombie/zo_pain2.wav | player/die1.wav player/die3.wav");
 	t->friendly = false;
+	t->fleeHome = true;
 	t->enrageBelow = 0.0f;
 	t->enrageSpeed = 1.35f;
 	t->enrageDamage = 1.3f;
@@ -1323,6 +1326,7 @@ static void LsSetTypeKey(LsCreatureType *t, const char *key, const char *value)
 	else if (!Q_stricmp(key, "attack_delay")) t->attackDelay = LsNum(value, 0.0f, 3.0f, t->attackDelay);
 	else if (!Q_stricmp(key, "spread")) t->spread = LsNum(value, 0.0f, 45.0f, t->spread);
 	else if (!Q_stricmp(key, "flee_hp")) t->fleeHealth = LsNum(value, 0.0f, 1.0f, t->fleeHealth);
+	else if (!Q_stricmp(key, "flee_home")) t->fleeHome = Q_atoi(value) != 0;
 	else if (!Q_stricmp(key, "behaviour") || !Q_stricmp(key, "behavior")) t->behaviour = LsNameIndex(value, s_behaviourNames, LSB_COUNT, t->behaviour);
 	else if (!Q_stricmp(key, "radius") || !Q_stricmp(key, "guard_radius")) t->guardRadius = LsNum(value, 32.0f, 8192.0f, t->guardRadius);
 	else if (!Q_stricmp(key, "target")) t->targeting = LsNameIndex(value, s_targetingNames, ARRAYSIZE(s_targetingNames), t->targeting);
@@ -2449,6 +2453,8 @@ void CLsCreature::KeyValue(KeyValueData *pkvd)
 		m_persist = Q_atoi(value) != 0;
 	else if (FStrEq(key, "friendly"))
 		m_keyFriendly = Q_atoi(value) ? 2 : 1;
+	else if (FStrEq(key, "flee_hp"))
+		m_keyFleeHp = LsNum(value, 0.0f, 1.0f, 0.0f) + 1.0f;	// (works on a live one too)
 	else if (FStrEq(key, "owner"))
 		m_ownerIndex = Q_atoi(value);
 	else if (FStrEq(key, "tier"))
@@ -3631,7 +3637,8 @@ BOOL CLsCreature::TakeDamage(entvars_t *pevInflictor, entvars_t *pevAttacker, fl
 		m_lastAttacker = pAttacker;
 
 		// hurt badly: run (once in a while)
-		if (t->fleeHealth > 0.0f && pev->health < pev->max_health * t->fleeHealth && t->moves
+		float fleeHp = (m_keyFleeHp > 0.0f) ? m_keyFleeHp - 1.0f : t->fleeHealth;
+		if (fleeHp > 0.0f && pev->health < pev->max_health * fleeHp && t->moves
 			&& m_mode != MODE_FLEE && gpGlobals->time >= m_fleeCooldown)
 		{
 			StartFlee(pAttacker->pev->origin);
@@ -3726,6 +3733,13 @@ void CLsCreature::StartFlee(const Vector &from)
 	if (!t->moves)
 		return;
 
+	// never: flee_hp=0 on this one; or only a few left (ls_creature_flee_last), when a mode
+	// wants the round to end rather than players hunting a straggler across the map
+	if (m_keyFleeHp > 0.0f && m_keyFleeHp - 1.0f <= 0.0f)
+		return;
+	if (ls_creature_flee_last.value > 0.0f && !m_friendly && LsAliveCount() <= int(ls_creature_flee_last.value))
+		return;
+
 	m_fleeFrom = from;
 	m_fleeUntil = gpGlobals->time + RANDOM_FLOAT(5.0f, 9.0f);
 	m_mode = MODE_FLEE;
@@ -3774,6 +3788,32 @@ bool CLsCreature::PickWanderSpot(Vector *spot, float radius) const
 
 bool CLsCreature::PickFleeSpot(Vector *spot, const Vector &from) const
 {
+	// back toward home (where it spawned: a wave's spawner, its post), so it comes back into the
+	// fight from there after the cooldown instead of ranging off across the map; already near
+	// home, or home is where the threat is, it just backs off nearby
+	const LsCreatureType *t = GetType();
+	bool homeward = t->fleeHome && (m_home - pev->origin).Make2D().IsLengthGreaterThan(300.0f)
+		&& (m_home - from).Make2D().Length() > (pev->origin - from).Make2D().Length() * 0.8f;
+	if (homeward && !TheNavAreaList.empty())
+	{
+		CNavArea *pick = nullptr;
+		int seen = 0;
+		for (auto area : TheNavAreaList)
+		{
+			if ((*area->GetCenter() - m_home).Make2D().IsLengthGreaterThan(350.0f))
+				continue;
+			if ((*area->GetCenter() - from).Make2D().IsLengthLessThan(300.0f))
+				continue;
+			if (RANDOM_LONG(0, seen++) == 0)
+				pick = area;
+		}
+		if (pick)
+		{
+			*spot = *pick->GetCenter();
+			return true;
+		}
+	}
+
 	if (!TheNavAreaList.empty())
 	{
 		// the area that best puts distance between it and the threat, among some nearby
@@ -3783,7 +3823,7 @@ bool CLsCreature::PickFleeSpot(Vector *spot, const Vector &from) const
 		for (auto area : TheNavAreaList)
 		{
 			float mine = (*area->GetCenter() - pev->origin).Make2D().Length();
-			if (mine < 250.0f || mine > 1400.0f)
+			if (mine < 250.0f || mine > (t->fleeHome ? 800.0f : 1400.0f))
 				continue;
 
 			// (only some of them, at random: a busy map has thousands)
