@@ -1139,9 +1139,16 @@ bool CCSBot::LsModeOfferTick()
 	if (now < m_lsModeOfferAt)
 		return false;
 	m_lsModeOfferAt = now + RANDOM_FLOAT(1.0f, 2.5f);
+	// (already on its way to one it picked - a lower one, the mode's "go to the shop" hint for the
+	// whole break, is replaced: with it in the way no perk was ever bought at a machine)
 	for (int i = 0; i < LS_MODE_GOALS; i++)
-		if (m_lsModeGoal[i].kind == LS_GOAL_USE)
-			return false;	// (already on its way to one)
+	{
+		const LsModeGoal &g = m_lsModeGoal[i];
+		CBaseEntity *pThing = g.ent > 0 ? (CBaseEntity *)g.thing : nullptr;
+		// (nor a revive: a teammate down comes first)
+		if (g.kind == LS_GOAL_USE && (g.prio >= 80 || (pThing && pThing->IsPlayer())))
+			return false;
+	}
 	// (calm: nothing to shoot within 600 u)
 	bool calm = now - m_lsModeSawAt > 3.0f;
 	for (int k = 0; calm && k < s_lsTargetCount; k++)
