@@ -141,6 +141,7 @@ struct LsCreatureType
 	float respawn;			// seconds after death it comes back at home (0 = never)
 	float corpseTime;		// seconds the body stays
 	bool moves;				// false: a turret
+	bool friendly;			// on the players' side (a bought turret): attacks creatures only, creatures attack it
 	int shotFx;				// ranged shot drawn as: 0 a tracer, 1 an electric zap (vortigaunt), 2 nothing
 	float hops;				// chance a second of a sideways hop while chasing (assassin; 0 = never)
 	bool flank;				// comes at its target from the side, not straight on
@@ -452,6 +453,8 @@ public:
 	float m_keyHealth, m_keySpeed, m_keyDamage, m_keyAggression, m_keyDetect;
 	int m_keyHates;
 	int m_tier;					// 1..3 (key "tier"; 0 = 1)
+	int m_keyFriendly;			// key "friendly": 0 the type's, 1 no, 2 yes
+	int m_ownerIndex;			// key "owner": the player who placed it (its kills are theirs)
 
 	CCreatureImprov *m_improv;
 
@@ -510,11 +513,13 @@ private:
 	int m_hates;
 	bool m_enraged;
 	float m_animScale;			// enraged: attacks and animation this much quicker
+	bool m_friendly;
 
 	void ApplyLook();
 	void Enrage();
 public:
 	int Tier() const { return m_tier < 2 ? 1 : m_tier; }
+	bool Friendly() const { return m_friendly; }
 	bool Enraged() const { return m_enraged; }
 };
 
@@ -589,7 +594,8 @@ double LsPerfClock();							// ls_perf: now in seconds (0 while ls_perf is off)
 void LsPerfAddCreature(double seconds);
 void LsPerfAddBots(double seconds);
 void LsPerfFrame();
-float LsCreatureCapNow();						// ls_creature_max, lowered while the server's fps is low (ls_creature_adaptive)						// StartFrame: a frame came
+float LsCreatureCapNow();
+bool LsCreatureIsFriendly(CBaseEntity *pEntity);			// a creature on the players' side (pev->team 1): bots never shoot it						// ls_creature_max, lowered while the server's fps is low (ls_creature_adaptive)						// StartFrame: a frame came
 
 // ls_perf sections: time spent in a named piece of code, summed over a report window (LS_PROF("name")
 // at the top of a block). Nothing is measured while ls_perf is 0 (the clock isn't read).
