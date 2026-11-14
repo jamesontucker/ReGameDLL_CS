@@ -1733,7 +1733,8 @@ public:
 	int m_lsModeOfferKind = 0;						// the offer it's on its way to use (LS_OFFER_*)
 	float m_lsModeOfferInfl = -1.0f;				// ...and that offer's personality influence
 	int m_lsModeOfferCost = 0;						// ...its price
-	int m_lsModeOfferMoney = -1;					// ...the money it had as it began to use it (-1 not yet)
+	int m_lsModeOfferMoney = -1;
+	int m_lsModeUseMoney = -1;						// the money it had as it began a use (any kind)					// ...the money it had as it began to use it (-1 not yet)
 	bool LsModeHealTick();							// a healing item used at a moment of its own choosing (BR)
 	float m_lsModeHealAt = 0.0f;					// next heal decision
 	float m_lsModeHealUntil = 0.0f;					// healing (standing still) till then
