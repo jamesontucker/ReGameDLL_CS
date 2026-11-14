@@ -102,7 +102,13 @@ static bool LsModeIsDown(CBaseEntity *pPlayer)
 		return pPlayer->IsAlive();
 	// (no hint: no-target with the view low, or - not hidden, with ls_down_finish - the view low and
 	// held to a crawl: crouching keeps its speed)
-	return pPlayer && pPlayer->pev->view_ofs.z < 20.0f
+	if (!pPlayer)
+		return false;
+	// (the mode's red glow on the downed - gm_components' go_down: a glow shell 255 40 40)
+	if (pPlayer->pev->renderfx == kRenderFxGlowShell && pPlayer->pev->rendercolor.x > 200.0f && pPlayer->pev->rendercolor.y < 80.0f
+		&& pPlayer->pev->rendercolor.z < 80.0f && pPlayer->IsAlive())
+		return true;
+	return pPlayer->pev->view_ofs.z < 20.0f
 		&& ((pPlayer->pev->flags & FL_NOTARGET) || (pPlayer->IsAlive() && pPlayer->pev->maxspeed > 2.0f && pPlayer->pev->maxspeed <= 60.0f));
 }
 
