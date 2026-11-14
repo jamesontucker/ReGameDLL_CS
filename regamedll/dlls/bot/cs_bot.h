@@ -1726,6 +1726,9 @@ public:
 	bool LsModeKitted();							// armor, a pistol and a spare magazine beside a main gun
 	bool LsModeOfferTick();							// a perk, the bench, the box, the trap, a turret: when to take one
 	float m_lsModeOfferAt = 0.0f;
+	float m_lsModeReviveBackUntil = 0.0f;			// backed off a revive under fire till then
+	float m_lsModeSmokeAt = -100.0f;				// its smoke for a revive, thrown then...
+	Vector m_lsModeSmokeOn;							// ...on them there
 	bool LsModePickHigh(Vector *out);				// a sightline spot on high ground
 	bool LsModePerchTick();							// high ground held a while, then the next along
 	float m_lsModePerchUntil = 0.0f;				// holding its high spot till then
