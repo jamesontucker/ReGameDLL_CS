@@ -1265,6 +1265,8 @@ bool CCSBot::LsModeOfferTick()
 	pBest->nextTry = now + 20.0f;
 	m_lsModeOfferKind = pBest->kind;
 	m_lsModeOfferInfl = pBest->infl;
+	m_lsModeOfferCost = pBest->cost;
+	m_lsModeOfferMoney = -1;
 	Vector at = pBest->at;
 	if (pBest->kind == LS_OFFER_TURRET)
 	{
@@ -2098,6 +2100,18 @@ void CCSBot::LsModeGoalTick(LsModeGoal &g)
 			else
 				m_lsModeStillUntil = now + 0.3f;
 			SetLookAt("Loner-Strike: using", &at, PRIORITY_HIGH, 0.5f);
+			// (bought: done - holding USE on at the box bought it again a second later)
+			if (g.kind == LS_GOAL_OFFER)
+			{
+				if (m_lsModeOfferMoney < 0)
+					m_lsModeOfferMoney = m_iAccount;
+				else if (m_iAccount <= m_lsModeOfferMoney - Q_max(1, m_lsModeOfferCost / 2))
+				{
+					LsModeClearGoals(g.kind, 0);
+					LsWhy("mode offer: bought");
+					return;
+				}
+			}
 			// (the bench upgrades the gun in hand: the main gun out first)
 			if (g.kind == LS_GOAL_OFFER && m_lsModeOfferKind == LS_OFFER_BENCH && m_rgpPlayerItems[PRIMARY_WEAPON_SLOT]
 				&& !(m_pActiveItem && m_pActiveItem == m_rgpPlayerItems[PRIMARY_WEAPON_SLOT]))
