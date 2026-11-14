@@ -1520,6 +1520,18 @@ bool CCSBot::LsModeAttractTick(bool gearing)
 void CCSBot::LsModeTick()
 {
 	m_lsModePressed = 0;
+	// (who it is, readable by plugins - the Studio's Bot Skill / Bot Trait getters: vuser2 = skill,
+	// aggression, teamwork (0-1, what the decisions use); vuser3 = loot greed 0-1, playstyle (-1 none,
+	// LS_STYLE_*), trait bits: 1 bold, 2 cautious, 4 team player, 8 loner, 16 greedy, 32 skilled, 64 novice)
+	if (gpGlobals->time >= m_lsModeNatureAt)
+	{
+		m_lsModeNatureAt = gpGlobals->time + 1.0f;
+		float skill = LsSkill(), aggro = LsAggro(), team = LsTeamwork(), greed = LsModeGreed();
+		int bits = (aggro >= 0.65f ? 1 : 0) | (aggro <= 0.35f ? 2 : 0) | (team >= 0.6f ? 4 : 0) | (team <= 0.3f ? 8 : 0)
+			| (greed >= 0.65f ? 16 : 0) | (skill >= 0.65f ? 32 : 0) | (skill <= 0.35f ? 64 : 0);
+		pev->vuser2 = Vector(skill, aggro, team);
+		pev->vuser3 = Vector(greed, float(LsStyle()), float(bits));
+	}
 	// (a peace ends any fight, also one carried over from before it in a state the rest of this
 	// skips - a bot still in the buy state kept "attacking" from the round start, and set its
 	// neighbours off when the fighting began)

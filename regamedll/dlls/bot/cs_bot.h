@@ -1743,6 +1743,7 @@ public:
 	void LsModeHuntTick(LsModeGoal &g);				// hunting a player down: toward where they are now
 	void LsModeHuntPrefer();						// the hunted one in sight: the fight is with them
 	float m_lsModeHuntAt = 0.0f;					// next check for that
+	float m_lsModeNatureAt = 0.0f;					// next write of its nature to vuser2/vuser3 (for plugins)
 	float m_lsModeThirdAt = 0.0f;
 	float m_lsModePersonaFor = -1.0f;				// its persona written to the trace for this map (its start time)
 	bool LsModeOfferTick();							// a perk, the bench, the box, the trap, a turret: when to take one
