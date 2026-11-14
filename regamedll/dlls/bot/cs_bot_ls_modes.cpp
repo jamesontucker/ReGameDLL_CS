@@ -1716,7 +1716,9 @@ void CCSBot::LsModeGoalTick(LsModeGoal &g)
 		for (int i = 1; i <= gpGlobals->maxClients; i++)
 		{
 			CBasePlayer *pPlayer = UTIL_PlayerByIndex(i);
-			if (!UTIL_IsValidPlayer(pPlayer) || !pPlayer->IsAlive() || pPlayer == pGoalThing || BotRelationship(pPlayer) != BOT_ENEMY)
+			// (a downed enemy - flagged no-target - is no threat: knocks in a duel are often both ways)
+			if (!UTIL_IsValidPlayer(pPlayer) || !pPlayer->IsAlive() || pPlayer == pGoalThing || BotRelationship(pPlayer) != BOT_ENEMY
+				|| (pPlayer->pev->flags & FL_NOTARGET))
 				continue;
 			float d = (pPlayer->pev->origin - mate).Length();
 			if (d > 900.0f)
