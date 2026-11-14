@@ -535,6 +535,47 @@ static std::vector<Trap> s_traps;
 static std::vector<Tele> s_teles;
 static std::vector<DoorLink> s_doorLinks;
 
+// A ledge a jump climbs from A onto B (touching areas): 0 if it does, else which check fails
+// (1 not side by side, 2 not 20-56 up, 3 already linked, 4 deadly on top, 5 no room on top, 6 the way up blocked);
+// dir: the way across. Used at map start and by "ls_dr ledge".
+static int LedgeClimb(CNavArea *A, CNavArea *B, Vector *dirOut, Vector *landOut)
+{
+	const Extent *ea = A->GetExtent(), *eb = B->GetExtent();
+	float dx = Q_max(eb->lo.x - ea->hi.x, ea->lo.x - eb->hi.x), dy = Q_max(eb->lo.y - ea->hi.y, ea->lo.y - eb->hi.y);
+	if (dx > 4.0f || dy > 4.0f || (dx > 0.5f && dy > 0.5f))
+		return 1;
+	Vector ca = *A->GetCenter(), cb = *B->GetCenter();
+	Vector pa, pb;
+	A->GetClosestPointOnArea(&cb, &pa);
+	B->GetClosestPointOnArea(&pa, &pb);
+	float rise = pb.z - pa.z;
+	if (rise < 20.0f || rise > 56.0f)
+		return 2;
+	if (A->IsConnected(B, NUM_DIRECTIONS))
+		return 3;
+	if (DeadlyAt(s_hurts, cb))
+		return 4;
+	Vector dir2 = (pb - pa).Make2D().IsLengthLessThan(1.0f) ? (cb - ca) : (pb - pa);
+	dir2.z = 0.0f;
+	dir2 = dir2.Normalize();
+	Vector land = pb + dir2 * 24.0f;
+	land.z = B->GetZ(&land);
+	// (a duck-jump goes up tucked: the crouched hull, so a low corridor over the ledge is fine)
+	TraceResult tr;
+	Vector up(pa.x, pa.y, pb.z + HalfHumanHeight * 0.5f + 2.0f), top(land.x, land.y, land.z + HalfHumanHeight * 0.5f + 2.0f);
+	UTIL_TraceHull(top, top, ignore_monsters, head_hull, nullptr, &tr);
+	if (tr.fStartSolid || tr.fAllSolid)
+		return 5;
+	UTIL_TraceHull(up, top, ignore_monsters, head_hull, nullptr, &tr);
+	if (tr.fStartSolid || tr.flFraction < 1.0f)
+		return 6;
+	if (dirOut)
+		*dirOut = dir2;
+	if (landOut)
+		*landOut = land;
+	return 0;
+}
+
 // Is the door of this link in the way right now (a hull between the two floors hits it)
 static bool DoorShut(const DoorLink &dl)
 {
@@ -876,28 +917,8 @@ static void Build()
 				float dx = Q_max(eb->lo.x - ea->hi.x, ea->lo.x - eb->hi.x), dy = Q_max(eb->lo.y - ea->hi.y, ea->lo.y - eb->hi.y);
 				if (dx > 4.0f || dy > 4.0f || (dx > 0.5f && dy > 0.5f))
 					continue;	// (only side by side, not corner to corner)
-				Vector ca = *A->GetCenter(), cb = *B->GetCenter();
-				Vector pa, pb;
-				A->GetClosestPointOnArea(&cb, &pa);
-				B->GetClosestPointOnArea(&pa, &pb);
-				float rise = pb.z - pa.z;
-				if (rise < 20.0f || rise > 56.0f || A->IsConnected(B, NUM_DIRECTIONS) || DeadlyAt(s_hurts, cb))
-					continue;
-				// (room on top, and the way up clear: from above the takeoff to above the landing)
-				Vector dir2 = (pb - pa).Make2D().IsLengthLessThan(1.0f) ? (cb - ca) : (pb - pa);
-				dir2.z = 0.0f;
-				dir2 = dir2.Normalize();
-				Vector land = pb + dir2 * 24.0f;
-				land.z = B->GetZ(&land);
-				// (a duck-jump goes up tucked: the crouched hull, so a low corridor over the ledge is fine -
-				// starwars' start corridor is barely taller than a standing player)
-				TraceResult tr;
-				Vector up(pa.x, pa.y, pb.z + HalfHumanHeight * 0.5f + 2.0f), top(land.x, land.y, land.z + HalfHumanHeight * 0.5f + 2.0f);
-				UTIL_TraceHull(top, top, ignore_monsters, head_hull, nullptr, &tr);
-				if (tr.fStartSolid || tr.fAllSolid)
-					continue;
-				UTIL_TraceHull(up, top, ignore_monsters, head_hull, nullptr, &tr);
-				if (tr.fStartSolid || tr.flFraction < 1.0f)
+				Vector dir2;
+				if (LedgeClimb(A, B, &dir2, nullptr) != 0)
 					continue;
 				NavDirType dir = Q_fabs(dir2.x) > Q_fabs(dir2.y) ? (dir2.x > 0 ? EAST : WEST) : (dir2.y > 0 ? SOUTH : NORTH);
 				A->ConnectTo(B, dir);
@@ -2545,6 +2566,38 @@ void LsDrCommand()
 		DeadlyHurts(s_learnHurts);
 		CONSOLE_ECHO("ls_dr gap from %.0f %.0f %.0f dir %d:\n", p.x, p.y, p.z, Q_atoi(CMD_ARGV(5)));
 		GapJumpAt(p, Q_atoi(CMD_ARGV(5)) & 3, true, &land, &n, true);
+		return;
+	}
+	// ls_dr ledge <x> <y> <z>: every touching area 20-56 units above the area at a spot, and whether a
+	// jump climbs onto it (which check fails); ledges are linked at map start when it does
+	if (CMD_ARGC() >= 5 && FStrEq(CMD_ARGV(1), "ledge"))
+	{
+		Vector p(Q_atof(CMD_ARGV(2)), Q_atof(CMD_ARGV(3)), Q_atof(CMD_ARGV(4)));
+		CNavArea *A = TheNavAreaGrid.GetNavArea(&p);
+		if (!A)
+			A = TheNavAreaGrid.GetNearestNavArea(&p);
+		if (!A)
+		{
+			CONSOLE_ECHO("ls_dr ledge: no area at %.0f %.0f %.0f\n", p.x, p.y, p.z);
+			return;
+		}
+		static const char *why[] = { "climbs", "not side by side", "not 20-56 up", "already linked", "deadly on top", "no room on top (crouched)", "the way up is blocked (crouched)" };
+		const Extent *ea = A->GetExtent();
+		CONSOLE_ECHO("ls_dr ledge from area #%d (%.0f %.0f - %.0f %.0f, z %.0f):\n", A->GetID(), ea->lo.x, ea->lo.y, ea->hi.x, ea->hi.y, A->GetCenter()->z);
+		int shown = 0;
+		for (CNavArea *B : TheNavAreaList)
+		{
+			if (B == A)
+				continue;
+			const Extent *eb = B->GetExtent();
+			float dx = Q_max(eb->lo.x - ea->hi.x, ea->lo.x - eb->hi.x), dy = Q_max(eb->lo.y - ea->hi.y, ea->lo.y - eb->hi.y);
+			if (dx > 4.0f || dy > 4.0f || Q_fabs(B->GetCenter()->z - A->GetCenter()->z) > 80.0f)
+				continue;
+			int r = LedgeClimb(A, B, nullptr, nullptr);
+			CONSOLE_ECHO("  -> #%d (%.0f %.0f - %.0f %.0f, z %.0f): %s\n", B->GetID(), eb->lo.x, eb->lo.y, eb->hi.x, eb->hi.y, B->GetCenter()->z, why[r]);
+			if (++shown >= 16)
+				break;
+		}
 		return;
 	}
 	// ls_dr ents <x> <y> <z> <r>: entities round a spot, their solid type and box (a trigger's state)
