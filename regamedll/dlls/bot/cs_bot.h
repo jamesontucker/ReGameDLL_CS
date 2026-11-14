@@ -1740,6 +1740,10 @@ public:
 	bool LsModeSquadTick();							// back toward its squad when it's strayed too far (BR)
 	float m_lsModeSquadAt = 0.0f;
 	bool LsModeThirdTick();							// a fight between others near by: in on it, or away from it
+	void LsModeHuntTick(LsModeGoal &g);				// hunting a player down: toward where they are now
+	void LsModeHuntPrefer();						// the hunted one in sight: the fight is with them
+	float m_lsModeHuntAt = 0.0f;					// next check for that
+	float m_lsModeNatureAt = 0.0f;					// next write of its nature to vuser2/vuser3 (for plugins)
 	float m_lsModeThirdAt = 0.0f;
 	float m_lsModePersonaFor = -1.0f;				// its persona written to the trace for this map (its start time)
 	bool LsModeOfferTick();							// a perk, the bench, the box, the trap, a turret: when to take one
@@ -1806,7 +1810,7 @@ private:
 	float m_lsModePushAt = 0.0f;					// next push roll
 	bool LsModeShootTick();							// a mode enemy (a creature) in sight: shoot it (true: it is)
 	float LsModeGreed();							// 0-1: how much loot and pickups pull it
-	bool LsModeCares(int kind, int prio, const Vector &at, float infl);	// a goal's taken up or not (once, by its persona)
+	bool LsModeCares(int kind, int prio, const Vector &at, float infl, int ent);	// a goal's taken up or not (once, by its persona)
 
 public:
 	// Loner-Strike deathrun (cs_bot_ls_deathrun.cpp, bot_ls_deathrun): runners run the course, the
@@ -1847,6 +1851,7 @@ enum { LS_STYLE_RUSHER, LS_STYLE_ROAMER, LS_STYLE_LURKER, LS_STYLE_CAREFUL, LS_S
 enum { LS_GOAL_NONE, LS_GOAL_HOLD, LS_GOAL_DEFEND, LS_GOAL_CAPTURE, LS_GOAL_EXTRACT, LS_GOAL_LOOT, LS_GOAL_USE,
 	LS_GOAL_RIDE, LS_GOAL_INVESTIGATE, LS_GOAL_FLEE, LS_GOAL_MEETING,
 	LS_GOAL_OFFER,	// a use of the bot's own choosing (ls_mode offer), apart from the mode's use goals
+	LS_GOAL_HUNT,	// a player to hunt down (ent: the player), enemy or not by the usual ties
 	LS_GOAL_KINDS };
 
 // Loner-Strike (cs_bot_ls.cpp)
