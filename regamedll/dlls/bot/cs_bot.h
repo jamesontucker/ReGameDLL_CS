@@ -1807,7 +1807,7 @@ private:
 	float m_lsModePushAt = 0.0f;					// next push roll
 	bool LsModeShootTick();							// a mode enemy (a creature) in sight: shoot it (true: it is)
 	float LsModeGreed();							// 0-1: how much loot and pickups pull it
-	bool LsModeCares(int kind, int prio, const Vector &at, float infl);	// a goal's taken up or not (once, by its persona)
+	bool LsModeCares(int kind, int prio, const Vector &at, float infl, int ent);	// a goal's taken up or not (once, by its persona)
 };
 
 // Loner-Strike: how far a person could see from one point toward another, 1 all the way: doors,

@@ -908,7 +908,7 @@ float CCSBot::LsModeGreed()
 
 // A goal's advisory: whether this bot takes it up is up to who it is (rolled once, as it's
 // given). Team jobs go by its teamwork, loot by its greed, running away by its caution
-bool CCSBot::LsModeCares(int kind, int prio, const Vector &at, float infl)
+bool CCSBot::LsModeCares(int kind, int prio, const Vector &at, float infl, int ent)
 {
 	// (the influence: 0 every bot takes it up; 1 the usual; 2 its personality fully - the careful
 	// may turn down a risky one, even one the mode says matters)
@@ -918,8 +918,20 @@ bool CCSBot::LsModeCares(int kind, int prio, const Vector &at, float infl)
 	float lean;
 	switch (kind)
 	{
-	case LS_GOAL_LOOT:
 	case LS_GOAL_USE:
+	{
+		// (a downed teammate: by teamwork - a revive pays now, but it's the team players who go; a gate's
+		// boards: the team-minded and the defensive repair, the lone and the aggressive rarely)
+		CBaseEntity *pThing = ent > 0 && INDEXENT(ent) && !INDEXENT(ent)->free ? CBaseEntity::Instance(INDEXENT(ent)) : nullptr;
+		if (pThing && pThing->IsPlayer())
+			lean = 0.3f + 0.7f * LsTeamwork();
+		else if (pThing && FClassnameIs(pThing->pev, "ls_barricade"))
+			lean = 0.6f * LsTeamwork() + 0.4f * (1.0f - LsAggro());
+		else
+			lean = LsModeGreed();
+		break;
+	}
+	case LS_GOAL_LOOT:
 	case LS_GOAL_INVESTIGATE:
 		lean = LsModeGreed();
 		break;
@@ -1011,7 +1023,7 @@ void CCSBot::LsModeSetGoal(int kind, const Vector &at, float radius, int ent, in
 	g.prio = prio;
 	g.until = LsModeUntil(secs);
 	g.infl = infl;
-	g.care = (sameKind && prio < 80) ? care : LsModeCares(kind, prio, at, infl);
+	g.care = (sameKind && prio < 80) ? care : LsModeCares(kind, prio, at, infl, ent);
 	// (on its way after a moment - the less skilled, the longer; a must-do one at once)
 	g.startAt = again ? startAt
 		: (prio >= 90 ? 0.0f : gpGlobals->time + LsModeSway(infl) * (1.0f - LsSkill()) * RANDOM_FLOAT(0.4f, 1.2f));
@@ -1218,8 +1230,26 @@ bool CCSBot::LsModeOfferTick()
 			perkCost = s_lsOffer[me][k].cost;
 	// (who it is: a gun player - bold, skilled - upgrades the gun before a turret; a careful team
 	// player puts the turret down first and keeps more money by; a loner pulls the trap later)
-	float aggro = LsAggro(), team = LsTeamwork();
-	float tilt = 0.5f * (1.0f - aggro) + 0.5f * team - 0.5f * aggro - 0.5f * LsSkill();
+	float aggro = LsAggro(), team = LsTeamwork(), skill = LsSkill();
+	float tilt = 0.5f * (1.0f - aggro) + 0.5f * team - 0.5f * aggro - 0.5f * skill;
+	// (saving for the bench: with the bench offered - the mode offers it once the perks are in and the
+	// gun isn't upgraded, affordable or not - a bot keeps its price aside and skips the box till it's
+	// done; a planner - careful, skilled - keeps it all and a bit more, an impulsive one less, and a
+	// low-skill one now and then forgets. With a turret offer open, a team player keeps a little more
+	// aside for that too)
+	float planner = 0.5f * (1.0f - aggro) + 0.5f * skill;
+	int benchSave = 0, turretSave = 0;
+	for (int k = 0; k < LS_MODE_OFFERS; k++)
+	{
+		const LsModeOffer &o = s_lsOffer[me][k];
+		float sway = LsModeSway(o.infl);
+		if (o.kind == LS_OFFER_BENCH)
+			benchSave = Q_max(benchSave, int(o.cost * Q_max(0.0f, 0.9f + sway * 0.6f * (planner - 0.5f))));
+		else if (o.kind == LS_OFFER_TURRET)
+			turretSave = Q_max(turretSave, int(o.cost * Q_max(0.0f, 0.25f * sway * team)));
+	}
+	if (benchSave && RANDOM_FLOAT(0.0f, 1.0f) < 0.35f * (1.0f - skill))
+		benchSave = 0;	// (forgot)
 	LsModeOffer *pBest = nullptr;
 	int bestRank = 1000;
 	for (int k = 0; k < LS_MODE_OFFERS; k++)
@@ -1228,10 +1258,16 @@ bool CCSBot::LsModeOfferTick()
 		if (o.kind == LS_OFFER_NONE || now < o.nextTry)
 			continue;
 		float sway = LsModeSway(o.infl);
-		int spare = int(200.0f + sway * (250.0f * (1.0f - aggro) - 100.0f));
+		// (money kept over the price: the careful more; the less skilled spend early)
+		int spare = int((200.0f + sway * (250.0f * (1.0f - aggro) - 100.0f)) * (0.5f + skill));
 		// (a turret is defense, bought when it can be: W1's at $2500 never came with a perk's price kept
 		// on top as well)
 		if ((o.kind == LS_OFFER_BOX || o.kind == LS_OFFER_BENCH) && m_iAccount < o.cost + perkCost + spare)
+			continue;
+		if (o.kind == LS_OFFER_BOX && m_iAccount < o.cost + benchSave + turretSave)
+			continue;
+		// (a turret is for the team: a selfish bot spends on itself instead)
+		if (o.kind == LS_OFFER_TURRET && team < 0.3f && sway >= 1.0f && LsTrait(215) > team + 0.4f)
 			continue;
 		int rank = 1000;
 		if (o.kind == LS_OFFER_TRAP)
@@ -1247,7 +1283,17 @@ bool CCSBot::LsModeOfferTick()
 		else if (calm && m_iAccount >= o.cost + spare)
 		{
 			if (o.kind == LS_OFFER_PERK)
-				rank = 10 + o.order;
+			{
+				// (its own pick among them: the mode's order - Tough 0, Feet 1, Revive 2, Double tap 3,
+				// Hands 4 - shifted by who it is: the bold want the damage ones sooner, the careful
+				// health and revive)
+				float shift = 0.0f;
+				if (o.order == 3 || o.order == 4)
+					shift = -4.0f * (aggro - 0.5f);
+				else if (o.order == 0 || o.order == 2)
+					shift = 4.0f * (aggro - 0.5f);
+				rank = int(10.0f + float(o.order) + sway * shift + 0.5f);
+			}
 			// (the gun before a turret: the mode offers the bench once the perks are in, and a $2500
 			// turret taken first left no money for it - bots never upgraded at a bench)
 			else if (o.kind == LS_OFFER_BENCH)
@@ -1257,7 +1303,8 @@ bool CCSBot::LsModeOfferTick()
 			else if (o.kind == LS_OFFER_BOX)
 			{
 				// (now and then: a roll a minute or so, the greedier the likelier)
-				if (RANDOM_FLOAT(0.0f, 1.0f) < 0.325f + sway * 0.35f * (LsModeGreed() - 0.5f))
+				// (the impulsive gamble on it more)
+				if (RANDOM_FLOAT(0.0f, 1.0f) < 0.325f + sway * (0.35f * (LsModeGreed() - 0.5f) + 0.2f * (0.5f - planner)))
 					rank = 60;
 				else
 					o.nextTry = now + RANDOM_FLOAT(40.0f, 80.0f);
