@@ -856,6 +856,57 @@ static void Build()
 			CONSOLE_ECHO("Loner-Strike deathrun: %d doors linked across\n", int(s_doorLinks.size() / 2));
 	}
 
+	// ledges a jump climbs: touching areas the next one 20-56 units up (over a step, within a duck-jump),
+	// the arc's hull clear - nav generation leaves them unlinked and the course stopped below them
+	// (starwars' start corridor: a channel, then a 36-48 unit ledge)
+	{
+		int made = 0;
+		for (size_t i = 0; i < n; i++)
+		{
+			CNavArea *A = s_areas[i];
+			const Extent *ea = A->GetExtent();
+			if (DeadlyAt(s_hurts, *A->GetCenter()))
+				continue;
+			for (size_t j = 0; j < n; j++)
+			{
+				if (i == j)
+					continue;
+				CNavArea *B = s_areas[j];
+				const Extent *eb = B->GetExtent();
+				float dx = Q_max(eb->lo.x - ea->hi.x, ea->lo.x - eb->hi.x), dy = Q_max(eb->lo.y - ea->hi.y, ea->lo.y - eb->hi.y);
+				if (dx > 4.0f || dy > 4.0f || (dx > 0.5f && dy > 0.5f))
+					continue;	// (only side by side, not corner to corner)
+				Vector ca = *A->GetCenter(), cb = *B->GetCenter();
+				Vector pa, pb;
+				A->GetClosestPointOnArea(&cb, &pa);
+				B->GetClosestPointOnArea(&pa, &pb);
+				float rise = pb.z - pa.z;
+				if (rise < 20.0f || rise > 56.0f || A->IsConnected(B, NUM_DIRECTIONS) || DeadlyAt(s_hurts, cb))
+					continue;
+				// (room on top, and the way up clear: from above the takeoff to above the landing)
+				Vector dir2 = (pb - pa).Make2D().IsLengthLessThan(1.0f) ? (cb - ca) : (pb - pa);
+				dir2.z = 0.0f;
+				dir2 = dir2.Normalize();
+				Vector land = pb + dir2 * 24.0f;
+				land.z = B->GetZ(&land);
+				TraceResult tr;
+				Vector up(pa.x, pa.y, pb.z + HalfHumanHeight + 20.0f), top(land.x, land.y, land.z + HalfHumanHeight + 2.0f);
+				UTIL_TraceHull(top, top, ignore_monsters, human_hull, nullptr, &tr);
+				if (tr.fStartSolid || tr.fAllSolid)
+					continue;
+				UTIL_TraceHull(up, top, ignore_monsters, human_hull, nullptr, &tr);
+				if (tr.fStartSolid || tr.flFraction < 1.0f)
+					continue;
+				NavDirType dir = Q_fabs(dir2.x) > Q_fabs(dir2.y) ? (dir2.x > 0 ? EAST : WEST) : (dir2.y > 0 ? SOUTH : NORTH);
+				A->ConnectTo(B, dir);
+				s_out[i].push_back(int(j));
+				made++;
+			}
+		}
+		if (made)
+			CONSOLE_ECHO("Loner-Strike deathrun: %d ledges a jump climbs linked\n", made);
+	}
+
 	// gaps a running jump clears, linked on this nav too (a nav learned without course learning -
 	// or by hand - has none): from every edge of every area, every step along it, the jump check
 	// the learner uses; a landing on another area not linked yet gets a one-way link
@@ -1088,6 +1139,7 @@ struct Runner
 	float backUntil = 0.0f;			// backing up for a run-up
 	bool tele = false;				// walking into a teleport rather than jumping
 	float hopSpeed = 0.0f;			// a hop at this pace (small blocks), 0: a full running jump
+	bool climb = false;				// a jump up onto a ledge: from right at its foot
 	Vector paceFor;					// the learned gap whose pace was worked out, and that pace
 	float paceCached = 0.0f;
 	Vector lastGround;
@@ -2001,8 +2053,18 @@ void CCSBot::LsDrPathTick()
 			continue;
 		if (m_lastKnownArea == B)
 			break;
+		// (a ledge a jump climbs: touching, but higher than a step - jumped like a gap, tucked)
+		bool climb = false;
 		if (!LsDrSeparated(A, B))
-			continue;
+		{
+			Vector pa, pb;
+			const Vector *cb = B->GetCenter();
+			A->GetClosestPointOnArea(cb, &pa);
+			B->GetClosestPointOnArea(&pa, &pb);
+			climb = pb.z - pa.z > 20.0f && pb.z - pa.z <= 56.0f;
+			if (!climb)
+				continue;
+		}
 		// a teleport link: walk into the trigger
 		int ia = Index(A), ib = Index(B);
 		for (const Tele &tl : s_teles)
@@ -2049,6 +2111,7 @@ void CCSBot::LsDrPathTick()
 				{
 					r.gapArmed = true;
 					r.hopSpeed = 0.0f;
+					r.climb = false;
 					r.armedAt = now;
 					r.landing = tl.at;
 					r.jumpedAt = -9.0f;
@@ -2157,7 +2220,8 @@ void CCSBot::LsDrPathTick()
 			}
 		}
 		r.gapArmed = true;
-		r.hopSpeed = r.paceCached;
+		r.hopSpeed = climb ? 150.0f : r.paceCached;
+		r.climb = climb;
 		r.armedAt = now;
 		r.takeoff = takeoff;
 		r.landing = land;
@@ -2268,6 +2332,7 @@ bool CCSBot::LsDrJumpGap(int i)
 		if (hop < 0.0f)
 			continue;
 		r.hopSpeed = hop;
+		r.climb = false;
 		r.gapArmed = true;
 		r.tele = false;
 		r.armedAt = now;
@@ -2394,6 +2459,8 @@ void LsDrDrive(CBasePlayer *bot, float *forward, float *strafe, unsigned short *
 			float need = DotProduct(r.landing.Make2D(), r.gapDir) - r.edge;
 			float slack = 0.66f * pace - need;
 			float early = Q_min(14.0f + 0.06f * Q_max(0.0f, speed), Q_max(3.0f, 0.5f * slack));
+			if (r.climb)
+				early = 6.0f;	// (up onto a ledge: from its foot, or the jump meets the wall on the way up)
 			if (toEdge < early && toEdge > -20.0f && now - r.jumpedAt > 0.8f)
 			{
 				// (a full jump wants a run at it; a hop its own pace, give or take)
