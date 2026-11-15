@@ -1983,7 +1983,7 @@ void LsModeMapStart();					// a new map: every mode fact forgotten
 void LsModePlayerGone(int index);		// a player left: their role and ties forgotten (client.cpp)
 bool LsModeCosts();						// any avoid, block or zone set (path costs to add)
 bool LsModeNoBuy();						// a mode said there's nothing to buy (ls_mode nobuy 1)
-float LsModeAreaCost(const CNavArea *area, unsigned int insideMask);	// 1 plain, more inside an avoid or outside the zone, -1 never
+float LsModeAreaCost(const CNavArea *area, unsigned int insideMask, int team);	// 1 plain, more inside an avoid or outside the zone, -1 never
 
 // Inlines
 inline float CCSBot::GetCombatRange() const
@@ -2562,6 +2562,7 @@ public:
 		// Loner-Strike deathrun: never through a deadly pit, the long way round where people fell
 		m_lsDr = lsTaste && LsDrCosts();
 		m_lsModeInside = 0;
+		m_lsModeTeam = pBot->m_iTeam;
 		if (m_lsMode)
 			pBot->LsModeInside(&m_lsModeInside);
 	}
@@ -2623,7 +2624,7 @@ public:
 			// never through a no-go one (a damage zone, a closed door)
 			if (m_lsMode)
 			{
-				float modeCost = LsModeAreaCost(area, m_lsModeInside);
+				float modeCost = LsModeAreaCost(area, m_lsModeInside, m_lsModeTeam);
 				if (modeCost < 0.0f)
 					return -1.0f;
 				dist *= modeCost;
@@ -2753,6 +2754,7 @@ private:
 	bool m_lsMode;
 	unsigned int m_lsModeInside;
 	bool m_lsDr;
+	int m_lsModeTeam;
 };
 
 class FollowTargetCollector
