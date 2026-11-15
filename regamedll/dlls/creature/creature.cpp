@@ -1273,7 +1273,7 @@ static void LsBuiltinTypes()
 	t->flank = true;
 	t->fleeHealth = 0.25f;
 	t->bloodColor = BLOOD_COLOR_RED;
-	Q_strlcpy(t->models, "models/hgrunt.mdl models/player/gign/gign.mdl");
+	Q_strlcpy(t->models, "models/hgrunt.mdl models/hostage.mdl");
 	Q_strlcpy(t->anim[LSAN_ATTACK], "standing_mp5");
 	t->fallbackGlowColor = Vector(0, 0, 0);
 	t->fallbackGlow = false;
@@ -1836,9 +1836,18 @@ bool LsCreaturePrecacheType(int index)
 	t->model[0] = '\0';
 	t->usingFallback = false;
 	int candidate = 0;
+	bool skippedPlayer = false;
 	char *cursor = buf;
 	for (char *tok; (tok = LsNextToken(&cursor, " \t")); candidate++)
 	{
+		// (never a CS player model: its origin is the middle of the person, a creature's is its
+		// feet, so it would show sunk to the waist; the hostage stands in)
+		if (!Q_strnicmp(tok, "models/player/", 14))
+		{
+			CONSOLE_ECHO("ls_creature: '%s' can't use %s (a player model stands half in the floor)\n", t->name, tok);
+			skippedPlayer = true;
+			continue;
+		}
 		if (g_pFileSystem->FileExists(tok))
 		{
 			Q_strlcpy(t->model, tok);
@@ -1847,6 +1856,11 @@ bool LsCreaturePrecacheType(int index)
 		}
 	}
 
+	if (!t->model[0] && skippedPlayer && g_pFileSystem->FileExists("models/hostage.mdl"))
+	{
+		Q_strlcpy(t->model, "models/hostage.mdl");
+		t->usingFallback = true;
+	}
 	if (!t->model[0])
 	{
 		CONSOLE_ECHO("ls_creature: no model found for '%s' (%s)\n", t->name, t->models);
