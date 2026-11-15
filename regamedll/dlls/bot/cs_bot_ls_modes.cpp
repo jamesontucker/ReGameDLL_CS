@@ -33,7 +33,7 @@
 
 #include "precompiled.h"
 
-cvar_t cv_ls_mode_ver = { "ls_mode_ver", "3", 0, 3.0f, nullptr };	// the plugins look for this before sending ls_mode
+cvar_t cv_ls_mode_ver = { "ls_mode_ver", "4", 0, 4.0f, nullptr };	// the plugins look for this before sending ls_mode
 
 bool g_lsModeTies = false;	// any friend / foe set (BotRelationship checks it, bot.h)
 
@@ -54,9 +54,11 @@ struct LsModeZone
 	float r = 0.0f;
 	float value = 0.0f;					// avoid: the cost (-1 never); attract: the weight
 	float until = 0.0f;					// 0 till forgotten
-	int team = 0;						// attract: 0 everyone, 1 T, 2 CT
+	int team = 0;						// attract: who it pulls; avoid: who avoids it - 0 everyone, 1 T, 2 CT
 	bool box = false;					// a door's bounds instead of the circle
 	Vector lo, hi;
+	EntityHandle<CBaseEntity> follow;	// avoid: riding on an entity (a hot potato carrier, a burning player)
+	bool following = false;				// ...and it ends when that entity is gone
 };
 
 // the safe zone, and the next one it shrinks to
@@ -131,7 +133,8 @@ static float LsModeInflArg(int i)
 // what a mode offers each player to use (ls_mode offer): perk machines, the upgrade bench, the mystery
 // box, a trap switch, a turret to place; the bot decides when to take one
 enum { LS_OFFER_NONE, LS_OFFER_PERK, LS_OFFER_BENCH, LS_OFFER_BOX, LS_OFFER_TRAP, LS_OFFER_TURRET,
-	LS_OFFER_USE };	// (use: an interactable bots may use - a lever, a button, a door switch; no price)
+	LS_OFFER_USE,	// (use: an interactable bots may use - a lever, a button, a door switch; no price)
+	LS_OFFER_PICKUP };	// (pickup: an item, a weapon spawner, a health pack - walked over, no USE; order = what it is, cost = weight)
 
 // The point on a thing's bounds nearest a spot (where a USE aimed at it from there lands)
 static Vector LsModeNearestOn(CBaseEntity *pThing, const Vector &from)
@@ -604,13 +607,13 @@ bool LsModeCosts()
 // How much more a walk through this area costs: 1 nothing extra; an avoid adds its cost, a
 // no-go zone is never walked through (unless the bot is in it already: then it may walk out);
 // outside the safe zone costs more the further out it is
-float LsModeAreaCost(const CNavArea *area, unsigned int insideMask)
+float LsModeAreaCost(const CNavArea *area, unsigned int insideMask, int team)
 {
 	float factor = 1.0f;
 	for (int i = 0; i < LS_MODE_ZONES; i++)
 	{
 		const LsModeZone &z = s_lsAvoid[i];
-		if (!LsModeLive(z) || !LsModeAreaInZone(z, area))
+		if (!LsModeLive(z) || (z.team && z.team != team) || !LsModeAreaInZone(z, area))
 			continue;
 		if (z.value < 0.0f)
 		{
@@ -1144,7 +1147,7 @@ bool CCSBot::LsModeEscape()
 	for (int i = 0; i < LS_MODE_ZONES && !go; i++)
 	{
 		const LsModeZone &z = s_lsAvoid[i];
-		if (!LsModeLive(z) || (z.value >= 0.0f && z.value < 5.0f) || !LsModeInZone(z, pev->origin))
+		if (!LsModeLive(z) || (z.value >= 0.0f && z.value < 5.0f) || (z.team && z.team != m_iTeam) || !LsModeInZone(z, pev->origin))
 			continue;
 		Vector center = z.box ? (z.lo + z.hi) * 0.5f : z.at;
 		float reach = z.box ? Q_max(z.hi.x - z.lo.x, z.hi.y - z.lo.y) * 0.5f : z.r;
@@ -1336,7 +1339,8 @@ bool CCSBot::LsModeOfferTick()
 			if (pressure >= Q_max(2, int(most + 0.5f)) && m_iAccount >= o.cost)
 				rank = 0;	// (urgent: even mid-fight)
 		}
-		else if (calm && m_iAccount >= o.cost + (o.kind == LS_OFFER_USE ? 0 : spare))
+		else if ((calm || (o.kind == LS_OFFER_PICKUP && o.order == 2 && LsHealth() < 35.0f))
+			&& (o.kind == LS_OFFER_PICKUP || m_iAccount >= o.cost + (o.kind == LS_OFFER_USE ? 0 : spare)))
 		{
 			if (o.kind == LS_OFFER_PERK)
 			{
@@ -1356,6 +1360,43 @@ bool CCSBot::LsModeOfferTick()
 				rank = int(30.0f + sway * 15.0f * tilt);
 			else if (o.kind == LS_OFFER_TURRET)
 				rank = int(40.0f - sway * 15.0f * tilt);
+			else if (o.kind == LS_OFFER_PICKUP)
+			{
+				// (a pickup when it suits: health when hurt - the careful sooner, badly hurt first of all;
+				// a weapon without a main gun; anything else by its weight and greed; not one another
+				// bot is already on its way to)
+				float weight = (o.cost > 0 ? Q_min(o.cost, 100) : 50) / 100.0f;
+				bool taken = false;
+				for (int i = 1; i <= gpGlobals->maxClients && !taken; i++)
+				{
+					CBasePlayer *pOther = UTIL_PlayerByIndex(i);
+					if (!pOther || pOther == this || !pOther->IsBot() || !pOther->IsAlive())
+						continue;
+					CCSBot *pBot = static_cast<CCSBot *>(pOther);
+					for (int g = 0; g < LS_MODE_GOALS; g++)
+						if (pBot->m_lsModeGoal[g].kind == LS_GOAL_OFFER && pBot->m_lsModeGoal[g].ent == o.ent && pBot->m_lsModeGoal[g].care)
+							taken = true;
+				}
+				if (taken)
+					;
+				else if (o.order == 2)
+				{
+					float hp = LsHealth();
+					if (hp < 35.0f)
+						rank = 5;
+					else if (hp < 45.0f + sway * 25.0f * (1.0f - aggro) && RANDOM_FLOAT(0.0f, 1.0f) < 0.5f + 0.5f * weight)
+						rank = 45;
+				}
+				else if (o.order == 1)
+				{
+					if (!m_rgpPlayerItems[PRIMARY_WEAPON_SLOT])
+						rank = 25;
+				}
+				else if (RANDOM_FLOAT(0.0f, 1.0f) < weight * (0.3f + 0.7f * LsModeGreed()))
+					rank = 55;
+				else
+					o.nextTry = now + RANDOM_FLOAT(20.0f, 40.0f);
+			}
 			else if (o.kind == LS_OFFER_USE)
 			{
 				// (an interactable: a roll every half minute or so - the team-minded likelier)
@@ -1399,7 +1440,7 @@ bool CCSBot::LsModeOfferTick()
 	else
 	{
 		// (the trap's x y z is the gate it covers: the switch is the entity - that's where it goes)
-		if ((pBest->kind == LS_OFFER_TRAP || pBest->kind == LS_OFFER_USE) && pBest->ent > 0)
+		if ((pBest->kind == LS_OFFER_TRAP || pBest->kind == LS_OFFER_USE || pBest->kind == LS_OFFER_PICKUP) && pBest->ent > 0)
 		{
 			edict_t *pEdict = INDEXENT(pBest->ent);
 			if (pEdict && !pEdict->free && pEdict->pvPrivateData)
@@ -1409,7 +1450,8 @@ bool CCSBot::LsModeOfferTick()
 	}
 	LsWhy(pBest->kind == LS_OFFER_PERK ? "mode offer: a perk" : pBest->kind == LS_OFFER_BENCH ? "mode offer: the bench"
 		: pBest->kind == LS_OFFER_BOX ? "mode offer: the box" : pBest->kind == LS_OFFER_TRAP ? "mode offer: the trap, gate under pressure"
-		: pBest->kind == LS_OFFER_USE ? "mode offer: using something" : "mode offer: placing a turret");
+		: pBest->kind == LS_OFFER_USE ? "mode offer: using something" : pBest->kind == LS_OFFER_PICKUP ? "mode offer: picking something up"
+		: "mode offer: placing a turret");
 	return true;
 }
 
@@ -1654,9 +1696,32 @@ bool CCSBot::LsModeAttractTick(bool gearing)
 // Each think, after a person's order: shoot a creature in sight, get out of a bad zone, then
 // the most important goal it cares about. A fight comes first, then a person's order, then the
 // mode; with nothing to do here, hunting may be pulled toward an attract
+// Avoids riding on an entity: where it is now, once a frame; gone (or dead), the avoid goes too
+static void LsModeFollowZones()
+{
+	static float s_at = -1.0f;
+	if (gpGlobals->time == s_at)
+		return;
+	s_at = gpGlobals->time;
+	for (int i = 0; i < LS_MODE_ZONES; i++)
+	{
+		LsModeZone &z = s_lsAvoid[i];
+		if (!z.used || !z.following)
+			continue;
+		CBaseEntity *pThing = z.follow;
+		if (!pThing || (pThing->IsPlayer() && !pThing->IsAlive()))
+		{
+			z = LsModeZone();
+			continue;
+		}
+		z.at = pThing->Center();
+	}
+}
+
 void CCSBot::LsModeTick()
 {
 	m_lsModePressed = 0;
+	LsModeFollowZones();
 	// (who it is, readable by plugins - the Studio's Bot Skill / Bot Trait getters: vuser2 = skill,
 	// aggression, teamwork (0-1, what the decisions use); vuser3 = loot greed 0-1, playstyle (-1 none,
 	// LS_STYLE_*), trait bits: 1 bold, 2 cautious, 4 team player, 8 loner, 16 greedy, 32 skilled, 64 novice)
@@ -2499,6 +2564,37 @@ void CCSBot::LsModeGoalTick(LsModeGoal &g)
 			handy = (pGoalThing->pev->origin - pev->origin).Length() < 70.0f;
 		// (the trap's switch: the mode's reach is 80 u, origin to origin; one it can't get that close to -
 		// beyond the gate, say - is given up for a while instead of USE held in vain)
+		// (a pickup: walked over - there, it's picked up; close by but not getting onto it for 4 s,
+		// given up for a while)
+		if (g.kind == LS_GOAL_OFFER && m_lsModeOfferKind == LS_OFFER_PICKUP && pThing)
+		{
+			Vector to = pThing->pev->origin - pev->origin;
+			float flat = to.Make2D().Length();
+			if (flat < 28.0f && Q_fabs(to.z) < 60.0f)
+			{
+				LsModeOfferGiveUp(g.ent, 20.0f);
+				LsModeClearGoals(g.kind, 0);
+				LsWhy("mode offer: picked it up");
+				return;
+			}
+			if (flat < 160.0f)
+			{
+				if (m_lsModeTrapNearSince < 0.0f)
+					m_lsModeTrapNearSince = now;
+				else if (now - m_lsModeTrapNearSince > 4.0f)
+				{
+					LsModeOfferGiveUp(g.ent, 90.0f);
+					m_lsModeTrapNearSince = -1.0f;
+					LsModeClearGoals(g.kind, 0);
+					LsWhy("mode offer: the pickup out of reach");
+					return;
+				}
+				m_lsModeStepTo = pThing->pev->origin;
+				m_lsModeStepUntil = now + 0.3f;
+				return;
+			}
+			m_lsModeTrapNearSince = -1.0f;
+		}
 		bool useOffer = g.kind == LS_GOAL_OFFER && m_lsModeOfferKind == LS_OFFER_USE && pThing;
 		// (an interactable: within its reach - the mode measures from the eyes to the nearest point of it,
 		// 96 u by default - and in plain sight of it)
@@ -3022,7 +3118,7 @@ void Bot_LsModeCommand()
 	{
 		const char *kn = CMD_ARGV(3);
 		int kind = FStrEq(kn, "perk") ? LS_OFFER_PERK : FStrEq(kn, "bench") ? LS_OFFER_BENCH : FStrEq(kn, "box") ? LS_OFFER_BOX
-			: FStrEq(kn, "trap") ? LS_OFFER_TRAP : FStrEq(kn, "turret") ? LS_OFFER_TURRET : FStrEq(kn, "use") ? LS_OFFER_USE : LS_OFFER_NONE;
+			: FStrEq(kn, "trap") ? LS_OFFER_TRAP : FStrEq(kn, "turret") ? LS_OFFER_TURRET : FStrEq(kn, "use") ? LS_OFFER_USE : FStrEq(kn, "pickup") ? LS_OFFER_PICKUP : LS_OFFER_NONE;
 		int n = LsModeWho(CMD_ARGV(2), who, true);
 		if (FStrEq(what, "offer_clear"))
 		{
@@ -3051,7 +3147,8 @@ void Bot_LsModeCommand()
 		float infl = LsModeInflArg(10);
 		if (!kind || CMD_ARGC() < 9 || LsModeBadArgs())
 		{
-			CONSOLE_ECHO("ls_mode offer <who> <perk|bench|box|trap|turret|use> <x> <y> <z> <ent> <cost> [order] [influence 0-100]\n");
+			CONSOLE_ECHO("ls_mode offer <who> <perk|bench|box|trap|turret|use|pickup> <x> <y> <z> <ent> <cost> [order] [influence 0-100]\n"
+				"  pickup: cost = weight 0-100 (0: 50), order = 0 an item, 1 a weapon, 2 health\n");
 			return;
 		}
 		// (gm_components offers an interactable as a free "box": it's a use - a lever, a button)
@@ -3111,13 +3208,43 @@ void Bot_LsModeCommand()
 		}
 		Vector at(LsModeArg(3), LsModeArg(4), LsModeArg(5));
 		float r = LsModeRadius(LsModeArg(6), 16.0f), value = LsModeArg(7), secs = LsModeArg(8);
-		int team = avoid ? 0 : int(LsModeArg(9));
+		// (avoid ... [until] [team]: only bots of that team avoid it - 1 T, 2 CT; 0 everyone)
+		int team = int(LsModeArg(9));
 		if (LsModeBadArgs())
 			return;
 		LsModeZone *z = LsModeFindTag(avoid ? s_lsAvoid : s_lsAttract, CMD_ARGV(2), true);
 		if (!z)
 			return;
+		z->following = false;
+		z->follow = nullptr;
 		z->at = at;
+		z->r = r;
+		z->value = value;
+		z->until = LsModeUntil(secs);
+		z->team = team;
+		s_lsModeOn = true;
+		return;
+	}
+	// avoid_ent <tag> <ent> <r> <cost> [until] [team]: an avoid that rides on an entity (a hot potato
+	// carrier, a burning player, a trigger volume) - it ends with the entity
+	if (FStrEq(what, "avoid_ent"))
+	{
+		int ent = Q_atoi(CMD_ARGV(3));
+		float r = LsModeRadius(LsModeArg(4), 16.0f), value = LsModeArg(5), secs = LsModeArg(6);
+		int team = int(LsModeArg(7));
+		edict_t *pEdict = ent > 0 ? INDEXENT(ent) : nullptr;
+		if (LsModeBadArgs() || CMD_ARGC() < 6 || !pEdict || pEdict->free || !pEdict->pvPrivateData)
+		{
+			CONSOLE_ECHO("ls_mode avoid_ent <tag> <ent> <r> <cost> [until] [team]\n");
+			return;
+		}
+		LsModeZone *z = LsModeFindTag(s_lsAvoid, CMD_ARGV(2), true);
+		if (!z)
+			return;
+		CBaseEntity *pThing = CBaseEntity::Instance(pEdict);
+		z->follow = pThing;
+		z->following = true;
+		z->at = pThing->Center();
 		z->r = r;
 		z->value = value;
 		z->until = LsModeUntil(secs);
