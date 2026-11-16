@@ -4224,7 +4224,7 @@ void Reset()
 	size_t top = 0;
 	for (CNavArea *a : s_know.areas)
 		top = Q_max(top, (size_t)a->GetID());
-	const size_t MAX_AREAS = 6000;				// (about 4.5 MB of sightlines; bigger maps go without)
+	const size_t MAX_AREAS = 10000;				// (about 12.5 MB of sightlines at 10,000; bigger maps go without)
 	if (s_know.count > MAX_AREAS || top > 16 * s_know.count + 1024)
 	{
 		s_know.count = 0;
