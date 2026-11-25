@@ -92,8 +92,12 @@ jobs:
         shell: pwsh
         run: |
           # (straight from its GitHub release: the chocolatey feed timed out, 2026-11-25)
-          Invoke-WebRequest https://github.com/electron/rcedit/releases/download/v2.0.0/rcedit-x64.exe -OutFile "$env:RUNNER_TEMP\rcedit.exe"
-          "$env:RUNNER_TEMP" | Out-File -FilePath $env:GITHUB_PATH -Append
+          $dir = Join-Path $env:RUNNER_TEMP 'rcedit'
+          New-Item -ItemType Directory -Force $dir | Out-Null
+          Invoke-WebRequest https://github.com/electron/rcedit/releases/download/v2.0.0/rcedit-x64.exe -OutFile "$dir\rcedit.exe"
+          $h = (Get-FileHash "$dir\rcedit.exe" -Algorithm SHA256).Hash
+          if ($h -ne '3E7801DB1A5EDBEC91B49A24A094AAD776CB4515488EA5A4CA2289C400EADE2A') { throw "rcedit hash mismatch: $h" }
+          $dir | Out-File -FilePath $env:GITHUB_PATH -Append
 
       - name: Move files
         run: |
