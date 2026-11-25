@@ -7287,8 +7287,14 @@ bool CCSBot::LsAheadPoint(Vector *to)
 // mostly sat at the hostages by their spawn
 bool CCSBot::LsHostageGuardsEnough()
 {
+	return LsHostageGuardsShort() <= 0;
+}
+
+// how many more of the team the hostages want this round (0 or less: enough already)
+int CCSBot::LsHostageGuardsShort()
+{
 	if (!LsFight())
-		return false;
+		return 0;
 	int alive = 0, guarding = 0;
 	for (int i = 1; i <= gpGlobals->maxClients; i++)
 	{
@@ -7296,10 +7302,31 @@ bool CCSBot::LsHostageGuardsEnough()
 		if (!p || p == this || !p->IsAlive() || p->m_iTeam != m_iTeam)
 			continue;
 		alive++;
-		if (p->IsBot() && static_cast<CCSBot *>(p)->GetTask() == GUARD_HOSTAGES)
-			guarding++;
+		// (a sniper set up by them counts: Valve's "sniping near hostages")
+		if (p->IsBot())
+		{
+			TaskType task = static_cast<CCSBot *>(p)->GetTask();
+			if (task == GUARD_HOSTAGES || task == MOVE_TO_SNIPER_SPOT || task == SNIPING)
+				guarding++;
+		}
 	}
-	return guarding >= Q_max(2, (alive + 2) / 2);
+	// how much of the team stays on the hostages this round: 30-50% of it, more on maps
+	// where the hostages sit deep in a building the Ts hold (assault), less where pub Ts
+	// push out (italy). One share per round for the whole team, so they agree on it
+	struct HostShare { const char *map; float lo, hi; };
+	static const HostShare kShares[] = {
+		{ "cs_italy", 0.25f, 0.40f }, { "cs_office", 0.35f, 0.50f }, { "cs_assault", 0.45f, 0.55f },
+		{ "cs_militia", 0.35f, 0.50f }, { "cs_havana", 0.30f, 0.45f }, { "cs_siege", 0.35f, 0.50f },
+		{ "cs_estate", 0.35f, 0.50f }, { "cs_backalley", 0.30f, 0.45f }, { "cs_747", 0.40f, 0.55f },
+	};
+	float lo = 0.30f, hi = 0.50f;
+	const char *map = STRING(gpGlobals->mapname);
+	for (const HostShare &h : kShares)
+		if (!Q_stricmp(map, h.map)) { lo = h.lo; hi = h.hi; }
+	unsigned int seed = (unsigned int)LsRoundSerial() * 2654435761u + (unsigned int)m_iTeam * 40503u;
+	float share = lo + (hi - lo) * float((seed >> 8) & 0xffff) / 65535.0f;
+	int want = Q_max(1, int(share * float(alive + 1) + 0.5f));
+	return want - guarding;
 }
 
 // ---- stepping out (bot_ls_fight) ----------------------------------------------------------

@@ -230,7 +230,7 @@ void HideState::OnUpdate(CCSBot *me)
 					return;
 				}
 			}
-			else if (me->GetTask() == CCSBot::GUARD_HOSTAGE_RESCUE_ZONE)
+			else if (me->GetTask() == CCSBot::GUARD_HOSTAGE_RESCUE_ZONE && !me->LsHostageGuardsEnough())
 			{
 				// if we stumble across a hostage, guard it
 				CHostage *pHostage = me->GetGameState()->GetNearestVisibleFreeHostage();

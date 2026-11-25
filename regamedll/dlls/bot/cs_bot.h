@@ -1242,6 +1242,7 @@ public:
 	bool LsAheadPoint(Vector *to);					// the farthest point along the path it can actually see
 	bool LsOffThreshold(const Vector &at, float most);	// about to go through a doorway and that's off to the side
 	bool LsHostageGuardsEnough();					// enough of its team guarding the hostages already
+	int LsHostageGuardsShort();						// how many more guards the hostages want this round
 	bool LsTakeCoverFrom(const Vector &threat, float minMove, bool fromFight = false, float holdSecs = -1.0f);	// to the nearest spot out of its sight, a short hold there
 	bool LsMatchup(CBasePlayer *pEnemy, bool crouchAndHold);		// mid-fight: the wrong gun for this range (an AWP down a lane): out of it
 	Vector LsDefuseSpot(const Vector &bomb);		// beside the bomb, the side away from the threat

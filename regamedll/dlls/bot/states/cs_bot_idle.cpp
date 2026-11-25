@@ -656,7 +656,7 @@ void IdleState::OnUpdate(CCSBot *me)
 				if (RANDOM_FLOAT(0, 100) <= defenseSniperCampChance)
 				{
 					const Vector *hostagePos = me->GetGameState()->GetRandomFreeHostagePosition();
-					if (hostagePos && campHostages)
+					if (hostagePos && campHostages && !me->LsHostageGuardsEnough())
 					{
 						me->SetTask(CCSBot::MOVE_TO_SNIPER_SPOT);
 						me->PrintIfWatched("Sniping near hostages\n");
@@ -705,7 +705,9 @@ void IdleState::OnUpdate(CCSBot *me)
 			if (me->GetFriendsRemaining())
 			{
 				// (Loner-Strike: enough of the team on the hostages already: out hunting)
-				if (me->LsShirksObjective() || TheCSBots()->IsDefenseRushing() || RANDOM_FLOAT(0, 100) < huntChance || (campHostages && me->LsHostageGuardsEnough()))
+				// (and too few on them: this one stays, so the team keeps its 30-50% there)
+				bool shortOfGuards = campHostages && me->LsHostageGuardsShort() > 0;
+				if (me->LsShirksObjective() || TheCSBots()->IsDefenseRushing() || (!shortOfGuards && RANDOM_FLOAT(0, 100) < huntChance) || (campHostages && me->LsHostageGuardsEnough()))
 				{
 					me->Hunt();
 					return;

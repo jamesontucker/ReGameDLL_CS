@@ -140,7 +140,7 @@ void HuntState::OnUpdate(CCSBot *me)
 			}
 
 			// if safe time is up, and we stumble across a hostage, guard it
-			if (!me->LsShirksObjective() && !me->IsSafe())
+			if (!me->LsShirksObjective() && !me->IsSafe() && !me->LsHostageGuardsEnough())
 			{
 				CHostage *pHostage = me->GetGameState()->GetNearestVisibleFreeHostage();
 				if (pHostage)
