@@ -410,11 +410,12 @@ bool CCSBot::IsVisible(const Vector *pos, bool testFOV) const
 		return false;
 
 	// is it in my general viewcone?
-	if (testFOV && !(const_cast<CCSBot *>(this)->FInViewCone(pos)))
+	// (Loner-Strike: a hacker's aimbot sees all round it, and through smoke)
+	if (testFOV && !LsHackSeesAround() && !(const_cast<CCSBot *>(this)->FInViewCone(pos)))
 		return false;
 
 	// check line of sight against smoke
-	if (TheCSBots()->IsLineBlockedBySmoke(&GetEyePosition(), pos))
+	if (!LsHackIgnoresSmoke() && TheCSBots()->IsLineBlockedBySmoke(&GetEyePosition(), pos))
 		return false;
 
 	// check line of sight
@@ -1821,6 +1822,8 @@ void CCSBot::UpdateReactionQueue()
 
 	// clamp reaction time to enemy queue size
 	float reactionTime = GetProfile()->GetReactionTime();
+	// (Loner-Strike: an aimbot doesn't wait to know)
+	reactionTime = LsHackReaction(reactionTime);
 	float maxReactionTime = (MAX_ENEMY_QUEUE * g_flBotFullThinkInterval) - 0.01f;
 	if (reactionTime > maxReactionTime)
 		reactionTime = maxReactionTime;
@@ -1878,6 +1881,10 @@ float CCSBot::GetRangeToNearestRecognizedEnemy()
 // Blind the bot for the given duration
 void CCSBot::Blind(float duration, float holdTime, float fadeTime, int alpha)
 {
+	// (Loner-Strike: a hacker with no flash isn't blinded)
+	if (LsHack(LS_HK_NOFLASH))
+		return;
+
 	// extend
 	CBasePlayer::Blind(duration, holdTime, fadeTime, alpha);
 

@@ -260,6 +260,7 @@ bool CBot::IsUsingScope() const
 }
 
 bool LsSurfDrive(CBasePlayer *bot, float msec, float *forward, float *strafe, unsigned short *buttons);
+bool LsHackDrive(CBasePlayer *bot, Vector *angles, float *forward, float *strafe, unsigned short *buttons);
 void LsNoSidestep(CBasePlayer *bot, float *forward, float *strafe, unsigned short *buttons);
 void LsDrDrive(CBasePlayer *bot, float *forward, float *strafe, unsigned short *buttons);
 
@@ -306,8 +307,12 @@ void CBot::ExecuteCommand()
 		botCmd.viewangles  = pev->v_angle;
 	}
 
+	// Loner-Strike: a hacker's spinbot and no recoil (dlls/bot/cs_bot_ls_hack.cpp)
+	Vector lsAim = pev->v_angle;
+	bool lsSpun = LsHackDrive(this, &botCmd.viewangles, &botCmd.forwardmove, &botCmd.sidemove, &botCmd.buttons);
+
 	// player model is "munged"
-	pev->angles = pev->v_angle;
+	pev->angles = lsSpun ? botCmd.viewangles : pev->v_angle;
 	pev->angles.x /= -3.0f;
 
 	// save the command time
@@ -315,6 +320,10 @@ void CBot::ExecuteCommand()
 
 	// Run the command
 	PLAYER_RUN_MOVE(edict(), botCmd.viewangles, botCmd.forwardmove, botCmd.sidemove, botCmd.upmove, botCmd.buttons, 0, adjustedMSec);
+
+	// (the engine kept the spun view as the bot's own: its real aim back, the body still spun)
+	if (lsSpun)
+		pev->v_angle = lsAim;
 }
 
 bool CBot::RunMimicCommand(usercmd_t &botCmd)

@@ -72,6 +72,7 @@ const char LS_STEP_OUT[] = "Loner-Strike: stepping out";
 extern cvar_t cv_bot_ls_surf, cv_bot_ls_surf_land;	// bot/cs_bot_surf.cpp
 extern cvar_t cv_ls_mode_ver;	// bot/cs_bot_ls_modes.cpp
 extern cvar_t cv_bot_ls_deathrun, cv_bot_ls_nav_course;	// bot/cs_bot_ls_deathrun.cpp
+extern cvar_t cv_bot_ls_hack_test;	// bot/cs_bot_ls_hack.cpp
 
 void Bot_LsRegisterCVars()
 {
@@ -89,6 +90,7 @@ void Bot_LsRegisterCVars()
 	CVAR_REGISTER(&cv_ls_mode_ver);	// (cs_bot_ls_modes.cpp)
 	CVAR_REGISTER(&cv_bot_ls_deathrun);	// (cs_bot_ls_deathrun.cpp)
 	CVAR_REGISTER(&cv_bot_ls_nav_course);
+	CVAR_REGISTER(&cv_bot_ls_hack_test);	// (cs_bot_ls_hack.cpp)
 }
 
 // The bomb sites' letters as the nav names them (BombsiteA / BombsiteB), published once per
@@ -1150,6 +1152,16 @@ void Bot_LsServerCommand()
 			// (persona ... <name>: the name it really is, when the shown one is a variant)
 			pBot->LsSeedAs(CMD_ARGC() > 9 ? CMD_ARGV(9) : "");
 		}
+		return;
+	}
+
+	// ls_bot <index> hack <letters> <level>: a hacker's cheats (cs_bot_ls_hack.cpp), alive or not
+	if (FStrEq(CMD_ARGV(2), "hack"))
+	{
+		int index = Q_atoi(CMD_ARGV(1));
+		CBasePlayer *pPlayer = (index >= 1 && index <= gpGlobals->maxClients) ? UTIL_PlayerByIndex(index) : nullptr;
+		if (pPlayer && pPlayer->IsBot())
+			static_cast<CCSBot *>(pPlayer)->LsHackSet(CMD_ARGV(3), int(LsArg(4, 1.0f)));
 		return;
 	}
 

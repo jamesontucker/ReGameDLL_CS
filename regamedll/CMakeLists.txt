@@ -310,6 +310,7 @@ set(GAMEDLL_SRCS
 	"dlls/bot/cs_bot_ls.cpp"
 	"dlls/bot/cs_bot_ls_team.cpp"
 	"dlls/bot/cs_bot_ls_nades.cpp"
+	"dlls/bot/cs_bot_ls_hack.cpp"
 	"dlls/bot/cs_bot_ls_moves.cpp"
 	"dlls/bot/cs_bot_ls_modes.cpp"
 	"dlls/bot/cs_bot_surf.cpp"

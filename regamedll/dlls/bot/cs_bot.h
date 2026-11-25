@@ -43,6 +43,9 @@ enum
 	BOT_PROGGRESS_HIDE,     // hide status bar progress
 };
 
+// Loner-Strike hacker: the cheats in a bot's kit (cs_bot_ls_hack.cpp)
+enum { LS_HK_WALL = 1, LS_HK_AIM = 2, LS_HK_TRIGGER = 4, LS_HK_SPIN = 8, LS_HK_RECOIL = 16, LS_HK_NOFLASH = 32, LS_HK_BANG = 64 };
+
 class CCSBot;
 struct LsRoute;
 class BotChatterInterface;
@@ -1115,6 +1118,17 @@ public:
 	void LsHideNearBomb(const Vector &bomb);		// guarding the planted bomb: a spot near it no teammate has (stock: the same best spot for all)								// at the site with the bomb: plant now, or walk in to a better spot first
 	bool LsFetchesBomb();							// one of the nearest two Ts to a dropped bomb
 	// (end team)
+	// Loner-Strike hacker (cs_bot_ls_hack.cpp): the cheats of a bot in the Hackers style (ls_bot hack)
+	void LsHackSet(const char *letters, int level);
+	bool LsHack(int flag) const;					// that cheat is in its kit (and the brain's fighting is on)
+	int LsHackLevel() const { return m_lsHackLevel; }	// 0 closet, 1 mixed, 2 rage
+	float LsHackReaction(float t) const;			// its reaction time with an aimbot
+	bool LsHackSeesAround() const;					// a wallhacking aimbot: no field of view
+	bool LsHackIgnoresSmoke() const;
+	void LsHackUpkeep();							// each frame: the aimbot, the walls, the trigger
+	float LsHackSpinStep(float step) { m_lsHackSpin = NormalizeAngle(m_lsHackSpin + step); return m_lsHackSpin; }
+	CBasePlayer *LsHackNearestEnemy(float range);
+
 	// Loner-Strike nades (cs_bot_ls_nades.cpp)
 	void LsNadeReset();								// a new round
 	bool LsNadeBusy() const { return m_lsNadePhase != 0; }	// getting a grenade out, throwing it, or looking away from its flash
@@ -1625,6 +1639,19 @@ private:
 	float m_lsStaleLastAt = -100.0f;
 	EntityHandle<CBaseEntity> m_lsFloorGun;			// the one it's going for (others leave it to it)
 	// (end team members)
+	// Loner-Strike hacker (cs_bot_ls_hack.cpp): members (the kit stays until it's told again)
+	int m_lsHack = 0;								// LS_HK_* bits
+	int m_lsHackLevel = 1;
+	float m_lsHackTrigAt = 0.0f;					// when the triggerbot fires on who's under the crosshair
+	float m_lsHackSeekAt = 0.0f;					// next walk to where an enemy is
+	float m_lsHackBangCheckAt = 0.0f;
+	float m_lsHackBangUntil = 0.0f;					// firing through a wall until
+	CBasePlayer *m_lsHackAimAt = nullptr;			// the enemy the aimbot is on
+	bool m_lsHackBody = false;						// (a closet one taking the body this time)
+	float m_lsHackSpin = 0.0f;						// the spinbot's yaw
+	float m_lsHackTestAt = 0.0f;					// (bot_ls_hack_test)
+	char m_lsHackLetters[16] = "";
+
 	// Loner-Strike nades (cs_bot_ls_nades.cpp): members
 	int m_lsNadePhase = 0;							// 0 none, 1 getting it out, 2 throwing, 3 looking away from its flash
 	int m_lsNadeId = 0;								// the grenade it's throwing

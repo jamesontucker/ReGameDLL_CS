@@ -227,6 +227,9 @@ void CCSBot::Upkeep()
 		// view angles can change quickly
 		UpdateLookAngles();
 	}
+
+	// Loner-Strike: a hacker's cheats on top (cs_bot_ls_hack.cpp)
+	LsHackUpkeep();
 }
 
 // Heavyweight processing, invoked less often
