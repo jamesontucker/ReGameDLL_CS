@@ -5,7 +5,6 @@ on:
     branches: [master, loner-strike, "ls-*"]
     paths-ignore:
       - '**.md'
-      - '.github/**'
 
   pull_request:
     types: [opened, reopened, synchronize]
@@ -89,10 +88,12 @@ jobs:
           $toolset = '${{ steps.select_toolset.outputs.toolset }}'
           msbuild ${{ env.solution }} -p:Configuration="${{ env.buildRelease }}" /t:Clean,Build /p:Platform=${{ env.buildPlatform }} /p:PlatformToolset=$toolset /p:XPDeprecationWarning=false
           msbuild ${{ env.solution }} -p:Configuration="${{ env.buildReleasePlay }}" /t:Clean,Build /p:Platform=${{ env.buildPlatform }} /p:PlatformToolset=$toolset /p:XPDeprecationWarning=false
-      - name: Get rcedit from chocolatey
+      - name: Get rcedit
         shell: pwsh
         run: |
-          choco install rcedit -y
+          # (straight from its GitHub release: the chocolatey feed timed out, 2026-11-25)
+          Invoke-WebRequest https://github.com/electron/rcedit/releases/download/v2.0.0/rcedit-x64.exe -OutFile "$env:RUNNER_TEMP\rcedit.exe"
+          "$env:RUNNER_TEMP" | Out-File -FilePath $env:GITHUB_PATH -Append
 
       - name: Move files
         run: |
