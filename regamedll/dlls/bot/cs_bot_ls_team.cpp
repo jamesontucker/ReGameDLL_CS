@@ -733,9 +733,12 @@ void CCSBot::LsTeamTick()
 			CBaseEntity *pHostage = nullptr;
 			while (!byHostage && (pHostage = UTIL_FindEntityByClassname(pHostage, "hostage_entity")))
 				byHostage = pHostage->IsAlive() && !(pHostage->pev->effects & EF_NODRAW) && (pHostage->pev->origin - pev->origin).IsLengthLessThan(600.0f);
-			if (byHostage && RANDOM_FLOAT(0.0f, 1.0f) < 0.4f + 0.4f * (1.0f - LsAggro()))
+			// (a handful of the team on them, not everyone who walks past: on cs_office the
+			// hostages are by the T spawn and 50-80% of the Ts sat there, measured 2026-11-24)
+			if (byHostage && !LsHostageGuardsEnough() && RANDOM_FLOAT(0.0f, 1.0f) < 0.4f + 0.4f * (1.0f - LsAggro()))
 			{
 				float secs = RANDOM_FLOAT(8.0f, 20.0f);
+				SetTask(GUARD_HOSTAGES);
 				Hide(GetLastKnownArea(), secs, 400.0f);
 				m_lsHostHoldAt = now + secs + RANDOM_FLOAT(5.0f, 15.0f);
 				LsWhy("hold-hostages");

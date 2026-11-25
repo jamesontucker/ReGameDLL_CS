@@ -679,7 +679,7 @@ void IdleState::OnUpdate(CCSBot *me)
 			}
 
 			// if safe time is up, and we stumble across a hostage, guard it
-			if (!me->IsSafe() && !me->LsShirksObjective())
+			if (!me->IsSafe() && !me->LsShirksObjective() && !me->LsHostageGuardsEnough())
 			{
 				CBaseEntity *pHostage = me->GetGameState()->GetNearestVisibleFreeHostage();
 				if (pHostage)
@@ -704,7 +704,8 @@ void IdleState::OnUpdate(CCSBot *me)
 			// if the whole team has decided to rush, hunt
 			if (me->GetFriendsRemaining())
 			{
-				if (me->LsShirksObjective() || TheCSBots()->IsDefenseRushing() || RANDOM_FLOAT(0, 100) < huntChance)
+				// (Loner-Strike: enough of the team on the hostages already: out hunting)
+				if (me->LsShirksObjective() || TheCSBots()->IsDefenseRushing() || RANDOM_FLOAT(0, 100) < huntChance || (campHostages && me->LsHostageGuardsEnough()))
 				{
 					me->Hunt();
 					return;

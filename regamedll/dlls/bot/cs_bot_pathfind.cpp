@@ -1488,6 +1488,11 @@ CCSBot::PathResult CCSBot::UpdatePathMovement(bool allowSpeedChange)
 		toGoal = GetPathEndpoint() - pev->origin;
 	}
 
+	// (Loner-Strike: the farthest point along the path it can see, not one behind a wall)
+	Vector lsAhead;
+	if (LsFight() && LsAheadPoint(&lsAhead) && (lsAhead - pev->origin).Length2D() > 48.0f)
+		toGoal = lsAhead - pev->origin;
+
 	m_lookAheadAngle = UTIL_VecToYaw(toGoal);
 
 	// initialize "adjusted" goal to current goal

@@ -185,6 +185,13 @@ void CCSBot::ResetValues()
 	m_lsCrouchWalking = false;
 	m_lsCrouchWalkNext = 0.0f;
 	m_lsScanNext = 0.0f;
+	m_lsEyesAheadUntil = 0.0f;
+	m_lsAheadIndex = -1;
+	m_lsAheadAt = 0.0f;
+	m_lsExposeNext = 0.0f;
+	m_lsExposeArea = nullptr;
+	m_lsExposeQuietUntil = 0.0f;
+	m_lsTraceLookAt = 0.0f;
 	// (the safe early part of the round fits the map: a new map starts from the stock guess,
 	// cut to before the teams could first meet; what it learns lower stays)
 	if (LsFight())

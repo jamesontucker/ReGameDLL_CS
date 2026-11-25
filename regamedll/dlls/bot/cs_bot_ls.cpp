@@ -67,6 +67,7 @@ cvar_t cv_bot_ls_trace      = { "bot_ls_trace", "0", FCVAR_SERVER, 0.0f, nullptr
 // (each bomb site's real letter from the nav's place names, for plugins: "a x y b x y")
 cvar_t cv_ls_sites          = { "ls_sites", "", 0, 0.0f, nullptr };
 const char LS_PEEK[] = "Loner-Strike: peek";
+const char LS_STEP_OUT[] = "Loner-Strike: stepping out";
 
 extern cvar_t cv_bot_ls_surf, cv_bot_ls_surf_land;	// bot/cs_bot_surf.cpp
 extern cvar_t cv_ls_mode_ver;	// bot/cs_bot_ls_modes.cpp
@@ -2757,7 +2758,27 @@ void LsTraceMark()
 void CCSBot::LsTrace()
 {
 	LS_PROF("LsTrace");
-	if (cv_bot_ls_trace.value <= 0.0f || !IsAlive() || gpGlobals->time < m_lsTraceAt)
+	if (cv_bot_ls_trace.value <= 0.0f || !IsAlive())
+		return;
+	// (bot_ls_trace 2: also ten times a second where it looks against where it moves and where
+	// its path goes - a "#look" line: time,id,speed,off its movement,off its path's way,look,
+	// look priority,in a fight,x,y)
+	if (cv_bot_ls_trace.value >= 2.0f && gpGlobals->time >= m_lsTraceLookAt)
+	{
+		m_lsTraceLookAt = gpGlobals->time + 0.1f;
+		FILE *lf = LsTraceFile();
+		float sp = float(pev->velocity.Length2D());
+		if (lf && sp > 1.0f)
+		{
+			float velOff = NormalizeAngle(pev->v_angle.y - UTIL_VecToYaw(pev->velocity));
+			Vector way = m_goalPosition - pev->origin;
+			float pathOff = HasPath() && way.Length2D() > 16.0f ? NormalizeAngle(pev->v_angle.y - UTIL_VecToYaw(way)) : 999.0f;
+			const char *lk = (m_lookAtSpotState != NOT_LOOKING_AT_SPOT && m_lookAtDesc) ? m_lookAtDesc : "-";
+			fprintf(lf, "#look,%.2f,%d,%.0f,%.0f,%.0f,%s,%d,%d,%.0f,%.0f,%d\n", gpGlobals->time, entindex(), sp, velOff, pathOff, lk,
+				int(m_lookAtSpotPriority), (IsAttacking() || GetEnemy()) ? 1 : 0, pev->origin.x, pev->origin.y, LsAboutToEnter() ? 1 : 0);
+		}
+	}
+	if (gpGlobals->time < m_lsTraceAt)
 		return;
 	m_lsTraceAt = gpGlobals->time + 0.5f;
 	FILE *s_file = LsTraceFile();
@@ -4751,6 +4772,9 @@ bool CCSBot::LsScanAngles(bool holding)
 	bool approachLook = m_lookAtDesc && !Q_strcmp(m_lookAtDesc, "Approach Point (Hiding)");
 	if (now < m_lsScanNext || (IsLookingAtSpot(PRIORITY_LOW) && !(holding && approachLook)))
 		return false;
+	// (moving: eyes on the way a moment after each check)
+	if (!holding && !LsEyesFree())
+		return false;
 	const LsAreaKnow *k = LsKnow(m_lastKnownArea);
 	if (!k || k->angleCount == 0)
 		return false;
@@ -4836,6 +4860,9 @@ bool CCSBot::LsScanAngles(bool holding)
 		// once what's ahead is checked, and then just a quick look over the shoulder)
 		float off = float(Q_abs(NormalizeAngle(UTIL_VecToYaw(tc - pev->origin) - heading)));
 		behind[a] = !holding && off > 100.0f;
+		// (walking through a doorway: only what's through it)
+		if (!holding && off > 55.0f && LsOffThreshold(tc, 55.0f))
+			continue;
 		if (behind[a])
 			score *= fresh ? 0.03f : (style == LS_STYLE_CAREFUL || style == LS_STYLE_CAMPER) ? 0.25f : 0.1f;
 		// (checked a moment ago)
@@ -4985,7 +5012,12 @@ bool CCSBot::LsScanAngles(bool holding)
 		hold *= 1.25f;
 	if (!holding && behind[bestA])
 		hold = RANDOM_FLOAT(0.2f, 0.35f);
+	// (one out to the side while moving: a glance, not a stare)
+	else if (!holding && Q_abs(NormalizeAngle(UTIL_VecToYaw(look - pev->origin) - heading)) > 60.0f)
+		hold = Q_min(hold, RANDOM_FLOAT(0.3f, 0.45f));
 	SetLookAt("Loner-Strike: angle", &look, PRIORITY_LOW, hold, true, 8.0f);
+	if (!holding)
+		LsEyesAhead(hold);
 	m_lsScanArea[m_lsScanNextSlot] = (unsigned short)(k->angles[bestA].area + 1);
 	m_lsScanAt[m_lsScanNextSlot] = now;
 	m_lsScanNextSlot = (m_lsScanNextSlot + 1) % 8;
@@ -7159,4 +7191,254 @@ void CCSBot::LsTraceSeen(CBasePlayer *pEnemy)
 		return;
 	fprintf(f, "#seen,%.2f,%d,%d,%d,%.0f\n", gpGlobals->time, entindex(), m_iTeam, pEnemy->entindex(), float((pEnemy->pev->origin - pev->origin).Length()));
 	fflush(f);
+}
+
+// ---- eyes on the way (bot_ls_fight) -------------------------------------------------------
+// Measured 2026-11-24 (traces, de_dust2/de_inferno/cs_office): moving bots had their view on
+// the way they were going only 28% of the time and were more than 90 degrees off it 14% of
+// the time - one check straight after another (map angles, corners, hiding spots), and the
+// path's look-ahead aimed into the wall past a bend. A person running somewhere glances, then
+// looks where they're going; walking at a doorway, they look into it.
+
+// A check while moving: once it's done, eyes on the way for a moment - shorter for a good
+// player (quick, sure checks) and the careful, longer for a newer one and rushers
+void CCSBot::LsEyesAhead(float checkSecs)
+{
+	float skill = LsSkill();
+	float gap = RANDOM_FLOAT(0.5f, 1.1f) * (1.3f - 0.6f * skill);
+	int style = LsStyle();
+	if (style == LS_STYLE_CAREFUL || style == LS_STYLE_CAMPER || style == LS_STYLE_NINJA)
+		gap *= 0.75f;
+	else if (style == LS_STYLE_RUSHER)
+		gap *= 1.25f;
+	m_lsEyesAheadUntil = gpGlobals->time + checkSecs + gap;
+}
+
+bool CCSBot::LsEyesFree() const
+{
+	return gpGlobals->time >= m_lsEyesAheadUntil;
+}
+
+// Right at a doorway or corner into somewhere it can't see yet, and `at` more than `most`
+// degrees off the way through it: not now (a person walking through a door looks into the room)
+bool CCSBot::LsOffThreshold(const Vector &at, float most)
+{
+	if (!LsAboutToEnter())
+		return false;
+	Vector through = m_path[m_pathIndex].pos - pev->origin;
+	if (through.Length2D() < 1.0f)
+		return false;
+	return Q_abs(NormalizeAngle(UTIL_VecToYaw(at - pev->origin) - UTIL_VecToYaw(through))) > most;
+}
+
+// The path's look-ahead (stock: a point 500 units along it, which round a bend is behind the
+// wall - walking at a doorway looking diagonally at bare wall): the farthest point along the
+// path, up to that, it can actually see - the doorway, then the room past it. A few times a
+// second, not every frame
+bool CCSBot::LsAheadPoint(Vector *to)
+{
+	if (!HasPath() || m_pathIndex <= 0 || m_pathIndex >= m_pathLength)
+		return false;
+	float now = gpGlobals->time;
+	if (m_lsAheadIndex == m_pathIndex && now - m_lsAheadAt < 0.25f)
+	{
+		*to = m_lsAheadTo;
+		return true;
+	}
+	Vector eye = GetEyePosition();
+	// along the path to 500 units, then back to the first it can see
+	Vector pts[16];
+	int n = 0;
+	pts[n++] = m_path[m_pathIndex].pos;
+	float along = (m_path[m_pathIndex].pos - pev->origin).Length2D();
+	for (int i = m_pathIndex + 1; i < m_pathLength && n < 16 && along < 500.0f; i++)
+	{
+		if (m_path[i].ladder || (m_path[i].area->GetAttributes() & NAV_JUMP))
+			break;
+		Vector d = m_path[i].pos - m_path[i - 1].pos;
+		float seg = d.Length2D();
+		if (along + seg > 500.0f && seg > 1.0f)
+		{
+			pts[n++] = m_path[i - 1].pos + d * ((500.0f - along) / seg);
+			break;
+		}
+		pts[n++] = m_path[i].pos;
+		along += seg;
+	}
+	Vector best = pts[0];
+	for (int k = n - 1; k > 0; k--)
+	{
+		Vector p = pts[k] + Vector(0, 0, HalfHumanHeight);
+		if (LsClearTo(eye, p, ENT(pev)) >= 0.97f)
+		{
+			best = pts[k];
+			break;
+		}
+	}
+	m_lsAheadIndex = m_pathIndex;
+	m_lsAheadAt = now;
+	m_lsAheadTo = best;
+	*to = best;
+	return true;
+}
+
+// Ts on a hostage map: up to about half of them (two at least) keep the hostages, each at
+// its own spot round them; the rest go out. Stock had each pick on its own - 70% + 25% x morale to hunt, so a losing team's Ts
+// mostly sat at the hostages by their spawn
+bool CCSBot::LsHostageGuardsEnough()
+{
+	if (!LsFight())
+		return false;
+	int alive = 0, guarding = 0;
+	for (int i = 1; i <= gpGlobals->maxClients; i++)
+	{
+		CBasePlayer *p = UTIL_PlayerByIndex(i);
+		if (!p || p == this || !p->IsAlive() || p->m_iTeam != m_iTeam)
+			continue;
+		alive++;
+		if (p->IsBot() && static_cast<CCSBot *>(p)->GetTask() == GUARD_HOSTAGES)
+			guarding++;
+	}
+	return guarding >= Q_max(2, (alive + 2) / 2);
+}
+
+// ---- stepping out (bot_ls_fight) ----------------------------------------------------------
+// A person about to step out from cover - out of a tunnel onto long A, through double doors,
+// up cat past the ledge - checks the places that will see them before they're in view of
+// them, the worst first, the crosshair on the corner's edge. From the map knowledge: along
+// its path, the first area that places it can't be seen from now can see, and of those the
+// one most likely to have someone. Each such step checked once; how often it bothers goes
+// with skill and personality (a careful player nearly always, a rusher less, a newcomer now
+// and then)
+bool CCSBot::LsStepOutCheck()
+{
+	float now = gpGlobals->time;
+	if (!LsFight() || now < m_lsExposeNext || !HasPath() || !m_lastKnownArea || IsOnLadder() || IsUsingLadder() || IsSafe() || !LsSightReady()
+		|| m_pathIndex <= 0 || m_pathIndex >= m_pathLength || IsLookingAtSpot(PRIORITY_MEDIUM))
+		return false;
+	m_lsExposeNext = now + 0.25f;
+	float skill = LsSkill();
+	int style = LsStyle();
+	// (how far ahead it thinks: a good or careful player sees it coming sooner)
+	float range = 220.0f + 180.0f * skill;
+	if (style == LS_STYLE_CAREFUL || style == LS_STYLE_NINJA || style == LS_STYLE_CAMPER)
+		range += 80.0f;
+	const Vector *enemyHome = LsSolo() ? nullptr : LsEnemySpawn(m_iTeam);
+	float along = (m_path[m_pathIndex].pos - pev->origin).Length2D();
+	for (int i = m_pathIndex; i < m_pathLength && along < range; i++)
+	{
+		if (i > m_pathIndex)
+			along += (m_path[i].pos - m_path[i - 1].pos).Length2D();
+		const CNavArea *ahead = m_path[i].area;
+		if (!ahead || ahead == m_lastKnownArea)
+			continue;
+		const LsAreaKnow *k = LsKnow(ahead);
+		if (!k || !k->angleCount)
+			continue;
+		// (only a real step out: the view opens right up - a tunnel's mouth, double doors -
+		// or one of the busy angles there can't see it now. Walking along, each small area
+		// sees a place or two more, and that's not one: measured, a check every 2 s)
+		const LsAreaKnow *here = LsKnow(m_lastKnownArea);
+		bool opens = here && k->sees >= here->sees + here->sees / 2 + 10;
+		int topWeight = k->angles[0].weight;
+		int busyNew = 0;
+		for (int a = 0; a < k->angleCount && a < 4; a++)
+		{
+			CNavArea *t = LsKnowArea(k->angles[a].area);
+			if (t && t != m_lastKnownArea && !LsSees(m_lastKnownArea, t) && k->angles[a].weight * 2 >= topWeight)
+				busyNew++;
+		}
+		// (and a step into somewhere else: the map's places - Long Doors to Long A, Tunnels to
+		// B - or, on a map without them, the view opening up. Walking along inside one place
+		// isn't stepping out)
+		bool newPlace = ahead->GetPlace() != UNDEFINED_PLACE && ahead->GetPlace() != m_lastKnownArea->GetPlace();
+		bool hasPlaces = m_lastKnownArea->GetPlace() != UNDEFINED_PLACE || ahead->GetPlace() != UNDEFINED_PLACE;
+		if (!(opens || (newPlace && busyNew > 0) || (!hasPlaces && busyNew > 1)))
+			continue;
+		// (one a moment ago: not straight into another unless this one is big)
+		if (now < m_lsExposeQuietUntil && !opens)
+			continue;
+		// the places that see that area but not this one
+		int best = -1;
+		float bestScore = 0.0f;
+		Vector way = m_path[i].pos - pev->origin;
+		float wayYaw = way.Length2D() > 1.0f ? UTIL_VecToYaw(way) : pev->v_angle.y;
+		for (int a = 0; a < k->angleCount; a++)
+		{
+			CNavArea *t = LsKnowArea(k->angles[a].area);
+			if (!t || t == m_lastKnownArea || LsSees(m_lastKnownArea, t))
+				continue;
+			const Vector &tc = *t->GetCenter();
+			// (not one behind it: stepping out, eyes go forward and to the sides)
+			if (Q_abs(NormalizeAngle(UTIL_VecToYaw(tc - pev->origin) - wayYaw)) > 115.0f)
+				continue;
+			// (the minor ones aren't worth a look stepping out)
+			if (k->angles[a].weight * 3 < topWeight)
+				continue;
+			float score = 1.0f + float(k->angles[a].weight);
+			if (enemyHome)
+				score *= (tc - *enemyHome).Length2D() < (pev->origin - *enemyHome).Length2D() ? 1.5f : 0.7f;
+			score *= LsTimingWeight(t);
+			Vector eyeNow = GetEyePosition();
+			Vector tcHead = tc + Vector(0, 0, HalfHumanHeight);
+			if (TheCSBots()->IsLineBlockedBySmoke(&eyeNow, &tcHead))
+				score *= 0.25f;
+			if ((IsNoiseHeard() && now - m_noiseTimestamp < 6.0f && (tc - m_noisePosition).IsLengthLessThan(600.0f))
+				|| (GetTimeSinceLastSawEnemy() < 10.0f && (tc - GetLastKnownEnemyPosition()).IsLengthLessThan(600.0f)))
+				score *= 2.5f;
+			// (checked a moment ago, from here or on the way)
+			for (int r = 0; r < 8; r++)
+				if (m_lsScanArea[r] == k->angles[a].area + 1 && now - m_lsScanAt[r] < 4.0f)
+					score *= 0.15f;
+			if (score > bestScore)
+			{
+				bestScore = score;
+				best = a;
+			}
+		}
+		if (best < 0)
+			continue;
+		// the first step that opens up something is the one to check (or not)
+		if (ahead == m_lsExposeArea)
+			return false;
+		m_lsExposeArea = ahead;
+		float chance = 0.35f + 0.6f * skill;
+		if (style == LS_STYLE_CAREFUL || style == LS_STYLE_NINJA || style == LS_STYLE_CAMPER)
+			chance += 0.2f;
+		else if (style == LS_STYLE_RUSHER)
+			chance -= 0.15f;
+		if (LsSolo())
+			chance -= 0.2f;
+		if (RANDOM_FLOAT(0.0f, 1.0f) > chance)
+			return false;
+		CNavArea *t = LsKnowArea(k->angles[best].area);
+		Vector look = *t->GetCenter() + Vector(0, 0, HalfHumanHeight + LsLookHeight());
+		// (round the corner it can't see past yet: the corner's edge)
+		LsLookableSpot(&look);
+		// (a newer player's eyes land roughly there)
+		float sloppy = 1.0f - skill;
+		look.x += RANDOM_FLOAT(-40.0f, 40.0f) * sloppy;
+		look.y += RANDOM_FLOAT(-40.0f, 40.0f) * sloppy;
+		// held till it's through the step and a moment after
+		float speed = Q_max(120.0f, float(pev->velocity.Length2D()));
+		float secs = Q_min(1.6f, along / speed + RANDOM_FLOAT(0.3f, 0.6f) + 0.3f * skill);
+		SetLookAt(LS_STEP_OUT, &look, PRIORITY_LOW, secs, true, 10.0f);
+		m_lsScanArea[m_lsScanNextSlot] = (unsigned short)(k->angles[best].area + 1);
+		m_lsScanAt[m_lsScanNextSlot] = now;
+		m_lsScanNextSlot = (m_lsScanNextSlot + 1) % 8;
+		LsEyesAhead(secs * 0.5f);
+		m_lsExposeQuietUntil = now + secs + RANDOM_FLOAT(1.5f, 2.5f);
+		if (cv_bot_ls_trace.value > 0.0f)
+		{
+			// (the trace says where from and what at, by the map's place names)
+			const char *from = TheNavAreaGrid.IDToName(m_lastKnownArea->GetPlace());
+			const char *to = TheNavAreaGrid.IDToName(t->GetPlace());
+			char note[96];
+			Q_snprintf(note, sizeof(note), "stepping out %s>%s%s", from ? from : "?", to ? to : "?", opens ? " (opens up)" : "");
+			LsTraceNote(note);
+		}
+		LsWhy("stepping out");
+		return true;
+	}
+	return false;
 }

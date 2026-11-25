@@ -125,10 +125,20 @@ void CCSBot::UpdateLookAngles()
 	if (LsFight() && !IsAttacking() && !IsUsingLadder() && pev->velocity.Length2D() > 150.0f && !LsLookingBack()
 		&& (m_lookAtSpotPriority < PRIORITY_HIGH || LsPuppetLooking()) && gpGlobals->time >= m_lsJiggleUntil)
 	{
+		// (from where its path goes, not where it's moving now: it moves with the keys relative
+		// to its view, so the way it's moving follows the view round - a limit measured from that
+		// drifted with it, and the bot ended up crabbing sideways at a doorway, looking off at
+		// something; measured 2026-11-24, 10% of its looks were past 90 degrees)
 		float moveYaw = UTIL_VecToYaw(pev->velocity);
+		{
+			Vector way = m_goalPosition - pev->origin;
+			if (HasPath() && way.Length2D() > 32.0f)
+				moveYaw = UTIL_VecToYaw(way);
+		}
 		float off = NormalizeAngle(useYaw - moveYaw);
 		// (a corner peek strafes, so it may turn further; looking about while walking doesn't)
-		const float most = (m_lookAtDesc == LS_PEEK) ? 100.0f : LsPuppetLooking() ? 160.0f : 70.0f;
+		// (and stepping out it checks what will see it, which can be well off to the side)
+		const float most = (m_lookAtDesc == LS_PEEK) ? 100.0f : (m_lookAtDesc == LS_STEP_OUT) ? 115.0f : LsPuppetLooking() ? 160.0f : 70.0f;
 		if (off > most)
 			useYaw = moveYaw + most;
 		else if (off < -most)
@@ -897,6 +907,10 @@ void CCSBot::UpdateLookAround(bool updateNow)
 		return;
 	}
 
+	// Loner-Strike: about to step out where new places see it: those first
+	if (LsStepOutCheck())
+		return;
+
 	// Loner-Strike: moving, the area's angles from the map knowledge (where an enemy could
 	// come from) before anything else
 	if (!IsSafe() && LsScanAngles(false))
@@ -906,7 +920,7 @@ void CCSBot::UpdateLookAround(bool updateNow)
 	// timer returns early most frames): where
 	// a near surface (a box, a doorway's side, a tunnel's bend) gives way to open space beyond,
 	// someone could be just past the edge. A flat wall has no edge and is never looked at
-	if (LsFight() && !IsNotMoving() && !IsSafe() && !IsOnLadder() && !IsLookingAtSpot(PRIORITY_LOW) && gpGlobals->time >= m_lsCornerCheckAt)
+	if (LsFight() && !IsNotMoving() && !IsSafe() && !IsOnLadder() && !IsLookingAtSpot(PRIORITY_LOW) && gpGlobals->time >= m_lsCornerCheckAt && LsEyesFree())
 	{
 		// how often: the careful and campers check more, rushers less, newer players less
 		float skill = LsSkill(), aggro = LsAggro();
@@ -922,7 +936,9 @@ void CCSBot::UpdateLookAround(bool updateNow)
 		if (RANDOM_FLOAT(0.0f, 1.0f) < 0.35f + 0.65f * skill && LsCornerAhead(&corner)
 			// (the same edge it just checked: once is enough - walking past one far corner it
 			// kept being picked again and again, eyes stuck off to the side for seconds)
-			&& !(gpGlobals->time - m_lsLastCornerLookAt < 4.0f && (corner - m_lsLastCornerLook).Make2D().IsLengthLessThan(200.0f)))
+			&& !(gpGlobals->time - m_lsLastCornerLookAt < 4.0f && (corner - m_lsLastCornerLook).Make2D().IsLengthLessThan(200.0f))
+			// (walking through a doorway: not an edge off to the side of it)
+			&& !LsOffThreshold(corner, 60.0f))
 		{
 			m_lsLastCornerLook = corner;
 			m_lsLastCornerLookAt = gpGlobals->time;
@@ -936,6 +952,7 @@ void CCSBot::UpdateLookAround(bool updateNow)
 			if (style == LS_STYLE_CAREFUL || style == LS_STYLE_NINJA)
 				hold *= 1.3f;
 			SetLookAt("Loner-Strike: corner", &corner, PRIORITY_LOW, hold, true, 10.0f);
+			LsEyesAhead(hold);
 			return;
 		}
 	}
@@ -944,7 +961,7 @@ void CCSBot::UpdateLookAround(bool updateNow)
 	if (m_spotEncounter)
 	{
 		// Check encounter spots
-		if (!IsSafe() && !IsLookingAtSpot(PRIORITY_LOW))
+		if (!IsSafe() && !IsLookingAtSpot(PRIORITY_LOW) && (!LsFight() || LsEyesFree()))
 		{
 			// allow a short time to look where we're going
 			if (gpGlobals->time < m_spotCheckTimestamp)
@@ -1019,6 +1036,9 @@ void CCSBot::UpdateLookAround(bool updateNow)
 					Vector ahead = m_spotEncounter->path.to - m_spotEncounter->path.from;
 					if (ahead.Length2D() > 1.0f && Q_abs(NormalizeAngle(UTIL_VecToYaw(to) - UTIL_VecToYaw(ahead))) > 110.0f)
 						continue;
+					// (walking through a doorway: only what's through it)
+					if (LsOffThreshold(pos, 60.0f))
+						continue;
 				}
 
 				dangerSpot[dangerIndex++] = spotOrder.spot;
@@ -1062,6 +1082,8 @@ void CCSBot::UpdateLookAround(bool updateNow)
 				{
 					// glance at the spot for minimum time
 					SetLookAt("Encounter Spot", &pos, PRIORITY_LOW, 0, true, 10.0f);
+					if (LsFight())
+						LsEyesAhead(0.3f);
 
 					// Loner-Strike: or put a few bullets into it first (some, up close)
 					LsPrefire(pos);

@@ -1228,6 +1228,20 @@ public:
 	float m_lsInvestAimAt = 0.0f;					// next pre-aim while closing on a noise (InvestigateNoiseState)
 	float m_lsHuntHoldUntil = 0.0f;					// hunting, stopped a moment to hold an angle on a sound (HuntState)
 	float m_lsScanBlindUntil = 0.0f;				// its map angles are all walled off from where it stands, until (UpdateLookAround)
+	float m_lsTraceLookAt = 0.0f;					// next "#look" trace line (bot_ls_trace 2)
+	float m_lsExposeNext = 0.0f;					// next look ahead for somewhere it's about to be seen from (LsStepOutCheck)
+	const CNavArea *m_lsExposeArea = nullptr;		// the area of the last one, checked once
+	float m_lsExposeQuietUntil = 0.0f;				// no small one before (a big opening still counts)
+	bool LsStepOutCheck();							// about to step out where new places see it: check the worst first
+	float m_lsEyesAheadUntil = 0.0f;				// moving: after a check, looks where it's going until (LsEyesAhead)
+	float m_lsAheadAt = 0.0f;						// the path's look-ahead point, worked out at (LsAheadPoint)
+	int m_lsAheadIndex = -1;
+	Vector m_lsAheadTo;
+	void LsEyesAhead(float checkSecs);				// a check while moving: then eyes on the way for a moment
+	bool LsEyesFree() const;						// moving: free to look at something other than the way
+	bool LsAheadPoint(Vector *to);					// the farthest point along the path it can actually see
+	bool LsOffThreshold(const Vector &at, float most);	// about to go through a doorway and that's off to the side
+	bool LsHostageGuardsEnough();					// enough of its team guarding the hostages already
 	bool LsTakeCoverFrom(const Vector &threat, float minMove, bool fromFight = false, float holdSecs = -1.0f);	// to the nearest spot out of its sight, a short hold there
 	bool LsMatchup(CBasePlayer *pEnemy, bool crouchAndHold);		// mid-fight: the wrong gun for this range (an AWP down a lane): out of it
 	Vector LsDefuseSpot(const Vector &bomb);		// beside the bomb, the side away from the threat
@@ -1881,6 +1895,7 @@ extern cvar_t cv_bot_ls_solo;
 extern cvar_t cv_bot_ls_fight;
 extern cvar_t cv_bot_ls_match;
 extern cvar_t cv_bot_ls_trace;
+extern const char LS_STEP_OUT[];				// the look-at of a stepping-out check
 extern const char LS_PEEK[];					// the look-at of a corner peek
 bool LsFight();
 bool LsSpotCrowded(CBaseEntity *me, const Vector *pos);	// a teammate at or heading to somewhere right by it
