@@ -225,7 +225,12 @@ bool CCSBot::LsFree() const
 
 int CCSBot::LsStyle() const
 {
-	return LsPersonWeight() > 0.0f ? m_lsStyle : -1;
+	int style = LsPersonWeight() > 0.0f ? m_lsStyle : -1;
+	// (a hacker who knows where everyone is doesn't lurk, camp or check corners: a rage one
+	// rushes, a mixed one roams; a closet one keeps its style, to pass for a person)
+	if ((m_lsHack & LS_HK_WALL) && m_lsHackLevel >= 1 && (style == LS_STYLE_LURKER || style == LS_STYLE_CAREFUL || style == LS_STYLE_CAMPER || style < 0))
+		return m_lsHackLevel >= 2 ? LS_STYLE_RUSHER : LS_STYLE_ROAMER;
+	return style;
 }
 
 // How aggressive, how much of a team player and how good this bot is: the bot style's
@@ -239,7 +244,11 @@ float CCSBot::LsAggro() const
 	if (!LsFight() || m_lsAggro < 0.0f)
 		return profile;
 	float pull = 0.8f * LsPersonWeight();
-	return Q_max(0.0f, Q_min(1.0f, profile + pull * (m_lsAggro - profile)));
+	float v = Q_max(0.0f, Q_min(1.0f, profile + pull * (m_lsAggro - profile)));
+	// (a hacker plays like one: it knows where you are, so it comes for you)
+	if (m_lsHack)
+		v = m_lsHackLevel >= 2 ? Q_max(v, 0.95f) : (m_lsHackLevel == 1 ? Q_max(v, 0.8f) : Q_min(1.0f, v + 0.15f));
+	return v;
 }
 
 float CCSBot::LsTeamwork() const
@@ -752,6 +761,9 @@ bool CCSBot::LsUpdatePause()
 {
 	// (the personality slider scales them: at 0 nobody stops; deathmatch keeps few)
 	float strength = LsFight() ? cv_bot_ls_pauses.value * (LsPersonWeight() / 0.6f) * (LsSolo() ? 0.3f : 1.0f) : 0.0f;
+	// (a rage or mixed hacker doesn't stop to listen: it knows)
+	if ((m_lsHack & LS_HK_WALL) && m_lsHackLevel >= 1)
+		strength = 0.0f;
 	if (strength <= 0.0f)
 		return false;
 

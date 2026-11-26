@@ -220,11 +220,21 @@ void CCSBot::LsHackUpkeep()
 				if (now < m_lsHackBangUntil && canShoot)
 					PrimaryAttack();
 
-				// off to where they are, when it isn't doing anything that matters more
-				if (m_lsHackLevel >= 1 && IsHunting() && now >= m_lsHackSeekAt)
+				// off to where they are: a rage one every few seconds, even from a spot it was
+				// holding; a closet one now and then while hunting (the bomb, a defuse and
+				// hostages come first)
+				bool busy = IsCarryingBomb() || IsDefusingBomb() || GetHostageEscortCount() > 0 || IsUsingLadder()
+					|| (m_iTeam == CT && TheCSBots()->IsBombPlanted());
+				bool free = IsHunting() || (m_lsHackLevel >= 1 && IsHiding() && GetTask() != GUARD_HOSTAGES);
+				if (!busy && free && now >= m_lsHackSeekAt)
 				{
-					m_lsHackSeekAt = now + RANDOM_FLOAT(6.0f, 12.0f);
-					MoveTo(&pThem->pev->origin, FASTEST_ROUTE);
+					m_lsHackSeekAt = now + (m_lsHackLevel >= 2 ? RANDOM_FLOAT(2.0f, 4.0f) : m_lsHackLevel == 1 ? RANDOM_FLOAT(4.0f, 7.0f) : RANDOM_FLOAT(10.0f, 18.0f));
+					if (m_lsHackLevel >= 1 || RANDOM_FLOAT(0.0f, 1.0f) < 0.4f)
+					{
+						MoveTo(&pThem->pev->origin, FASTEST_ROUTE);
+						if (m_lsHackLevel >= 1)
+							Run();
+					}
 				}
 			}
 		}
